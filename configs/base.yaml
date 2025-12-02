@@ -1,0 +1,61 @@
+# Base configuration for crease pattern detector
+
+# Model
+model:
+  backbone: hrnet_w32
+  pretrained: true
+  image_size: 1024
+  output_stride: 4
+
+  pixel_head:
+    hidden_channels: 256
+    num_seg_classes: 5  # BG, M, V, B, U
+
+# Data
+data:
+  image_size: 1024
+  padding: 50
+  line_width: 2
+
+  # Assignment colors (for reference)
+  colors:
+    M: [255, 0, 0]      # Red
+    V: [0, 0, 255]      # Blue
+    B: [0, 0, 0]        # Black
+    U: [128, 128, 128]  # Gray
+
+  # Train/val/test split
+  train_ratio: 0.85
+  val_ratio: 0.10
+  test_ratio: 0.05
+
+  # Augmentation
+  augment_strength: medium  # light, medium, heavy
+
+# Training
+training:
+  batch_size: 4
+  num_workers: 8
+  learning_rate: 1.0e-4
+  weight_decay: 0.01
+  epochs: 50
+
+  # Loss weights
+  seg_weight: 1.0
+  orient_weight: 0.5
+  junction_weight: 1.0
+
+  # Mixed precision
+  amp: true
+
+  # Gradient clipping
+  max_grad_norm: 1.0
+
+  # Checkpointing
+  checkpoint_dir: checkpoints
+  save_every: 5
+
+# Logging
+logging:
+  wandb_project: cp-detector
+  log_every: 100

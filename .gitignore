@@ -1,0 +1,5 @@
+data/**/*.fold
+data/**/*.png
+data/**/*.json
+data/**/*.txt
+data/ts-generation/node_modules
