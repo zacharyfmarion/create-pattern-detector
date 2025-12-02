@@ -37,9 +37,10 @@ class GroundTruthGenerator:
         self,
         image_size: int = 1024,
         padding: int = 50,
-        line_width: int = 3,
-        junction_radius: float = 8.0,
-        junction_sigma: float = 3.0,
+        line_width: int = 2,
+        junction_radius: float = 4.0,
+        junction_sigma: float = 1.5,
+        use_antialiasing: bool = True,
     ):
         """
         Initialize the ground truth generator.
@@ -50,12 +51,15 @@ class GroundTruthGenerator:
             line_width: Width of crease lines in pixels
             junction_radius: Radius for junction detection region
             junction_sigma: Sigma for Gaussian junction heatmap
+            use_antialiasing: Whether to use anti-aliased line drawing
         """
         self.image_size = image_size
         self.padding = padding
         self.line_width = line_width
         self.junction_radius = junction_radius
         self.junction_sigma = junction_sigma
+        self.use_antialiasing = use_antialiasing
+        self.line_type = cv2.LINE_AA if use_antialiasing else cv2.LINE_8
 
     def generate(self, cp: CreasePattern) -> Dict[str, np.ndarray]:
         """
@@ -112,7 +116,7 @@ class GroundTruthGenerator:
         assignments: np.ndarray,
     ) -> np.ndarray:
         """
-        Generate 5-class segmentation map.
+        Generate 5-class segmentation map with optional anti-aliasing.
 
         Classes:
         0: Background
@@ -120,32 +124,71 @@ class GroundTruthGenerator:
         2: Valley (V)
         3: Border (B)
         4: Unassigned (U)
-        """
-        # Use uint8 for OpenCV compatibility, convert to int64 at the end
-        seg = np.zeros((self.image_size, self.image_size), dtype=np.uint8)
 
+        For anti-aliasing, we draw each class to a separate float buffer,
+        then take argmax to get the final class labels.
+        """
         # Map assignment indices to segmentation classes
         # assignments: M=0, V=1, B=2, U=3
         # seg classes: BG=0, M=1, V=2, B=3, U=4
         assignment_to_class = {0: 1, 1: 2, 2: 3, 3: 4}
 
-        for edge_idx, (v1_idx, v2_idx) in enumerate(edges):
-            assignment = assignments[edge_idx]
-            seg_class = assignment_to_class[int(assignment)]
+        if self.use_antialiasing:
+            # Create per-class confidence buffers for soft segmentation
+            # Class 0 (background) starts with full confidence
+            class_buffers = [np.ones((self.image_size, self.image_size), dtype=np.float32)]
+            for _ in range(4):  # Classes 1-4
+                class_buffers.append(np.zeros((self.image_size, self.image_size), dtype=np.float32))
 
-            v1 = vertices[v1_idx].astype(np.int32)
-            v2 = vertices[v2_idx].astype(np.int32)
+            for edge_idx, (v1_idx, v2_idx) in enumerate(edges):
+                assignment = assignments[edge_idx]
+                seg_class = assignment_to_class[int(assignment)]
 
-            # Draw line with the appropriate class
-            cv2.line(
-                seg,
-                (int(v1[0]), int(v1[1])),
-                (int(v2[0]), int(v2[1])),
-                seg_class,
-                self.line_width,
-            )
+                v1 = vertices[v1_idx]
+                v2 = vertices[v2_idx]
 
-        return seg.astype(np.int64)
+                # Draw anti-aliased line to grayscale buffer
+                line_mask = np.zeros((self.image_size, self.image_size), dtype=np.uint8)
+                cv2.line(
+                    line_mask,
+                    (int(round(v1[0])), int(round(v1[1]))),
+                    (int(round(v2[0])), int(round(v2[1]))),
+                    255,
+                    self.line_width,
+                    lineType=self.line_type,
+                )
+
+                # Convert to float and accumulate
+                line_float = line_mask.astype(np.float32) / 255.0
+                class_buffers[seg_class] = np.maximum(class_buffers[seg_class], line_float)
+                # Reduce background confidence where we have lines
+                class_buffers[0] = np.minimum(class_buffers[0], 1.0 - line_float)
+
+            # Take argmax to get final class labels
+            stacked = np.stack(class_buffers, axis=0)
+            seg = np.argmax(stacked, axis=0).astype(np.int64)
+        else:
+            # Simple non-anti-aliased version
+            seg = np.zeros((self.image_size, self.image_size), dtype=np.uint8)
+
+            for edge_idx, (v1_idx, v2_idx) in enumerate(edges):
+                assignment = assignments[edge_idx]
+                seg_class = assignment_to_class[int(assignment)]
+
+                v1 = vertices[v1_idx].astype(np.int32)
+                v2 = vertices[v2_idx].astype(np.int32)
+
+                cv2.line(
+                    seg,
+                    (int(v1[0]), int(v1[1])),
+                    (int(v2[0]), int(v2[1])),
+                    seg_class,
+                    self.line_width,
+                )
+
+            seg = seg.astype(np.int64)
+
+        return seg
 
     def _generate_orientation(
         self,
@@ -188,21 +231,37 @@ class GroundTruthGenerator:
         cos_theta: float,
         sin_theta: float,
     ) -> None:
-        """Draw orientation values along a line segment."""
+        """Draw orientation values along a line segment with optional anti-aliasing."""
         # Create a mask for the line
         mask = np.zeros((self.image_size, self.image_size), dtype=np.uint8)
         cv2.line(
             mask,
-            (int(v1[0]), int(v1[1])),
-            (int(v2[0]), int(v2[1])),
-            1,
+            (int(round(v1[0])), int(round(v1[1]))),
+            (int(round(v2[0])), int(round(v2[1]))),
+            255,
             self.line_width,
+            lineType=self.line_type,
         )
 
-        # Set orientation at masked pixels
-        mask_bool = mask > 0
-        orientation[mask_bool, 0] = cos_theta
-        orientation[mask_bool, 1] = sin_theta
+        if self.use_antialiasing:
+            # Use anti-aliased blending for smooth orientation transitions
+            mask_float = mask.astype(np.float32) / 255.0
+            # Blend orientation values based on mask intensity
+            orientation[:, :, 0] = np.where(
+                mask_float > orientation[:, :, 0] ** 2 + orientation[:, :, 1] ** 2,
+                cos_theta,
+                orientation[:, :, 0],
+            )
+            orientation[:, :, 1] = np.where(
+                mask_float > orientation[:, :, 0] ** 2 + orientation[:, :, 1] ** 2,
+                sin_theta,
+                orientation[:, :, 1],
+            )
+        else:
+            # Set orientation at masked pixels
+            mask_bool = mask > 0
+            orientation[mask_bool, 0] = cos_theta
+            orientation[mask_bool, 1] = sin_theta
 
     def _generate_junctions(
         self,
