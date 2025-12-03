@@ -133,7 +133,8 @@ class Trainer:
         Returns:
             Dictionary with final metrics
         """
-        for epoch in range(self.epochs):
+        start_epoch = self.current_epoch
+        for epoch in range(start_epoch, self.epochs):
             self.current_epoch = epoch
 
             # Train one epoch
@@ -403,6 +404,11 @@ class Trainer:
         if not final:
             path = self.checkpoint_dir / f"checkpoint_epoch_{epoch + 1}.pt"
             torch.save(checkpoint, path)
+            print(f"Saved checkpoint: {path}")
+
+        # Always save latest checkpoint for easy resumption
+        latest_path = self.checkpoint_dir / "latest.pt"
+        torch.save(checkpoint, latest_path)
 
         # Save best model
         if is_best:

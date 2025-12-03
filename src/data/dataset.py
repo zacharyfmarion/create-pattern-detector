@@ -269,6 +269,7 @@ def create_dataloaders(
         num_workers=num_workers,
         pin_memory=True,
         drop_last=True,
+        collate_fn=collate_fn,
     )
 
     val_loader = torch.utils.data.DataLoader(
@@ -277,6 +278,7 @@ def create_dataloaders(
         shuffle=False,
         num_workers=num_workers,
         pin_memory=True,
+        collate_fn=collate_fn,
     )
 
     test_loader = torch.utils.data.DataLoader(
@@ -285,6 +287,33 @@ def create_dataloaders(
         shuffle=False,
         num_workers=num_workers,
         pin_memory=True,
+        collate_fn=collate_fn,
     )
 
     return train_loader, val_loader, test_loader
+
+
+def collate_fn(batch: List[Dict]) -> Dict:
+    """
+    Custom collate function that handles variable-size graph data.
+
+    Stacks fixed-size tensors (images, segmentation, etc.) normally,
+    but keeps graph data as lists since they have variable sizes.
+    """
+    # Keys that can be stacked (fixed size)
+    stackable_keys = ['image', 'segmentation', 'orientation', 'junction_heatmap', 'edge_distance']
+
+    # Keys that should be kept as lists (variable size)
+    list_keys = ['graph', 'meta']
+
+    result = {}
+
+    for key in stackable_keys:
+        if key in batch[0]:
+            result[key] = torch.stack([item[key] for item in batch])
+
+    for key in list_keys:
+        if key in batch[0]:
+            result[key] = [item[key] for item in batch]
+
+    return result

@@ -40,6 +40,14 @@ def parse_args():
         help="Directory containing pre-rendered images (optional)",
     )
 
+    # Image size
+    parser.add_argument(
+        "--image-size",
+        type=int,
+        default=1024,
+        help="Image size (default: 1024). Use 512 for faster experiments.",
+    )
+
     # Model
     parser.add_argument(
         "--backbone",
@@ -93,6 +101,12 @@ def parse_args():
         help="Directory to save checkpoints",
     )
     parser.add_argument(
+        "--save-every",
+        type=int,
+        default=1,
+        help="Save checkpoint every N epochs (default: 1)",
+    )
+    parser.add_argument(
         "--resume",
         type=str,
         default=None,
@@ -125,13 +139,17 @@ def parse_args():
 
 def load_config(args) -> dict:
     """Build config from args and optional YAML file."""
+    # Scale padding proportionally with image size
+    padding = int(50 * args.image_size / 1024)
+    line_width = max(1, int(2 * args.image_size / 1024))
+
     config = {
         # Data
         "fold_dir": args.fold_dir,
         "image_dir": args.image_dir,
-        "image_size": 1024,
-        "padding": 50,
-        "line_width": 3,
+        "image_size": args.image_size,
+        "padding": padding,
+        "line_width": line_width,
         # Model
         "backbone": args.backbone,
         "pretrained": args.pretrained,
@@ -153,7 +171,7 @@ def load_config(args) -> dict:
         "junction_weight": args.junction_weight,
         # Checkpointing
         "checkpoint_dir": args.checkpoint_dir,
-        "save_every": 5,
+        "save_every": args.save_every,
         # Logging
         "use_wandb": args.wandb,
         "wandb_project": args.wandb_project,
@@ -235,6 +253,8 @@ def main():
     print(f"\nTraining complete!")
     print(f"Best validation IoU: {results['best_val_metric']:.4f} (epoch {results['best_epoch'] + 1})")
     print(f"Checkpoints saved to: {config['checkpoint_dir']}")
+    print(f"\nTo resume training from latest checkpoint:")
+    print(f"  python scripts/train.py --fold-dir {config['fold_dir']} --resume {config['checkpoint_dir']}/latest.pt --epochs <total_epochs>")
 
 
 if __name__ == "__main__":
