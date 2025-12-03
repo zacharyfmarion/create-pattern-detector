@@ -11,6 +11,94 @@ import albumentations as A
 from albumentations.core.transforms_interface import ImageOnlyTransform
 
 
+class DarkMode(ImageOnlyTransform):
+    """
+    Convert to dark mode - dark background with visible colored lines.
+
+    - Inverts near-white background pixels to dark
+    - Brightens dark blue lines to light blue for visibility
+    - Keeps red lines as-is (already visible on dark bg)
+    - Converts black boundary lines to white/light gray
+    """
+
+    def __init__(self, bg_threshold=240, dark_bg_value=30, always_apply=False, p=0.5):
+        super().__init__(always_apply, p)
+        self.bg_threshold = bg_threshold  # Pixels above this are considered background
+        self.dark_bg_value = dark_bg_value  # What to set dark background to
+
+    def apply(self, img, **params):
+        result = img.copy().astype(np.int16)  # Use int16 to avoid overflow
+
+        # Find near-white pixels (background)
+        is_background = np.all(img > self.bg_threshold, axis=2)
+
+        # Find blue pixels (high blue, low red/green)
+        is_blue = (img[:, :, 2] > 200) & (img[:, :, 0] < 50) & (img[:, :, 1] < 50)
+
+        # Find black pixels (boundary lines)
+        is_black = np.all(img < 30, axis=2)
+
+        # Find gray pixels (unassigned lines)
+        is_gray = (
+            (img[:, :, 0] > 100) & (img[:, :, 0] < 160) &
+            (img[:, :, 1] > 100) & (img[:, :, 1] < 160) &
+            (img[:, :, 2] > 100) & (img[:, :, 2] < 160)
+        )
+
+        # Set background to dark
+        result[is_background] = self.dark_bg_value
+
+        # Brighten blue to light blue (e.g., [100, 150, 255])
+        result[is_blue] = [100, 150, 255]
+
+        # Convert black to light gray for visibility
+        result[is_black] = [200, 200, 200]
+
+        # Brighten gray to lighter gray
+        result[is_gray] = [180, 180, 180]
+
+        return result.astype(np.uint8)
+
+    def get_transform_init_args_names(self):
+        return ("bg_threshold", "dark_bg_value")
+
+
+class HueShiftCreases(ImageOnlyTransform):
+    """
+    Randomly shift the hue of red and blue crease colors.
+
+    This makes the model robust to variations like:
+    - Slightly orange-ish red
+    - Slightly purple-ish blue
+    - Different shades of the base colors
+    """
+
+    def __init__(self, hue_shift_limit=15, always_apply=False, p=0.5):
+        super().__init__(always_apply, p)
+        self.hue_shift_limit = hue_shift_limit
+
+    def apply(self, img, hue_shift=0, **params):
+        import cv2
+
+        # Convert to HSV
+        hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV).astype(np.int16)
+
+        # Shift hue channel (wraps around at 180)
+        hsv[:, :, 0] = (hsv[:, :, 0] + hue_shift) % 180
+
+        # Convert back to RGB
+        hsv = hsv.astype(np.uint8)
+        return cv2.cvtColor(hsv, cv2.COLOR_HSV2RGB)
+
+    def get_params(self):
+        return {
+            "hue_shift": np.random.randint(-self.hue_shift_limit, self.hue_shift_limit + 1)
+        }
+
+    def get_transform_init_args_names(self):
+        return ("hue_shift_limit",)
+
+
 class CreasePatternTransform:
     """
     Geometry-aware augmentations for crease patterns.
@@ -87,6 +175,9 @@ class CreasePatternTransform:
                     p=0.3,
                 ),
                 A.GaussNoise(std_range=(0.02, 0.1), p=0.2),
+                # Color robustness augmentations
+                HueShiftCreases(hue_shift_limit=15, p=0.3),  # Shift red/blue hues
+                DarkMode(p=0.2),  # Dark mode simulation (dark bg, original line colors)
             ])
         elif self.strength == "light":
             transforms.extend([
