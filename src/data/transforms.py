@@ -86,7 +86,7 @@ class CreasePatternTransform:
                     hue=0.05,
                     p=0.3,
                 ),
-                A.GaussNoise(std_range=(5, 25), p=0.2),
+                A.GaussNoise(std_range=(0.02, 0.1), p=0.2),
             ])
         elif self.strength == "light":
             transforms.extend([

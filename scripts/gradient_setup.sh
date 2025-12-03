@@ -18,10 +18,10 @@ python -c "import torch; print(f'CUDA available: {torch.cuda.is_available()}'); 
 # Quick sanity check
 echo ""
 echo "=== Running Quick Sanity Check ==="
-python scripts/sanity_check.py --fold-dir data/output/synthetic/raw/tier-a --quick
+python scripts/sanity_check.py --fold-dir data_small --quick
 
 echo ""
 echo "=== Setup Complete! ==="
 echo ""
 echo "To start training:"
-echo "  python scripts/train.py --fold-dir data/output/synthetic/raw/tier-a --image-size 512 --epochs 5 --batch-size 8"
+echo "  python scripts/train.py --fold-dir data_small --image-size 512 --epochs 5 --batch-size 8"
