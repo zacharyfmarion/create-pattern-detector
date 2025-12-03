@@ -139,20 +139,23 @@ class GraphExtractor:
         )
 
         # Step 2: Detect junctions
+        # use_skeleton_junctions controls both fallback and refinement behavior
         junctions = detect_junctions(
             junction_heatmap,
             skeleton=skeleton if self.config.use_skeleton_junctions else None,
             threshold=self.config.junction_threshold,
             min_distance=self.config.junction_min_distance,
             use_skeleton_fallback=self.config.use_skeleton_junctions,
+            use_skeleton_refinement=self.config.use_skeleton_junctions,
             merge_distance=self.config.junction_merge_distance,
         )
 
-        # Add boundary vertices
+        # Add boundary vertices (pass segmentation to find where creases meet border)
         vertices, is_boundary = add_boundary_vertices(
             junctions,
             skeleton,
             boundary_distance=self.config.boundary_snap_distance,
+            segmentation=segmentation,
         )
 
         # Step 3: Trace edges
@@ -203,9 +206,9 @@ class GraphExtractor:
             # We'd need to re-trace or concatenate paths
             edge_paths = []  # Clear paths after merge
 
-        # Snap boundary vertices
+        # Snap boundary vertices (use segmentation to find paper boundary)
         if self.config.snap_boundary:
-            vertices = snap_to_boundary(vertices, is_boundary, image_size)
+            vertices = snap_to_boundary(vertices, is_boundary, image_size, segmentation)
 
         # Remove isolated vertices
         if self.config.remove_isolated and len(edges) > 0:

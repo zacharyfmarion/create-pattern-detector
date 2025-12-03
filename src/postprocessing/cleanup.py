@@ -223,24 +223,66 @@ def snap_to_boundary(
     vertices: np.ndarray,
     is_boundary: np.ndarray,
     image_size: int,
+    segmentation: np.ndarray = None,
 ) -> np.ndarray:
     """
-    Snap boundary vertices to the nearest image edge.
+    Snap boundary vertices to the paper boundary (if available) or image edge.
+
+    When segmentation is provided, snaps to the actual paper boundary (border class).
+    Otherwise falls back to snapping to image edges.
 
     Args:
         vertices: (V, 2) vertex coordinates (x, y)
         is_boundary: (V,) boolean array indicating boundary vertices
         image_size: Size of the image (assumed square)
+        segmentation: Optional (H, W) segmentation with border class = 3
 
     Returns:
-        vertices: (V, 2) with boundary vertices snapped to edges
+        vertices: (V, 2) with boundary vertices snapped to paper/image edges
     """
     vertices = vertices.copy()
 
+    if segmentation is not None:
+        # Find paper boundary from border class (3)
+        border_mask = segmentation == 3
+        if border_mask.any():
+            border_coords = np.argwhere(border_mask)  # (N, 2) as (y, x)
+            y_coords = border_coords[:, 0]
+            x_coords = border_coords[:, 1]
+
+            paper_left = x_coords.min()
+            paper_right = x_coords.max()
+            paper_top = y_coords.min()
+            paper_bottom = y_coords.max()
+
+            for i in np.where(is_boundary)[0]:
+                x, y = vertices[i]
+
+                # Find nearest paper edge
+                dist_left = abs(x - paper_left)
+                dist_right = abs(x - paper_right)
+                dist_top = abs(y - paper_top)
+                dist_bottom = abs(y - paper_bottom)
+
+                min_dist = min(dist_left, dist_right, dist_top, dist_bottom)
+
+                # Only snap if we're reasonably close to a paper edge (within 10px)
+                if min_dist <= 10:
+                    if min_dist == dist_left:
+                        vertices[i, 0] = paper_left
+                    elif min_dist == dist_right:
+                        vertices[i, 0] = paper_right
+                    elif min_dist == dist_top:
+                        vertices[i, 1] = paper_top
+                    else:
+                        vertices[i, 1] = paper_bottom
+
+            return vertices
+
+    # Fallback: snap to image edges (old behavior)
     for i in np.where(is_boundary)[0]:
         x, y = vertices[i]
 
-        # Find nearest edge
         dist_left = x
         dist_right = image_size - 1 - x
         dist_top = y

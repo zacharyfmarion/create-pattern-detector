@@ -272,8 +272,9 @@ class GroundTruthGenerator:
         """
         Generate Gaussian heatmap for junction (vertex) locations.
 
-        Only includes interior vertices with at least 2 incident crease edges
-        (M or V, not B or U).
+        Includes:
+        - Interior vertices with at least 2 incident crease edges (M or V)
+        - Border vertices where crease edges meet the border
         """
         heatmap = np.zeros((self.image_size, self.image_size), dtype=np.float32)
 
@@ -295,14 +296,17 @@ class GroundTruthGenerator:
                 is_border_vertex[v1_idx] = True
                 is_border_vertex[v2_idx] = True
 
-        # Add Gaussian at interior vertices with >= 2 crease edges
+        # Add Gaussian at vertices that are junctions
         for v_idx, coords in enumerate(vertices):
-            # Skip border vertices
             if is_border_vertex[v_idx]:
-                continue
-            # Only include vertices with at least 2 crease edges
-            if crease_degrees[v_idx] >= 2:
-                self._add_gaussian(heatmap, coords)
+                # Border vertex: include if it has at least 1 crease edge
+                # (this is where a crease meets the paper boundary)
+                if crease_degrees[v_idx] >= 1:
+                    self._add_gaussian(heatmap, coords)
+            else:
+                # Interior vertex: include if it has at least 2 crease edges
+                if crease_degrees[v_idx] >= 2:
+                    self._add_gaussian(heatmap, coords)
 
         return heatmap
 
