@@ -147,7 +147,12 @@ class OrientationLoss(nn.Module):
         # cos_sim = pred · target (dot product along channel dim)
         cos_sim = (pred * target).sum(dim=1)  # (B, H, W)
 
-        # Loss = 1 - cos_sim (ranges from 0 to 2)
+        # IMPORTANT: Orientation is bidirectional - a line at angle θ is the
+        # same as at angle θ+180°. So we take abs(cos_sim) to ignore direction.
+        # This makes cos_sim range from 0 to 1 (1 = aligned, 0 = perpendicular)
+        cos_sim = torch.abs(cos_sim)
+
+        # Loss = 1 - |cos_sim| (ranges from 0 to 1)
         loss = 1 - cos_sim
 
         # Apply mask (only compute at crease pixels)
