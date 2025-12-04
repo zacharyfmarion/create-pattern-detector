@@ -74,7 +74,7 @@ class Trainer:
             orient_weight=config.get("orient_weight", 0.5),
             junction_weight=config.get("junction_weight", 1.0),
             junction_pos_weight=config.get("junction_pos_weight", 50.0),
-            junction_loss_type=config.get("junction_loss_type", "bce"),  # BCE is standard for heatmaps
+            junction_loss_type=config.get("junction_loss_type", "mse"),  # MSE for heatmaps
         )
 
         # Optimizer with different LR for backbone
