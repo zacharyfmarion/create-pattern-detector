@@ -74,7 +74,8 @@ class Trainer:
             orient_weight=config.get("orient_weight", 0.5),
             junction_weight=config.get("junction_weight", 1.0),
             junction_pos_weight=config.get("junction_pos_weight", 50.0),
-            junction_loss_type=config.get("junction_loss_type", "mse"),  # MSE for heatmaps
+            junction_focal=config.get("junction_focal", True),  # Use focal loss for junctions
+            junction_focal_gamma=config.get("junction_focal_gamma", 2.0),
         )
 
         # Optimizer with different LR for backbone
@@ -275,7 +276,7 @@ class Trainer:
         }
         num_batches = len(self.val_loader)
 
-        for batch_idx, batch in enumerate(tqdm(self.val_loader, desc="Validating", leave=False)):
+        for batch in tqdm(self.val_loader, desc="Validating", leave=False):
             images = batch["image"].to(self.device)
             targets = {
                 "segmentation": batch["segmentation"].to(self.device),
@@ -303,10 +304,6 @@ class Trainer:
                 targets["junction_heatmap"],
             )
             metrics["junction_f1"] += junction_f1
-
-            # Log visualizations every 50 batches
-            if batch_idx % 50 == 0:
-                self._log_predictions(images, targets, outputs, batch_idx=batch_idx)
 
         # Average metrics
         for key in metrics:
@@ -355,55 +352,6 @@ class Trainer:
         f1 = 2 * precision * recall / (precision + recall + 1e-6)
 
         return f1.item()
-
-    def _log_predictions(
-        self,
-        images: torch.Tensor,
-        targets: Dict[str, torch.Tensor],
-        outputs: Dict[str, torch.Tensor],
-        num_samples: int = 4,
-        batch_idx: int = 0,
-    ) -> None:
-        """Log prediction visualizations to W&B."""
-        if not self.use_wandb:
-            return
-
-        import matplotlib.pyplot as plt
-        import numpy as np
-
-        batch_size = min(num_samples, images.shape[0])
-        wandb_images = []
-
-        for i in range(batch_size):
-            fig, axes = plt.subplots(1, 3, figsize=(12, 4))
-
-            # Input image
-            img = images[i].cpu().permute(1, 2, 0).numpy()
-            img = (img - img.min()) / (img.max() - img.min() + 1e-8)
-            axes[0].imshow(img)
-            axes[0].set_title("Input")
-            axes[0].axis("off")
-
-            # GT junction heatmap
-            gt = targets["junction_heatmap"][i].cpu().numpy()
-            axes[1].imshow(gt, cmap="hot", vmin=0, vmax=1)
-            axes[1].set_title("GT Junctions")
-            axes[1].axis("off")
-
-            # Predicted junction heatmap
-            pred = outputs["junction"][i, 0].cpu().numpy()
-            axes[2].imshow(pred, cmap="hot", vmin=0, vmax=1)
-            axes[2].set_title(f"Predicted (min={pred.min():.3f}, max={pred.max():.3f})")
-            axes[2].axis("off")
-
-            plt.tight_layout()
-            wandb_images.append(wandb.Image(fig, caption=f"Batch {batch_idx} Sample {i}"))
-            plt.close(fig)
-
-        wandb.log({
-            f"val/junction_predictions_batch_{batch_idx}": wandb_images,
-            "epoch": self.current_epoch,
-        })
 
     def _log_epoch(
         self,

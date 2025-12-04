@@ -227,60 +227,6 @@ class JunctionLoss(nn.Module):
             return weighted_loss
 
 
-class JunctionBCELoss(nn.Module):
-    """
-    Binary Cross-Entropy loss for junction heatmap.
-
-    More commonly used than MSE for heatmap regression in modern
-    keypoint detection (e.g., pose estimation, corner detection).
-    Uses pos_weight to handle class imbalance.
-    """
-
-    def __init__(
-        self,
-        pos_weight: float = 10.0,
-    ):
-        """
-        Initialize junction BCE loss.
-
-        Args:
-            pos_weight: Weight for positive (junction) pixels to handle imbalance
-        """
-        super().__init__()
-        self.pos_weight = pos_weight
-
-    def forward(
-        self,
-        pred: torch.Tensor,
-        target: torch.Tensor,
-    ) -> torch.Tensor:
-        """
-        Compute junction BCE loss.
-
-        Args:
-            pred: (B, 1, H, W) predicted heatmap (after sigmoid, values 0-1)
-            target: (B, 1, H, W) or (B, H, W) ground truth heatmap
-
-        Returns:
-            Scalar loss value
-        """
-        # Ensure target has channel dimension
-        if target.dim() == 3:
-            target = target.unsqueeze(1)
-
-        # Clamp predictions to avoid log(0)
-        pred = torch.clamp(pred, min=1e-7, max=1 - 1e-7)
-
-        # Binary cross-entropy: -[y*log(p) + (1-y)*log(1-p)]
-        # With pos_weight: -[pos_weight*y*log(p) + (1-y)*log(1-p)]
-        bce = -(
-            self.pos_weight * target * torch.log(pred)
-            + (1 - target) * torch.log(1 - pred)
-        )
-
-        return bce.mean()
-
-
 class JunctionFocalLoss(nn.Module):
     """
     Binary focal loss for junction heatmap detection.
@@ -367,8 +313,7 @@ class PixelLoss(nn.Module):
         seg_alpha: Optional[List[float]] = None,
         seg_gamma: float = 2.0,
         junction_pos_weight: float = 10.0,
-        junction_loss_type: str = "mse",
-        junction_focal: bool = False,  # Deprecated, use junction_loss_type
+        junction_focal: bool = False,
         junction_focal_gamma: float = 2.0,
     ):
         """
@@ -381,8 +326,7 @@ class PixelLoss(nn.Module):
             seg_alpha: Per-class weights for segmentation
             seg_gamma: Focal loss gamma for segmentation
             junction_pos_weight: Positive weight for junction loss
-            junction_loss_type: One of "mse", "bce", or "focal"
-            junction_focal: Deprecated - use junction_loss_type="focal" instead
+            junction_focal: If True, use focal loss for junctions instead of MSE
             junction_focal_gamma: Gamma for junction focal loss (if enabled)
         """
         super().__init__()
@@ -394,20 +338,14 @@ class PixelLoss(nn.Module):
         self.seg_loss = SegmentationLoss(alpha=seg_alpha, gamma=seg_gamma)
         self.orient_loss = OrientationLoss()
 
-        # Handle deprecated junction_focal parameter
-        if junction_focal:
-            junction_loss_type = "focal"
-
         # Choose junction loss type
-        if junction_loss_type == "focal":
+        if junction_focal:
             self.junction_loss = JunctionFocalLoss(
                 alpha=0.25,
                 gamma=junction_focal_gamma,
                 pos_weight=junction_pos_weight,
             )
-        elif junction_loss_type == "bce":
-            self.junction_loss = JunctionBCELoss(pos_weight=junction_pos_weight)
-        else:  # mse (default)
+        else:
             self.junction_loss = JunctionLoss(pos_weight=junction_pos_weight)
 
     def forward(
