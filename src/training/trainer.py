@@ -386,6 +386,8 @@ class Trainer:
 
             # GT junction heatmap
             gt = targets["junction_heatmap"][i].cpu().numpy()
+            if gt.ndim == 3:
+                gt = gt.squeeze(0)  # Remove channel dim if present
             axes[1].imshow(gt, cmap="hot", vmin=0, vmax=1)
             axes[1].set_title("GT Junctions")
             axes[1].axis("off")
