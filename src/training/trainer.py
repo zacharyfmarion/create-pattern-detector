@@ -73,7 +73,9 @@ class Trainer:
             seg_weight=config.get("seg_weight", 1.0),
             orient_weight=config.get("orient_weight", 0.5),
             junction_weight=config.get("junction_weight", 1.0),
-            junction_pos_weight=config.get("junction_pos_weight", 50.0),  # Higher weight for junction pixels
+            junction_pos_weight=config.get("junction_pos_weight", 50.0),
+            junction_focal=config.get("junction_focal", True),  # Use focal loss for junctions
+            junction_focal_gamma=config.get("junction_focal_gamma", 2.0),
         )
 
         # Optimizer with different LR for backbone

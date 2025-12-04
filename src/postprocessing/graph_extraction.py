@@ -73,7 +73,7 @@ class ExtractedGraph:
 class GraphExtractorConfig:
     """Configuration for graph extraction."""
     # Junction detection
-    junction_threshold: float = 0.5  # Higher threshold since model outputs ~0.5-0.7
+    junction_threshold: float = 0.65  # Higher threshold - model background is ~0.5, peaks are 0.7+
     junction_min_distance: int = 10  # More spacing between junctions
     use_skeleton_junctions: bool = False  # Disable by default - adds too many spurious junctions
     junction_merge_distance: float = 5.0
