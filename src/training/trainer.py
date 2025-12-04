@@ -137,6 +137,12 @@ class Trainer:
             Dictionary with final metrics
         """
         start_epoch = self.current_epoch
+
+        # Run initial validation to verify setup and log first visualizations
+        if start_epoch > 0:
+            print("Running initial validation to verify resumed training...")
+            self.validate()
+
         for epoch in range(start_epoch, self.epochs):
             self.current_epoch = epoch
 
@@ -307,6 +313,7 @@ class Trainer:
 
             # Log visualizations every 50 batches
             if batch_idx % 50 == 0:
+                print(f"\nLogging W&B visualizations for batch {batch_idx}...")
                 self._log_predictions(images, targets, outputs, batch_idx=batch_idx)
 
         # Average metrics
@@ -488,27 +495,21 @@ class Trainer:
         self.best_epoch = checkpoint["best_epoch"]
         self.current_epoch = checkpoint["epoch"] + 1
 
-        # Recreate scheduler for remaining epochs instead of loading old state
-        # OneCycleLR can't be extended, so we create a fresh one for remaining training
+        # For resumed training, use CosineAnnealingLR instead of OneCycleLR
+        # OneCycleLR restarts warmup which wastes epochs; cosine decay works better
         remaining_epochs = self.epochs - self.current_epoch
         if remaining_epochs > 0:
-            total_steps = len(self.train_loader) * remaining_epochs
-            scheduler_type = self.config.get("scheduler", "onecycle")
+            # Set optimizer LR to a good value for continued training
+            resume_lr = self.config.get("resume_lr", self.learning_rate * 0.5)
+            for param_group in self.optimizer.param_groups:
+                param_group["lr"] = resume_lr
 
-            if scheduler_type == "onecycle":
-                self.scheduler = OneCycleLR(
-                    self.optimizer,
-                    max_lr=self.learning_rate,
-                    total_steps=total_steps,
-                    pct_start=0.1,
-                    anneal_strategy="cos",
-                )
-            else:  # cosine
-                self.scheduler = CosineAnnealingLR(
-                    self.optimizer,
-                    T_max=remaining_epochs,
-                )
-            print(f"Created new scheduler for {remaining_epochs} remaining epochs")
+            self.scheduler = CosineAnnealingLR(
+                self.optimizer,
+                T_max=remaining_epochs,
+                eta_min=resume_lr * 0.01,  # Decay to 1% of resume LR
+            )
+            print(f"Resumed training with LR={resume_lr:.2e}, cosine decay over {remaining_epochs} epochs")
 
         if self.scaler is not None and "scaler_state_dict" in checkpoint:
             self.scaler.load_state_dict(checkpoint["scaler_state_dict"])
