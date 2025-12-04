@@ -311,10 +311,9 @@ class Trainer:
             )
             metrics["junction_f1"] += junction_f1
 
-            # Log visualizations every 50 batches
-            if batch_idx % 50 == 0:
-                print(f"\nLogging W&B visualizations for batch {batch_idx}...")
-                self._log_predictions(images, targets, outputs, batch_idx=batch_idx)
+            # Log visualizations once per validation (first batch only)
+            if batch_idx == 0:
+                self._log_predictions(images, targets, outputs)
 
         # Average metrics
         for key in metrics:
@@ -370,7 +369,6 @@ class Trainer:
         targets: Dict[str, torch.Tensor],
         outputs: Dict[str, torch.Tensor],
         num_samples: int = 4,
-        batch_idx: int = 0,
     ) -> None:
         """Log prediction visualizations to W&B."""
         if not self.use_wandb:
@@ -406,11 +404,11 @@ class Trainer:
             axes[2].axis("off")
 
             plt.tight_layout()
-            wandb_images.append(wandb.Image(fig, caption=f"Batch {batch_idx} Sample {i}"))
+            wandb_images.append(wandb.Image(fig, caption=f"Sample {i}"))
             plt.close(fig)
 
         wandb.log({
-            f"val/junction_predictions_batch_{batch_idx}": wandb_images,
+            "val/junction_predictions": wandb_images,
             "epoch": self.current_epoch,
         })
 
