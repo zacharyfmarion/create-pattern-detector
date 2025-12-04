@@ -430,10 +430,31 @@ class Trainer:
 
         self.model.load_state_dict(checkpoint["model_state_dict"])
         self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-        self.scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
         self.best_val_metric = checkpoint["best_val_metric"]
         self.best_epoch = checkpoint["best_epoch"]
         self.current_epoch = checkpoint["epoch"] + 1
+
+        # Recreate scheduler for remaining epochs instead of loading old state
+        # OneCycleLR can't be extended, so we create a fresh one for remaining training
+        remaining_epochs = self.epochs - self.current_epoch
+        if remaining_epochs > 0:
+            total_steps = len(self.train_loader) * remaining_epochs
+            scheduler_type = self.config.get("scheduler", "onecycle")
+
+            if scheduler_type == "onecycle":
+                self.scheduler = OneCycleLR(
+                    self.optimizer,
+                    max_lr=self.learning_rate,
+                    total_steps=total_steps,
+                    pct_start=0.1,
+                    anneal_strategy="cos",
+                )
+            else:  # cosine
+                self.scheduler = CosineAnnealingLR(
+                    self.optimizer,
+                    T_max=remaining_epochs,
+                )
+            print(f"Created new scheduler for {remaining_epochs} remaining epochs")
 
         if self.scaler is not None and "scaler_state_dict" in checkpoint:
             self.scaler.load_state_dict(checkpoint["scaler_state_dict"])
