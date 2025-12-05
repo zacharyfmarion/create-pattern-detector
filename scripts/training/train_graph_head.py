@@ -165,6 +165,31 @@ class GraphHeadTrainer:
 
         self.current_epoch = 0
 
+        # Thread pool for parallel graph extraction
+        self._executor = None
+
+    def _extract_graphs_parallel(self, seg_preds, junction_heatmaps):
+        """Extract graphs from multiple samples in parallel."""
+        from concurrent.futures import ThreadPoolExecutor
+
+        batch_size = len(seg_preds)
+
+        def extract_single(i):
+            try:
+                return self.graph_extractor.extract(seg_preds[i], junction_heatmaps[i])
+            except Exception:
+                return None
+
+        # Use thread pool (reuse across batches)
+        if self._executor is None:
+            self._executor = ThreadPoolExecutor(max_workers=min(8, batch_size))
+
+        # Submit all extraction tasks
+        futures = [self._executor.submit(extract_single, i) for i in range(batch_size)]
+
+        # Collect results
+        return [f.result() for f in futures]
+
     def train(self) -> dict:
         """Run full training loop."""
         print(f"\nTraining for {self.epochs} epochs...")
@@ -228,22 +253,20 @@ class GraphHeadTrainer:
             with torch.no_grad():
                 pixel_outputs = self.pixel_model(images, return_features=True)
 
-            # Process each sample
+            # Extract graphs in parallel (CPU-bound)
+            seg_preds = pixel_outputs["segmentation"].argmax(dim=1).cpu().numpy()
+            junction_heatmaps = pixel_outputs["junction"][:, 0].cpu().numpy()
+
+            candidate_graphs = self._extract_graphs_parallel(seg_preds, junction_heatmaps)
+
+            # Process each sample (GPU)
             batch_loss = torch.tensor(0.0, device=self.device)
             batch_losses = {"existence": 0.0, "assignment": 0.0, "refinement": 0.0}
             valid_samples = 0
 
             for i in range(images.shape[0]):
                 try:
-                    # Extract candidate graph
-                    seg_pred = pixel_outputs["segmentation"][i].argmax(dim=0).cpu().numpy()
-                    junction_heatmap = pixel_outputs["junction"][i, 0].cpu().numpy()
-
-                    candidate_graph = self.graph_extractor.extract(
-                        seg_pred,
-                        junction_heatmap,
-                    )
-
+                    candidate_graph = candidate_graphs[i]
                     if candidate_graph is None or len(candidate_graph.vertices) < 2:
                         continue
 
@@ -368,16 +391,14 @@ class GraphHeadTrainer:
             images = batch["image"].to(self.device)
             pixel_outputs = self.pixel_model(images, return_features=True)
 
+            # Extract graphs in parallel
+            seg_preds = pixel_outputs["segmentation"].argmax(dim=1).cpu().numpy()
+            junction_heatmaps = pixel_outputs["junction"][:, 0].cpu().numpy()
+            candidate_graphs = self._extract_graphs_parallel(seg_preds, junction_heatmaps)
+
             for i in range(images.shape[0]):
                 try:
-                    seg_pred = pixel_outputs["segmentation"][i].argmax(dim=0).cpu().numpy()
-                    junction_heatmap = pixel_outputs["junction"][i, 0].cpu().numpy()
-
-                    candidate_graph = self.graph_extractor.extract(
-                        seg_pred,
-                        junction_heatmap,
-                    )
-
+                    candidate_graph = candidate_graphs[i]
                     if candidate_graph is None or len(candidate_graph.vertices) < 2:
                         continue
 
