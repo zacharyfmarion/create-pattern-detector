@@ -154,16 +154,17 @@ class NodeUpdateLayer(nn.Module):
     ) -> torch.Tensor:
         """Aggregate values with attention, grouped by destination node."""
         device = values.device
+        dtype = values.dtype  # Match dtype for AMP compatibility
         E = values.shape[0]
 
         if E == 0:
-            return torch.zeros(num_nodes, values.shape[1], device=device)
+            return torch.zeros(num_nodes, values.shape[1], dtype=dtype, device=device)
 
         # Average scores across heads for simplicity
         scores_mean = scores.mean(dim=1)  # (E,)
 
         # Compute max per destination for numerical stability
-        max_scores = torch.full((num_nodes,), float('-inf'), device=device)
+        max_scores = torch.full((num_nodes,), float('-inf'), dtype=dtype, device=device)
         max_scores.scatter_reduce_(
             0, indices, scores_mean, reduce='amax', include_self=False
         )
@@ -179,7 +180,7 @@ class NodeUpdateLayer(nn.Module):
         exp_scores = torch.exp(scores_mean - max_scores_expanded)  # (E,)
 
         # Sum of exp_scores per destination
-        sum_exp = torch.zeros(num_nodes, device=device)
+        sum_exp = torch.zeros(num_nodes, dtype=dtype, device=device)
         sum_exp.scatter_add_(0, indices, exp_scores)
         sum_exp_expanded = sum_exp[indices] + 1e-6  # (E,)
 
@@ -190,7 +191,7 @@ class NodeUpdateLayer(nn.Module):
         weighted_values = values * attn_weights.unsqueeze(1)  # (E, node_dim)
 
         # Aggregate by destination
-        output = torch.zeros(num_nodes, values.shape[1], device=device)
+        output = torch.zeros(num_nodes, values.shape[1], dtype=dtype, device=device)
         output.scatter_add_(
             0,
             indices.unsqueeze(1).expand(-1, values.shape[1]),
