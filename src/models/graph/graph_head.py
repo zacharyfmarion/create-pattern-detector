@@ -399,10 +399,11 @@ class GraphHead(nn.Module):
         self, edge_index: torch.Tensor, num_nodes: int, device: torch.device
     ) -> torch.Tensor:
         """Compute degree of each node."""
-        degree = torch.zeros(num_nodes, device=device)
+        degree = torch.zeros(num_nodes, dtype=torch.float32, device=device)
         src, dst = edge_index[0], edge_index[1]
-        degree.scatter_add_(0, src, torch.ones_like(src, dtype=torch.float))
-        degree.scatter_add_(0, dst, torch.ones_like(dst, dtype=torch.float))
+        ones = torch.ones(src.shape[0], dtype=torch.float32, device=device)
+        degree.scatter_add_(0, src, ones)
+        degree.scatter_add_(0, dst, ones.clone())
         return degree
 
     def _compute_boundary_distance(

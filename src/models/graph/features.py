@@ -165,12 +165,13 @@ class NodeFeatureExtractor(nn.Module):
     ) -> torch.Tensor:
         """Compute degree of each node."""
         device = edge_index.device
-        degree = torch.zeros(num_nodes, device=device)
+        degree = torch.zeros(num_nodes, dtype=torch.float32, device=device)
 
         # Count edges for each node
         src, dst = edge_index[0], edge_index[1]
-        degree.scatter_add_(0, src, torch.ones_like(src, dtype=torch.float))
-        degree.scatter_add_(0, dst, torch.ones_like(dst, dtype=torch.float))
+        ones = torch.ones(src.shape[0], dtype=torch.float32, device=device)
+        degree.scatter_add_(0, src, ones)
+        degree.scatter_add_(0, dst, ones.clone())
 
         return degree
 
