@@ -623,10 +623,16 @@ def main():
         help="Path to pixel head checkpoint",
     )
     parser.add_argument(
-        "--data-dir",
+        "--fold-dir",
         type=str,
         required=True,
-        help="Data directory with images/ and fold/ subdirectories",
+        help="Directory containing .fold files",
+    )
+    parser.add_argument(
+        "--image-dir",
+        type=str,
+        default=None,
+        help="Directory containing images (optional, renders on-the-fly if not provided)",
     )
     parser.add_argument(
         "--image-size",
@@ -740,21 +746,22 @@ def main():
     print(f"Graph head parameters: {sum(p.numel() for p in graph_head.parameters()):,}")
 
     # Create datasets
-    print(f"\nLoading data from: {args.data_dir}")
-    data_dir = Path(args.data_dir)
+    print(f"\nLoading data from: {args.fold_dir}")
+    if args.image_dir:
+        print(f"Image directory: {args.image_dir}")
 
     # Train dataset
     train_dataset = CreasePatternDataset(
-        fold_dir=data_dir / "fold",
-        image_dir=data_dir / "images",
+        fold_dir=args.fold_dir,
+        image_dir=args.image_dir,
         image_size=args.image_size,
         split="train",
     )
 
     # Validation dataset
     val_dataset = CreasePatternDataset(
-        fold_dir=data_dir / "fold",
-        image_dir=data_dir / "images",
+        fold_dir=args.fold_dir,
+        image_dir=args.image_dir,
         image_size=args.image_size,
         split="val",
     )
