@@ -40,9 +40,10 @@ class SegmentationLoss(nn.Module):
 
         if alpha is None:
             # Default weights: low for background, higher for creases
-            # Border (B) is rarest non-BG class (~3%) so gets highest weight
+            # Border (B) is rarest non-BG class (~3%) so gets higher weight
             # M (~4.5%) and V (~5%) are more common
-            alpha = [0.1, 0.25, 0.25, 0.35, 0.05]
+            # Note: Keep weights moderate to avoid NaN with AMP (float16)
+            alpha = [0.1, 0.25, 0.25, 0.25, 0.15]
 
         self.register_buffer("alpha", torch.tensor(alpha))
         self.gamma = gamma
