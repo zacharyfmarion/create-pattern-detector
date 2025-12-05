@@ -1,5 +1,10 @@
 """
-Graph neural network layers for crease pattern graph processing.
+Graph Neural Network layers for the Graph Head.
+
+Implements edge-aware message passing with:
+- Explicit edge feature updates
+- Attention-based node updates
+- Residual connections
 """
 
 import torch
@@ -8,239 +13,291 @@ import torch.nn.functional as F
 from typing import Optional, Tuple
 
 
-class GraphAttentionLayer(nn.Module):
-    """
-    Graph Attention Network (GAT) layer.
-
-    Computes attention-weighted message passing between connected nodes.
-    """
-
-    def __init__(
-        self,
-        in_features: int,
-        out_features: int,
-        num_heads: int = 4,
-        dropout: float = 0.1,
-        concat: bool = True,
-    ):
-        """
-        Args:
-            in_features: Input feature dimension
-            out_features: Output feature dimension (per head if concat=True)
-            num_heads: Number of attention heads
-            dropout: Dropout rate
-            concat: If True, concatenate heads; if False, average them
-        """
-        super().__init__()
-
-        self.in_features = in_features
-        self.out_features = out_features
-        self.num_heads = num_heads
-        self.concat = concat
-
-        # Linear transformation for each head
-        self.W = nn.Linear(in_features, out_features * num_heads, bias=False)
-
-        # Attention parameters for each head
-        self.a_src = nn.Parameter(torch.zeros(num_heads, out_features))
-        self.a_dst = nn.Parameter(torch.zeros(num_heads, out_features))
-
-        self.leaky_relu = nn.LeakyReLU(0.2)
-        self.dropout = nn.Dropout(dropout)
-
-        self._reset_parameters()
-
-    def _reset_parameters(self):
-        nn.init.xavier_uniform_(self.W.weight)
-        nn.init.xavier_uniform_(self.a_src)
-        nn.init.xavier_uniform_(self.a_dst)
-
-    def forward(
-        self,
-        x: torch.Tensor,
-        edge_index: torch.Tensor,
-        return_attention: bool = False,
-    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
-        """
-        Forward pass.
-
-        Args:
-            x: Node features (N, in_features)
-            edge_index: Edge indices (2, E) where edge_index[0] is source, edge_index[1] is target
-            return_attention: Whether to return attention weights
-
-        Returns:
-            out: Updated node features (N, out_features * num_heads) or (N, out_features)
-            attention: Attention weights (E, num_heads) if return_attention=True
-        """
-        N = x.size(0)
-
-        # Linear transformation: (N, in_features) -> (N, num_heads, out_features)
-        h = self.W(x).view(N, self.num_heads, self.out_features)
-
-        # Source and target node indices
-        src, dst = edge_index[0], edge_index[1]
-
-        # Compute attention scores
-        # (E, num_heads, out_features) * (num_heads, out_features) -> (E, num_heads)
-        e_src = (h[src] * self.a_src).sum(dim=-1)
-        e_dst = (h[dst] * self.a_dst).sum(dim=-1)
-        e = self.leaky_relu(e_src + e_dst)  # (E, num_heads)
-
-        # Softmax over incoming edges for each node
-        attention = self._sparse_softmax(e, dst, N)  # (E, num_heads)
-        attention = self.dropout(attention)
-
-        # Aggregate messages
-        # (E, num_heads, out_features)
-        messages = h[src] * attention.unsqueeze(-1)
-
-        # Sum messages for each target node
-        out = torch.zeros(N, self.num_heads, self.out_features, device=x.device)
-        dst_expanded = dst.unsqueeze(-1).unsqueeze(-1).expand(-1, self.num_heads, self.out_features)
-        out.scatter_add_(0, dst_expanded, messages)
-
-        # Combine heads
-        if self.concat:
-            out = out.view(N, self.num_heads * self.out_features)
-        else:
-            out = out.mean(dim=1)
-
-        if return_attention:
-            return out, attention
-        return out, None
-
-    def _sparse_softmax(
-        self,
-        e: torch.Tensor,
-        index: torch.Tensor,
-        num_nodes: int,
-    ) -> torch.Tensor:
-        """
-        Compute softmax over sparse edges grouped by target node.
-
-        Args:
-            e: Edge attention scores (E, num_heads)
-            index: Target node indices (E,)
-            num_nodes: Number of nodes
-
-        Returns:
-            Softmax attention weights (E, num_heads)
-        """
-        # Subtract max for numerical stability
-        e_max = torch.zeros(num_nodes, e.size(1), device=e.device)
-        e_max.scatter_reduce_(0, index.unsqueeze(-1).expand_as(e), e, reduce='amax', include_self=False)
-        e = e - e_max[index]
-
-        # Compute exp
-        exp_e = torch.exp(e)
-
-        # Sum exp for each target node
-        sum_exp = torch.zeros(num_nodes, e.size(1), device=e.device)
-        sum_exp.scatter_add_(0, index.unsqueeze(-1).expand_as(exp_e), exp_e)
-
-        # Normalize
-        return exp_e / (sum_exp[index] + 1e-8)
-
-
 class EdgeUpdateLayer(nn.Module):
     """
-    Layer that updates edge features based on endpoint node features.
+    Update edge features based on endpoint node features.
+
+    h_edge' = h_edge + MLP(concat(h_src, h_dst, h_edge))
     """
 
     def __init__(
         self,
-        node_features: int,
-        edge_features: int,
-        hidden_dim: int = 128,
+        node_dim: int,
+        edge_dim: int,
+        hidden_dim: Optional[int] = None,
+        dropout: float = 0.1,
     ):
         super().__init__()
+        self.node_dim = node_dim
+        self.edge_dim = edge_dim
+        hidden_dim = hidden_dim or edge_dim * 2
 
         self.mlp = nn.Sequential(
-            nn.Linear(2 * node_features + edge_features, hidden_dim),
+            nn.Linear(node_dim * 2 + edge_dim, hidden_dim),
             nn.ReLU(inplace=True),
-            nn.Linear(hidden_dim, edge_features),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, edge_dim),
         )
 
     def forward(
         self,
-        node_features: torch.Tensor,
-        edge_features: torch.Tensor,
-        edge_index: torch.Tensor,
+        node_features: torch.Tensor,  # (N, node_dim)
+        edge_features: torch.Tensor,  # (E, edge_dim)
+        edge_index: torch.Tensor,  # (2, E)
     ) -> torch.Tensor:
         """
         Update edge features.
 
-        Args:
-            node_features: Node features (N, node_dim)
-            edge_features: Edge features (E, edge_dim)
-            edge_index: Edge indices (2, E)
-
         Returns:
-            Updated edge features (E, edge_dim)
+            updated_edge_features: (E, edge_dim)
         """
         src, dst = edge_index[0], edge_index[1]
 
-        # Concatenate source node, target node, and current edge features
-        combined = torch.cat([
-            node_features[src],
-            node_features[dst],
-            edge_features,
-        ], dim=-1)
+        h_src = node_features[src]  # (E, node_dim)
+        h_dst = node_features[dst]  # (E, node_dim)
 
-        return self.mlp(combined)
+        # Concatenate and transform
+        combined = torch.cat([h_src, h_dst, edge_features], dim=1)
+        update = self.mlp(combined)  # (E, edge_dim)
+
+        # Residual connection
+        return edge_features + update
 
 
-class GraphConvBlock(nn.Module):
+class NodeUpdateLayer(nn.Module):
     """
-    Graph convolution block with attention, normalization, and residual connection.
+    Update node features using attention over incident edges.
+
+    For each node i:
+        1. Compute attention scores over incident edges
+        2. Aggregate edge features weighted by attention
+        3. Update node feature with residual
     """
 
     def __init__(
         self,
-        in_features: int,
-        out_features: int,
+        node_dim: int,
+        edge_dim: int,
+        num_heads: int = 4,
+        dropout: float = 0.1,
+    ):
+        super().__init__()
+        self.node_dim = node_dim
+        self.edge_dim = edge_dim
+        self.num_heads = num_heads
+        self.head_dim = node_dim // num_heads
+
+        assert node_dim % num_heads == 0, "node_dim must be divisible by num_heads"
+
+        # Attention computation
+        self.attention = nn.Linear(node_dim + edge_dim, num_heads)
+
+        # Edge value transformation
+        self.edge_value = nn.Linear(edge_dim, node_dim)
+
+        # Output projection
+        self.output = nn.Sequential(
+            nn.Linear(node_dim, node_dim),
+            nn.ReLU(inplace=True),
+            nn.Dropout(dropout),
+            nn.Linear(node_dim, node_dim),
+        )
+
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(
+        self,
+        node_features: torch.Tensor,  # (N, node_dim)
+        edge_features: torch.Tensor,  # (E, edge_dim)
+        edge_index: torch.Tensor,  # (2, E)
+    ) -> torch.Tensor:
+        """
+        Update node features.
+
+        Returns:
+            updated_node_features: (N, node_dim)
+        """
+        N = node_features.shape[0]
+        E = edge_index.shape[1]
+        device = node_features.device
+
+        src, dst = edge_index[0], edge_index[1]
+
+        # For each edge, compute attention score based on dst node and edge
+        # (dst is the receiving node in the message)
+        h_dst = node_features[dst]  # (E, node_dim)
+
+        # Attention input: concat node and edge features
+        attn_input = torch.cat([h_dst, edge_features], dim=1)  # (E, node_dim + edge_dim)
+        attn_scores = self.attention(attn_input)  # (E, num_heads)
+
+        # Transform edge features to values
+        edge_values = self.edge_value(edge_features)  # (E, node_dim)
+
+        # Apply attention with sparse softmax per destination node
+        # Group by destination node
+        messages = self._aggregate_with_attention(
+            edge_values, attn_scores, dst, N
+        )  # (N, node_dim)
+
+        # Apply output MLP with residual
+        update = self.output(messages)
+
+        return node_features + update
+
+    def _aggregate_with_attention(
+        self,
+        values: torch.Tensor,  # (E, node_dim)
+        scores: torch.Tensor,  # (E, num_heads)
+        indices: torch.Tensor,  # (E,) destination indices
+        num_nodes: int,
+    ) -> torch.Tensor:
+        """Aggregate values with attention, grouped by destination node."""
+        device = values.device
+        E = values.shape[0]
+
+        if E == 0:
+            return torch.zeros(num_nodes, values.shape[1], device=device)
+
+        # Average scores across heads for simplicity
+        scores_mean = scores.mean(dim=1)  # (E,)
+
+        # Compute max per destination for numerical stability
+        max_scores = torch.full((num_nodes,), float('-inf'), device=device)
+        max_scores.scatter_reduce_(
+            0, indices, scores_mean, reduce='amax', include_self=False
+        )
+        # Handle nodes with no incoming edges
+        max_scores = torch.where(
+            max_scores == float('-inf'),
+            torch.zeros_like(max_scores),
+            max_scores
+        )
+        max_scores_expanded = max_scores[indices]  # (E,)
+
+        # Softmax weights
+        exp_scores = torch.exp(scores_mean - max_scores_expanded)  # (E,)
+
+        # Sum of exp_scores per destination
+        sum_exp = torch.zeros(num_nodes, device=device)
+        sum_exp.scatter_add_(0, indices, exp_scores)
+        sum_exp_expanded = sum_exp[indices] + 1e-6  # (E,)
+
+        attn_weights = exp_scores / sum_exp_expanded  # (E,)
+        attn_weights = self.dropout(attn_weights)
+
+        # Weighted values
+        weighted_values = values * attn_weights.unsqueeze(1)  # (E, node_dim)
+
+        # Aggregate by destination
+        output = torch.zeros(num_nodes, values.shape[1], device=device)
+        output.scatter_add_(
+            0,
+            indices.unsqueeze(1).expand(-1, values.shape[1]),
+            weighted_values
+        )
+
+        return output
+
+
+class GraphConvBlock(nn.Module):
+    """
+    Single graph convolution block with edge and node updates.
+
+    Sequence:
+    1. Edge update (based on endpoint nodes)
+    2. Node update (attention over edges)
+    3. Layer normalization
+    """
+
+    def __init__(
+        self,
+        node_dim: int,
+        edge_dim: int,
         num_heads: int = 4,
         dropout: float = 0.1,
     ):
         super().__init__()
 
-        self.gat = GraphAttentionLayer(
-            in_features=in_features,
-            out_features=out_features // num_heads,
-            num_heads=num_heads,
+        self.edge_update = EdgeUpdateLayer(
+            node_dim=node_dim,
+            edge_dim=edge_dim,
             dropout=dropout,
-            concat=True,
         )
 
-        self.norm = nn.LayerNorm(out_features)
-        self.dropout = nn.Dropout(dropout)
+        self.node_update = NodeUpdateLayer(
+            node_dim=node_dim,
+            edge_dim=edge_dim,
+            num_heads=num_heads,
+            dropout=dropout,
+        )
 
-        # Residual projection if dimensions don't match
-        if in_features != out_features:
-            self.residual = nn.Linear(in_features, out_features)
-        else:
-            self.residual = nn.Identity()
+        self.node_norm = nn.LayerNorm(node_dim)
+        self.edge_norm = nn.LayerNorm(edge_dim)
 
     def forward(
         self,
-        x: torch.Tensor,
-        edge_index: torch.Tensor,
-    ) -> torch.Tensor:
+        node_features: torch.Tensor,  # (N, node_dim)
+        edge_features: torch.Tensor,  # (E, edge_dim)
+        edge_index: torch.Tensor,  # (2, E)
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
-        Forward pass with residual connection.
-
-        Args:
-            x: Node features (N, in_features)
-            edge_index: Edge indices (2, E)
+        Apply one graph convolution block.
 
         Returns:
-            Updated node features (N, out_features)
+            (updated_node_features, updated_edge_features)
         """
-        residual = self.residual(x)
+        # Edge update
+        edge_features = self.edge_update(node_features, edge_features, edge_index)
+        edge_features = self.edge_norm(edge_features)
 
-        out, _ = self.gat(x, edge_index)
-        out = self.dropout(out)
-        out = self.norm(out + residual)
+        # Node update
+        node_features = self.node_update(node_features, edge_features, edge_index)
+        node_features = self.node_norm(node_features)
 
-        return out
+        return node_features, edge_features
+
+
+class GraphNetwork(nn.Module):
+    """
+    Full graph neural network with multiple conv blocks.
+    """
+
+    def __init__(
+        self,
+        node_dim: int = 128,
+        edge_dim: int = 128,
+        num_layers: int = 4,
+        num_heads: int = 4,
+        dropout: float = 0.1,
+    ):
+        super().__init__()
+
+        self.layers = nn.ModuleList([
+            GraphConvBlock(
+                node_dim=node_dim,
+                edge_dim=edge_dim,
+                num_heads=num_heads,
+                dropout=dropout,
+            )
+            for _ in range(num_layers)
+        ])
+
+    def forward(
+        self,
+        node_features: torch.Tensor,  # (N, node_dim)
+        edge_features: torch.Tensor,  # (E, edge_dim)
+        edge_index: torch.Tensor,  # (2, E)
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Apply all graph conv layers.
+
+        Returns:
+            (final_node_features, final_edge_features)
+        """
+        for layer in self.layers:
+            node_features, edge_features = layer(
+                node_features, edge_features, edge_index
+            )
+
+        return node_features, edge_features

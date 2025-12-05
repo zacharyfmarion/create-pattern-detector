@@ -8,8 +8,9 @@ from .pixel_loss import (
 )
 from .graph_loss import (
     GraphLoss,
-    GraphLossWithNegativeSampling,
+    GraphLossWithBatching,
     compute_graph_metrics,
+    compute_batched_metrics,
 )
 
 __all__ = [
@@ -18,6 +19,7 @@ __all__ = [
     "JunctionLoss",
     "PixelLoss",
     "GraphLoss",
-    "GraphLossWithNegativeSampling",
+    "GraphLossWithBatching",
     "compute_graph_metrics",
+    "compute_batched_metrics",
 ]
