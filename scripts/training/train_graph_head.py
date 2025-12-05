@@ -99,7 +99,6 @@ class GraphHeadTrainer:
         extractor_config = GraphExtractorConfig(
             junction_threshold=config.get("junction_threshold", 0.3),
             junction_min_distance=config.get("junction_min_distance", 5),
-            seg_threshold=config.get("seg_threshold", 0.5),
         )
         self.graph_extractor = GraphExtractor(extractor_config)
 
