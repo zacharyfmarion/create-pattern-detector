@@ -174,6 +174,12 @@ class GraphHeadTrainer:
         print(f"Device: {self.device}")
         print(f"AMP: {self.use_amp}")
 
+        # Log initial visualization before training to catch errors early
+        if self.use_wandb:
+            print("\nLogging initial visualization to verify pipeline...")
+            self._log_graph_visualizations(epoch=-1)
+            print("Initial visualization logged successfully!")
+
         for epoch in range(self.current_epoch, self.epochs):
             self.current_epoch = epoch
 
@@ -453,6 +459,112 @@ class GraphHeadTrainer:
             for key, value in val_metrics.items():
                 log_dict[f"val/{key}"] = value
             wandb.log(log_dict)
+
+            # Log visualizations every few epochs
+            if (epoch + 1) % 5 == 0 or epoch == 0:
+                self._log_graph_visualizations(epoch)
+
+    @torch.no_grad()
+    def _log_graph_visualizations(self, epoch: int, num_samples: int = 3):
+        """Log graph prediction visualizations to W&B."""
+        import matplotlib.pyplot as plt
+
+        self.graph_head.eval()
+        wandb_images = []
+
+        # Get a few validation samples
+        val_iter = iter(self.val_loader)
+        batch = next(val_iter)
+
+        images = batch["image"].to(self.device)
+        pixel_outputs = self.pixel_model(images, return_features=True)
+
+        # Color map for assignments: M=red, V=blue, B=black, U=gray
+        colors = {0: 'red', 1: 'blue', 2: 'black', 3: 'gray', 4: 'green'}
+
+        for i in range(min(num_samples, images.shape[0])):
+            try:
+                seg_pred = pixel_outputs["segmentation"][i].argmax(dim=0).cpu().numpy()
+                junction_heatmap = pixel_outputs["junction"][i, 0].cpu().numpy()
+
+                candidate_graph = self.graph_extractor.extract(seg_pred, junction_heatmap)
+                if candidate_graph is None or len(candidate_graph.vertices) < 2:
+                    continue
+
+                vertices = torch.from_numpy(candidate_graph.vertices).float().to(self.device)
+                edge_index = torch.from_numpy(candidate_graph.edges.T).long().to(self.device)
+
+                if edge_index.shape[1] == 0:
+                    continue
+
+                seg_probs = torch.softmax(pixel_outputs["segmentation"][i:i+1], dim=1)
+                outputs = self.graph_head(
+                    vertices=vertices,
+                    edge_index=edge_index,
+                    backbone_features=pixel_outputs["features"][i:i+1],
+                    seg_probs=seg_probs,
+                    image_size=self.image_size,
+                )
+
+                # Get predictions
+                edge_probs = torch.sigmoid(outputs["edge_existence"]).cpu().numpy()
+                edge_preds = edge_probs > 0.5
+                assign_preds = outputs["edge_assignment"].argmax(dim=1).cpu().numpy()
+
+                vertices_np = vertices.cpu().numpy()
+                edges_np = edge_index.cpu().numpy()
+
+                # Create figure with 3 subplots
+                fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+
+                # Original image
+                img = images[i].cpu().numpy().transpose(1, 2, 0)
+                img = (img - img.min()) / (img.max() - img.min() + 1e-8)
+                axes[0].imshow(img)
+                axes[0].set_title("Input Image")
+                axes[0].axis("off")
+
+                # Candidate graph (all edges)
+                axes[1].imshow(img)
+                for e in range(edges_np.shape[1]):
+                    v1, v2 = edges_np[0, e], edges_np[1, e]
+                    axes[1].plot(
+                        [vertices_np[v1, 0], vertices_np[v2, 0]],
+                        [vertices_np[v1, 1], vertices_np[v2, 1]],
+                        'gray', alpha=0.3, linewidth=1
+                    )
+                axes[1].scatter(vertices_np[:, 0], vertices_np[:, 1], c='blue', s=10)
+                axes[1].set_title(f"Candidate Graph ({edges_np.shape[1]} edges)")
+                axes[1].axis("off")
+
+                # Predicted graph (filtered + colored)
+                axes[2].imshow(img)
+                for e in range(edges_np.shape[1]):
+                    if edge_preds[e]:
+                        v1, v2 = edges_np[0, e], edges_np[1, e]
+                        color = colors.get(assign_preds[e], 'gray')
+                        axes[2].plot(
+                            [vertices_np[v1, 0], vertices_np[v2, 0]],
+                            [vertices_np[v1, 1], vertices_np[v2, 1]],
+                            color, linewidth=2
+                        )
+                kept = edge_preds.sum()
+                axes[2].set_title(f"Predicted Graph ({kept} edges)")
+                axes[2].axis("off")
+
+                plt.tight_layout()
+                wandb_images.append(wandb.Image(fig, caption=f"Sample {i}"))
+                plt.close(fig)
+
+            except Exception as e:
+                print(f"Visualization failed for sample {i}: {e}")
+                continue
+
+        if wandb_images:
+            wandb.log({
+                "val/graph_predictions": wandb_images,
+                "epoch": epoch,
+            })
 
     def save_checkpoint(self, epoch: int, is_best: bool = False, final: bool = False):
         """Save model checkpoint."""
