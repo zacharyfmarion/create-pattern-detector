@@ -259,10 +259,13 @@ class GraphHeadTrainer:
 
             candidate_graphs = self._extract_graphs_parallel(seg_preds, junction_heatmaps)
 
-            # Process each sample (GPU)
-            batch_loss = torch.tensor(0.0, device=self.device)
-            batch_losses = {"existence": 0.0, "assignment": 0.0, "refinement": 0.0}
-            valid_samples = 0
+            # Collect valid samples for batched GPU processing
+            vertices_list = []
+            edge_index_list = []
+            labels_list = []
+            valid_indices = []
+
+            gt_graph = batch.get("graph")
 
             for i in range(images.shape[0]):
                 try:
@@ -277,7 +280,6 @@ class GraphHeadTrainer:
                         continue
 
                     # Get GT graph data (already in pixel coords from dataset)
-                    gt_graph = batch.get("graph")
                     if gt_graph is None or gt_graph[i] is None:
                         continue
 
@@ -295,44 +297,61 @@ class GraphHeadTrainer:
                         vertex_match_threshold=self.vertex_match_threshold,
                     )
 
-                    # Forward through graph head
-                    seg_probs = torch.softmax(pixel_outputs["segmentation"][i:i+1], dim=1)
-
-                    with autocast(enabled=self.use_amp):
-                        outputs = self.graph_head(
-                            vertices=vertices,
-                            edge_index=edge_index,
-                            backbone_features=pixel_outputs["features"][i:i+1],
-                            seg_probs=seg_probs,
-                            image_size=self.image_size,
-                        )
-
-                        # Compute loss
-                        targets = {
-                            "edge_existence": labels.edge_existence,
-                            "edge_assignment": labels.edge_assignment,
-                            "vertex_offset": labels.vertex_offset,
-                            "vertex_matched": labels.vertex_matched,
-                        }
-                        loss_dict = self.criterion(outputs, targets)
-
-                    batch_loss = batch_loss + loss_dict["loss"]
-                    batch_losses["existence"] += loss_dict["existence_loss"].item()
-                    batch_losses["assignment"] += loss_dict["assignment_loss"].item()
-                    batch_losses["refinement"] += loss_dict["refinement_loss"].item()
-                    valid_samples += 1
+                    vertices_list.append(vertices)
+                    edge_index_list.append(edge_index)
+                    labels_list.append(labels)
+                    valid_indices.append(i)
 
                 except Exception as e:
-                    # Skip problematic samples
                     if batch_idx == 0 and i == 0:
-                        print(f"Warning: Sample failed: {e}")
+                        print(f"Warning: Sample prep failed: {e}")
                     continue
 
-            if valid_samples == 0:
+            if len(valid_indices) == 0:
                 continue
 
-            # Average loss
-            batch_loss = batch_loss / valid_samples
+            # Batched forward pass through graph head (single GPU call for all samples)
+            try:
+                seg_probs = torch.softmax(pixel_outputs["segmentation"][valid_indices], dim=1)
+                backbone_feats = pixel_outputs["features"][valid_indices]
+
+                with autocast(enabled=self.use_amp):
+                    outputs = self.graph_head.forward_batch(
+                        vertices_list=vertices_list,
+                        edge_index_list=edge_index_list,
+                        backbone_features=backbone_feats,
+                        seg_probs=seg_probs,
+                        image_size=self.image_size,
+                    )
+
+                    # Concatenate all labels for batched loss computation
+                    all_edge_existence = torch.cat([l.edge_existence for l in labels_list])
+                    all_edge_assignment = torch.cat([l.edge_assignment for l in labels_list])
+                    all_vertex_offset = torch.cat([l.vertex_offset for l in labels_list])
+                    all_vertex_matched = torch.cat([l.vertex_matched for l in labels_list])
+
+                    targets = {
+                        "edge_existence": all_edge_existence,
+                        "edge_assignment": all_edge_assignment,
+                        "vertex_offset": all_vertex_offset,
+                        "vertex_matched": all_vertex_matched,
+                    }
+                    loss_dict = self.criterion(outputs, targets)
+
+                batch_loss = loss_dict["loss"]
+                batch_losses = {
+                    "existence": loss_dict["existence_loss"].item(),
+                    "assignment": loss_dict["assignment_loss"].item(),
+                    "refinement": loss_dict["refinement_loss"].item(),
+                }
+                valid_samples = len(valid_indices)
+
+            except Exception as e:
+                if batch_idx == 0:
+                    print(f"Warning: Batched forward failed: {e}")
+                    import traceback
+                    traceback.print_exc()
+                continue
 
             # Backward
             self.optimizer.zero_grad()
@@ -350,24 +369,26 @@ class GraphHeadTrainer:
             if self.step_per_batch:
                 self.scheduler.step()
 
-            # Update metrics
+            # Update metrics (batch_losses already contains totals, not per-sample)
             metrics["loss"] += batch_loss.item()
-            metrics["existence_loss"] += batch_losses["existence"] / valid_samples
-            metrics["assignment_loss"] += batch_losses["assignment"] / valid_samples
-            metrics["refinement_loss"] += batch_losses["refinement"] / valid_samples
+            metrics["existence_loss"] += batch_losses["existence"]
+            metrics["assignment_loss"] += batch_losses["assignment"]
+            metrics["refinement_loss"] += batch_losses["refinement"]
             num_batches += 1
 
             pbar.set_postfix({
                 "loss": f"{batch_loss.item():.4f}",
+                "samples": valid_samples,
                 "lr": f"{self.optimizer.param_groups[0]['lr']:.2e}",
             })
 
             if self.use_wandb and (batch_idx + 1) % self.log_every == 0:
                 wandb.log({
                     "train/loss": batch_loss.item(),
-                    "train/existence_loss": batch_losses["existence"] / valid_samples,
-                    "train/assignment_loss": batch_losses["assignment"] / valid_samples,
-                    "train/refinement_loss": batch_losses["refinement"] / valid_samples,
+                    "train/existence_loss": batch_losses["existence"],
+                    "train/assignment_loss": batch_losses["assignment"],
+                    "train/refinement_loss": batch_losses["refinement"],
+                    "train/valid_samples": valid_samples,
                     "train/lr": self.optimizer.param_groups[0]["lr"],
                 })
 
