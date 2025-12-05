@@ -1,14 +1,26 @@
 """
 Main GraphExtractor class for converting pixel predictions to graph structure.
+
+This implements an OVER-COMPLETE candidate graph approach:
+- Prioritize recall over precision at extraction time
+- Include extra vertices and edges that might be spurious
+- Let the downstream Graph Head learn to filter/refine
+
+Key insight: If a real crease never shows up as a candidate edge,
+the graph head can't resurrect it. But if we include extra edges,
+the graph head can learn to drop them.
 """
 
 import numpy as np
 from dataclasses import dataclass, field
 from typing import Optional, Dict, Any, List
 
-from .skeletonize import skeletonize_segmentation
-from .junctions import detect_junctions, add_boundary_vertices
-from .edge_tracing import trace_edges, edges_to_arrays
+from .skeletonize import skeletonize_segmentation, find_skeleton_endpoints
+from .junctions import (
+    detect_junctions_overcomplete,
+    add_boundary_vertices_overcomplete,
+)
+from .edge_tracing import trace_edges_overcomplete, edges_to_arrays
 from .cleanup import (
     assign_edge_labels,
     remove_short_edges,
@@ -71,35 +83,50 @@ class ExtractedGraph:
 
 @dataclass
 class GraphExtractorConfig:
-    """Configuration for graph extraction."""
-    # Junction detection
-    junction_threshold: float = 0.70  # Optimal threshold for focal loss model (93% precision, 73% recall)
-    junction_min_distance: int = 10  # More spacing between junctions
-    use_skeleton_junctions: bool = False  # Disable by default - adds too many spurious junctions
-    junction_merge_distance: float = 5.0
+    """
+    Configuration for over-complete graph extraction.
 
-    # Edge tracing
-    junction_radius: int = 5  # Larger radius for finding skeleton near junction
-    min_edge_length: float = 10.0
+    Parameters are biased toward HIGH RECALL - we'd rather include
+    spurious edges/vertices than miss real ones. The Graph Head
+    will learn to filter out the noise.
+    """
+    # Junction detection - LOW thresholds for high recall
+    junction_threshold: float = 0.55  # Just above 0.5 baseline - catch more peaks
+    junction_min_distance: int = 3  # Small NMS distance - allow close vertices
+    use_skeleton_junctions: bool = True  # Include topology-based junctions
+    use_skeleton_endpoints: bool = True  # Include skeleton endpoints as vertices
+    junction_merge_distance: float = 3.0  # Soft merge only very close vertices
 
-    # Cleanup
-    merge_collinear: bool = True
+    # Edge tracing - permissive settings
+    junction_radius: int = 5  # Radius for finding skeleton near junction
+    min_edge_length: float = 3.0  # Very short min - include spurs
+    bridge_gap_pixels: int = 2  # Bridge small skeleton gaps
+    include_endpoint_edges: bool = True  # Include edges to skeleton endpoints
+
+    # Cleanup - MINIMAL cleanup for over-complete graph
+    merge_collinear: bool = False  # Don't merge - let graph head decide
     collinear_angle_threshold: float = 10.0
-    snap_boundary: bool = True
+    snap_boundary: bool = True  # Still snap boundary vertices
     boundary_snap_distance: float = 5.0
-    remove_isolated: bool = True
+    remove_isolated: bool = False  # Don't remove - might be needed
+    include_boundary_corners: bool = True  # Include image corners as vertices
 
 
 class GraphExtractor:
     """
-    Extract graph structure from pixel head predictions.
+    Extract OVER-COMPLETE graph structure from pixel head predictions.
+
+    This extractor prioritizes RECALL over precision:
+    - Include all plausible vertices (heatmap peaks, skeleton junctions, endpoints)
+    - Include all plausible edges (even short spurs and over-segmented creases)
+    - Minimal cleanup - let the Graph Head learn to filter
 
     Pipeline:
     1. Skeletonize segmentation mask
-    2. Detect junctions from heatmap + skeleton
-    3. Trace edges between junctions
+    2. Detect over-complete vertices (heatmap + skeleton junctions + endpoints + corners)
+    3. Trace over-complete edges (bridge gaps, include short spurs)
     4. Assign labels and compute confidence
-    5. Cleanup (merge collinear, snap boundary, etc.)
+    5. Minimal cleanup (snap boundary only)
     """
 
     def __init__(self, config: Optional[GraphExtractorConfig] = None):
@@ -118,7 +145,13 @@ class GraphExtractor:
         orientation: Optional[np.ndarray] = None,
     ) -> ExtractedGraph:
         """
-        Extract graph from pixel predictions.
+        Extract over-complete graph from pixel predictions.
+
+        The resulting graph will have:
+        - More vertices than the true graph (some duplicates, some spurious)
+        - More edges than the true graph (some redundant, some short spurs)
+
+        This is intentional - the Graph Head will learn to prune.
 
         Args:
             segmentation: (H, W) segmentation mask with class labels
@@ -138,33 +171,37 @@ class GraphExtractor:
             preserve_labels=True,
         )
 
-        # Step 2: Detect junctions
-        # use_skeleton_junctions controls both fallback and refinement behavior
-        junctions = detect_junctions(
+        # Step 2: Detect over-complete vertices
+        # Include: heatmap peaks + skeleton junctions + skeleton endpoints + boundary corners
+        vertices, vertex_sources = detect_junctions_overcomplete(
             junction_heatmap,
-            skeleton=skeleton if self.config.use_skeleton_junctions else None,
+            skeleton=skeleton,
             threshold=self.config.junction_threshold,
             min_distance=self.config.junction_min_distance,
-            use_skeleton_fallback=self.config.use_skeleton_junctions,
-            use_skeleton_refinement=self.config.use_skeleton_junctions,
+            use_skeleton_junctions=self.config.use_skeleton_junctions,
+            use_skeleton_endpoints=self.config.use_skeleton_endpoints,
             merge_distance=self.config.junction_merge_distance,
         )
 
-        # Add boundary vertices (pass segmentation to find where creases meet border)
-        vertices, is_boundary = add_boundary_vertices(
-            junctions,
+        # Add boundary vertices (crease-border intersections + paper corners)
+        vertices, is_boundary = add_boundary_vertices_overcomplete(
+            vertices,
             skeleton,
             boundary_distance=self.config.boundary_snap_distance,
             segmentation=segmentation,
+            include_corners=self.config.include_boundary_corners,
         )
 
-        # Step 3: Trace edges
-        traced_edges = trace_edges(
+        # Step 3: Trace over-complete edges
+        # Include: all skeleton paths, bridge small gaps, include endpoint edges
+        traced_edges = trace_edges_overcomplete(
             skeleton,
             vertices,
             orientation=orientation,
             junction_radius=self.config.junction_radius,
-            min_edge_length=5,  # Use a lower threshold during tracing
+            min_edge_length=self.config.min_edge_length,
+            bridge_gap_pixels=self.config.bridge_gap_pixels,
+            include_endpoint_edges=self.config.include_endpoint_edges,
         )
 
         if len(traced_edges) == 0:
@@ -188,29 +225,29 @@ class GraphExtractor:
             skeleton_labels,
         )
 
-        # Step 5: Cleanup
+        # Step 5: MINIMAL cleanup for over-complete graph
 
-        # Remove short edges
+        # Only remove very short edges (< min_edge_length)
+        # But keep this lenient - 3px default
         edges, edge_paths, assignments, confidence = remove_short_edges(
             edges, edge_paths, assignments, confidence, vertices,
             min_length=self.config.min_edge_length,
         )
 
-        # Merge collinear edges
+        # DON'T merge collinear edges - let graph head decide
+        # (keeping this off by default in config)
         if self.config.merge_collinear and len(edges) > 0:
             edges, assignments, vertices = merge_collinear_edges(
                 edges, assignments, vertices,
                 angle_threshold=self.config.collinear_angle_threshold,
             )
-            # Note: edge_paths are invalidated after merging
-            # We'd need to re-trace or concatenate paths
-            edge_paths = []  # Clear paths after merge
+            edge_paths = []
 
-        # Snap boundary vertices (use segmentation to find paper boundary)
+        # Snap boundary vertices to actual boundary
         if self.config.snap_boundary:
             vertices = snap_to_boundary(vertices, is_boundary, image_size, segmentation)
 
-        # Remove isolated vertices
+        # DON'T remove isolated vertices - might be needed by graph head
         if self.config.remove_isolated and len(edges) > 0:
             vertices, edges, is_boundary = remove_isolated_vertices(
                 vertices, edges, is_boundary
@@ -218,7 +255,6 @@ class GraphExtractor:
 
         # Recompute confidence array to match edge count
         if len(edges) != len(confidence):
-            # Confidence was invalidated by merge, set to 1.0
             confidence = np.ones(len(edges), dtype=np.float32)
 
         return ExtractedGraph(

@@ -455,3 +455,262 @@ def _deduplicate_vertices(vertices: np.ndarray, min_distance: float) -> np.ndarr
                 keep[j] = False
 
     return vertices[keep]
+
+
+# =============================================================================
+# OVER-COMPLETE JUNCTION DETECTION (for Graph Head pipeline)
+# =============================================================================
+
+
+def detect_junctions_overcomplete(
+    heatmap: np.ndarray,
+    skeleton: np.ndarray,
+    threshold: float = 0.55,
+    min_distance: int = 3,
+    use_skeleton_junctions: bool = True,
+    use_skeleton_endpoints: bool = True,
+    merge_distance: float = 3.0,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Detect OVER-COMPLETE junction candidates for the Graph Head pipeline.
+
+    This intentionally detects MORE junctions than needed - the Graph Head
+    will learn to filter spurious ones. We prioritize RECALL over precision.
+
+    Sources of vertices:
+    1. Heatmap peaks (with LOW threshold to catch more)
+    2. Skeleton branch points (topology-based junctions)
+    3. Skeleton endpoints (may be real vertices or artifacts)
+
+    Args:
+        heatmap: (H, W) junction probability heatmap (0-1)
+        skeleton: (H, W) binary skeleton mask
+        threshold: LOW threshold for heatmap peaks (e.g., 0.55 vs 0.5 baseline)
+        min_distance: Small NMS distance to allow close peaks
+        use_skeleton_junctions: Include skeleton branch points
+        use_skeleton_endpoints: Include skeleton endpoints as vertices
+        merge_distance: Only merge vertices closer than this (conservative)
+
+    Returns:
+        junctions: (N, 2) array of (x, y) junction coordinates
+        vertex_sources: (N,) array indicating source:
+                       0=heatmap, 1=skeleton_junction, 2=skeleton_endpoint
+    """
+    from scipy.ndimage import gaussian_filter
+    from skimage.feature import peak_local_max
+
+    h, w = skeleton.shape
+    all_vertices = []
+    all_sources = []
+
+    # Source 1: Heatmap peaks with LOW threshold
+    smoothed = gaussian_filter(heatmap, sigma=1.0)
+    peaks = peak_local_max(
+        smoothed,
+        min_distance=min_distance,
+        threshold_abs=threshold,
+        exclude_border=False,
+    )
+    if len(peaks) > 0:
+        heatmap_vertices = peaks[:, ::-1].astype(np.float32)  # (y,x) -> (x,y)
+        all_vertices.extend(heatmap_vertices)
+        all_sources.extend([0] * len(heatmap_vertices))
+
+    # Source 2: Skeleton branch points (3+ neighbors)
+    if use_skeleton_junctions:
+        branch_points = find_skeleton_branch_points(skeleton)  # (y, x)
+        if len(branch_points) > 0:
+            branch_xy = branch_points[:, ::-1].astype(np.float32)
+            all_vertices.extend(branch_xy)
+            all_sources.extend([1] * len(branch_xy))
+
+    # Source 3: Skeleton endpoints (1 neighbor)
+    if use_skeleton_endpoints:
+        from .skeletonize import find_skeleton_endpoints
+        endpoints = find_skeleton_endpoints(skeleton)  # (y, x)
+        if len(endpoints) > 0:
+            endpoint_xy = endpoints[:, ::-1].astype(np.float32)
+            all_vertices.extend(endpoint_xy)
+            all_sources.extend([2] * len(endpoint_xy))
+
+    if len(all_vertices) == 0:
+        return np.empty((0, 2), dtype=np.float32), np.empty(0, dtype=np.int8)
+
+    vertices = np.array(all_vertices, dtype=np.float32)
+    sources = np.array(all_sources, dtype=np.int8)
+
+    # Soft merge only VERY close vertices (conservative deduplication)
+    # Prioritize heatmap vertices (source 0) when merging
+    vertices, sources = _merge_close_vertices_with_priority(
+        vertices, sources, merge_distance
+    )
+
+    return vertices, sources
+
+
+def _merge_close_vertices_with_priority(
+    vertices: np.ndarray,
+    sources: np.ndarray,
+    merge_distance: float,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Merge close vertices, prioritizing lower source values (heatmap > skeleton).
+    """
+    if len(vertices) <= 1:
+        return vertices, sources
+
+    from scipy.spatial.distance import cdist
+
+    dists = cdist(vertices, vertices)
+    used = np.zeros(len(vertices), dtype=bool)
+    merged_vertices = []
+    merged_sources = []
+
+    # Sort by source priority (heatmap first)
+    order = np.argsort(sources)
+
+    for i in order:
+        if used[i]:
+            continue
+
+        # Find all vertices within merge_distance
+        nearby = np.where((dists[i] <= merge_distance) & ~used)[0]
+        used[nearby] = True
+
+        # Use position of the highest-priority vertex (first in sorted order)
+        best_idx = nearby[np.argmin(sources[nearby])]
+        merged_vertices.append(vertices[best_idx])
+        merged_sources.append(sources[best_idx])
+
+    return (
+        np.array(merged_vertices, dtype=np.float32),
+        np.array(merged_sources, dtype=np.int8),
+    )
+
+
+def add_boundary_vertices_overcomplete(
+    junctions: np.ndarray,
+    skeleton: np.ndarray,
+    boundary_distance: float = 5.0,
+    segmentation: np.ndarray = None,
+    include_corners: bool = True,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Add boundary vertices for over-complete graph extraction.
+
+    This adds:
+    1. Crease-border intersections (where creases meet paper edge)
+    2. Paper corners (if include_corners=True)
+
+    Args:
+        junctions: (N, 2) interior junction coordinates
+        skeleton: (H, W) binary skeleton mask
+        boundary_distance: Distance threshold for boundary detection
+        segmentation: (H, W) with classes BG=0, M=1, V=2, B=3, U=4
+        include_corners: Whether to include paper corners as vertices
+
+    Returns:
+        all_vertices: (M, 2) array including boundary vertices
+        is_boundary: (M,) boolean array indicating boundary vertices
+    """
+    from .skeletonize import find_skeleton_endpoints
+    from skimage.morphology import skeletonize as skimage_skeletonize
+    from scipy.ndimage import binary_dilation
+
+    h, w = skeleton.shape
+    boundary_vertices = []
+
+    if segmentation is not None:
+        border_mask = segmentation == 3
+
+        # 1. Find where creases meet the border
+        crease_mask = (segmentation == 1) | (segmentation == 2) | (segmentation == 4)
+        if crease_mask.any():
+            crease_skeleton = skimage_skeletonize(crease_mask)
+            crease_endpoints = find_skeleton_endpoints(crease_skeleton)
+
+            if len(crease_endpoints) > 0:
+                dilated_border = binary_dilation(
+                    border_mask, iterations=int(boundary_distance)
+                )
+                endpoints_xy = crease_endpoints[:, ::-1].astype(np.float32)
+
+                for ep in endpoints_xy:
+                    x, y = int(round(ep[0])), int(round(ep[1]))
+                    if 0 <= y < h and 0 <= x < w and dilated_border[y, x]:
+                        boundary_vertices.append(ep)
+
+        # 2. Include paper corners
+        if include_corners and border_mask.any():
+            border_coords = np.argwhere(border_mask)  # (y, x)
+            if len(border_coords) > 0:
+                y_coords = border_coords[:, 0]
+                x_coords = border_coords[:, 1]
+
+                # Find 4 corner points
+                corners = []
+
+                # Top-left
+                top_y = y_coords.min()
+                left_x = x_coords.min()
+                dists_tl = (x_coords - left_x) ** 2 + (y_coords - top_y) ** 2
+                tl_idx = np.argmin(dists_tl)
+                corners.append([x_coords[tl_idx], y_coords[tl_idx]])
+
+                # Top-right
+                right_x = x_coords.max()
+                dists_tr = (x_coords - right_x) ** 2 + (y_coords - top_y) ** 2
+                tr_idx = np.argmin(dists_tr)
+                corners.append([x_coords[tr_idx], y_coords[tr_idx]])
+
+                # Bottom-left
+                bottom_y = y_coords.max()
+                dists_bl = (x_coords - left_x) ** 2 + (y_coords - bottom_y) ** 2
+                bl_idx = np.argmin(dists_bl)
+                corners.append([x_coords[bl_idx], y_coords[bl_idx]])
+
+                # Bottom-right
+                dists_br = (x_coords - right_x) ** 2 + (y_coords - bottom_y) ** 2
+                br_idx = np.argmin(dists_br)
+                corners.append([x_coords[br_idx], y_coords[br_idx]])
+
+                for corner in corners:
+                    boundary_vertices.append(np.array(corner, dtype=np.float32))
+
+    else:
+        # Fallback: use skeleton endpoints near image edges
+        endpoints = find_skeleton_endpoints(skeleton)
+        if len(endpoints) > 0:
+            endpoints_xy = endpoints[:, ::-1].astype(np.float32)
+            near_edge = (
+                (endpoints_xy[:, 0] < boundary_distance)
+                | (endpoints_xy[:, 0] > w - boundary_distance)
+                | (endpoints_xy[:, 1] < boundary_distance)
+                | (endpoints_xy[:, 1] > h - boundary_distance)
+            )
+            edge_vertices = endpoints_xy[near_edge]
+
+            for v in edge_vertices:
+                boundary_vertices.append(v.copy())
+
+    # Deduplicate boundary vertices
+    if len(boundary_vertices) > 0:
+        boundary_vertices = np.array(boundary_vertices, dtype=np.float32)
+        boundary_vertices = _deduplicate_vertices(
+            boundary_vertices, min_distance=boundary_distance
+        )
+    else:
+        boundary_vertices = np.empty((0, 2), dtype=np.float32)
+
+    # Combine with interior junctions
+    if len(boundary_vertices) > 0:
+        all_vertices = np.vstack([junctions, boundary_vertices])
+        is_boundary = np.concatenate([
+            np.zeros(len(junctions), dtype=bool),
+            np.ones(len(boundary_vertices), dtype=bool),
+        ])
+    else:
+        all_vertices = junctions
+        is_boundary = np.zeros(len(junctions), dtype=bool)
+
+    return all_vertices, is_boundary

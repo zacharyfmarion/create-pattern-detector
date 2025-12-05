@@ -329,3 +329,250 @@ def edges_to_arrays(
     edge_paths = [e.path for e in edges]
 
     return edge_indices, edge_paths
+
+
+# =============================================================================
+# OVER-COMPLETE EDGE TRACING (for Graph Head pipeline)
+# =============================================================================
+
+
+def trace_edges_overcomplete(
+    skeleton: np.ndarray,
+    vertices: np.ndarray,
+    orientation: Optional[np.ndarray] = None,
+    junction_radius: int = 5,
+    min_edge_length: float = 3.0,
+    bridge_gap_pixels: int = 2,
+    include_endpoint_edges: bool = True,
+) -> List[TracedEdge]:
+    """
+    Trace OVER-COMPLETE edges between vertices along the skeleton.
+
+    This intentionally generates MORE edges than needed - the Graph Head
+    will learn to filter spurious ones. We prioritize RECALL over precision.
+
+    Key behaviors:
+    1. Bridge small gaps in the skeleton (up to bridge_gap_pixels)
+    2. Include short spurs (down to min_edge_length)
+    3. Keep over-segmented edges (multiple edges for one true crease)
+    4. Include edges to skeleton endpoints
+
+    Args:
+        skeleton: (H, W) binary skeleton mask
+        vertices: (N, 2) array of (x, y) vertex coordinates
+        orientation: (H, W, 2) orientation field (cos θ, sin θ)
+        junction_radius: Radius around junction to start/stop tracing
+        min_edge_length: Very short minimum (include spurs)
+        bridge_gap_pixels: Bridge skeleton gaps up to this size
+        include_endpoint_edges: Include edges to skeleton endpoints
+
+    Returns:
+        edges: List of TracedEdge objects
+    """
+    if len(vertices) == 0:
+        return []
+
+    h, w = skeleton.shape
+
+    # Optionally bridge small gaps in skeleton
+    if bridge_gap_pixels > 0:
+        skeleton = _bridge_skeleton_gaps(skeleton, max_gap=bridge_gap_pixels)
+
+    # Build KDTree for fast vertex lookup
+    vertex_tree = KDTree(vertices)
+
+    # Create vertex mask for quick lookup
+    vertex_mask = np.zeros((h, w), dtype=np.int32)
+    vertex_mask.fill(-1)  # -1 means no vertex
+
+    for i, (x, y) in enumerate(vertices):
+        ix, iy = int(round(x)), int(round(y))
+        # Mark vertex and nearby pixels
+        for dy in range(-junction_radius, junction_radius + 1):
+            for dx in range(-junction_radius, junction_radius + 1):
+                ny, nx = iy + dy, ix + dx
+                if 0 <= ny < h and 0 <= nx < w:
+                    if vertex_mask[ny, nx] == -1:  # Don't overwrite
+                        vertex_mask[ny, nx] = i
+
+    # Track which edges we've found
+    found_edges: Set[Tuple[int, int]] = set()
+    edges: List[TracedEdge] = []
+
+    # For each vertex, trace outward along skeleton branches
+    for start_idx, (vx, vy) in enumerate(vertices):
+        vx_int, vy_int = int(round(vx)), int(round(vy))
+
+        # Find skeleton pixels near this vertex
+        start_pixels = _find_skeleton_near_junction(
+            skeleton, vy_int, vx_int, junction_radius
+        )
+
+        # If no skeleton pixels found near vertex, try extending the search
+        if len(start_pixels) == 0 and bridge_gap_pixels > 0:
+            start_pixels = _find_skeleton_near_junction(
+                skeleton, vy_int, vx_int, junction_radius + bridge_gap_pixels
+            )
+
+        # Trace from each starting pixel
+        for sy, sx in start_pixels:
+            edge = _trace_single_edge_overcomplete(
+                skeleton,
+                vertex_mask,
+                start_idx,
+                sy,
+                sx,
+                vy_int,
+                vx_int,
+                orientation,
+                include_endpoint_edges,
+                vertices,
+                vertex_tree,
+            )
+
+            if edge is None:
+                continue
+
+            # Create canonical edge key
+            edge_key = (
+                min(edge.start_idx, edge.end_idx),
+                max(edge.start_idx, edge.end_idx),
+            )
+
+            if edge_key in found_edges:
+                continue
+
+            # Very lenient minimum length (just to filter noise)
+            if edge.length < min_edge_length:
+                continue
+
+            # Allow self-loops? No, that doesn't make sense for creases
+            if edge.start_idx == edge.end_idx:
+                continue
+
+            found_edges.add(edge_key)
+            edges.append(edge)
+
+    return edges
+
+
+def _bridge_skeleton_gaps(skeleton: np.ndarray, max_gap: int = 2) -> np.ndarray:
+    """
+    Bridge small gaps in the skeleton using morphological closing.
+
+    Args:
+        skeleton: Binary skeleton mask
+        max_gap: Maximum gap size to bridge
+
+    Returns:
+        skeleton_bridged: Skeleton with gaps filled
+    """
+    from scipy.ndimage import binary_dilation, binary_erosion
+    from skimage.morphology import skeletonize as skimage_skeletonize
+
+    # Dilate, then erode to close small gaps
+    # Use a small structuring element
+    dilated = binary_dilation(skeleton, iterations=max_gap)
+    closed = binary_erosion(dilated, iterations=max_gap)
+
+    # Re-skeletonize to maintain 1-pixel width
+    bridged = skimage_skeletonize(closed)
+
+    return bridged
+
+
+def _trace_single_edge_overcomplete(
+    skeleton: np.ndarray,
+    vertex_mask: np.ndarray,
+    start_idx: int,
+    start_y: int,
+    start_x: int,
+    vertex_y: int,
+    vertex_x: int,
+    orientation: Optional[np.ndarray],
+    include_endpoint_edges: bool,
+    vertices: np.ndarray,
+    vertex_tree: KDTree,
+    max_steps: int = 10000,
+) -> Optional[TracedEdge]:
+    """
+    Trace a single edge, with over-complete behavior.
+
+    This is more permissive than the standard version:
+    - Will create edges to skeleton endpoints (not just vertices)
+    - More tolerant of tracing issues
+    """
+    h, w = skeleton.shape
+    path = [(start_x, start_y)]  # Store as (x, y)
+
+    visited = set()
+    visited.add((start_y, start_x))
+    visited.add((vertex_y, vertex_x))  # Don't go back to start vertex
+
+    current_y, current_x = start_y, start_x
+
+    for _ in range(max_steps):
+        # Get skeleton neighbors
+        neighbors = get_skeleton_neighbors(skeleton, current_y, current_x)
+
+        if len(neighbors) == 0:
+            # Dead end - check if we should create endpoint edge
+            if include_endpoint_edges and len(path) >= 3:
+                # Create edge to this endpoint
+                # Find nearest vertex to endpoint
+                endpoint = np.array([[current_x, current_y]], dtype=np.float32)
+                dist, idx = vertex_tree.query(endpoint, k=1)
+
+                if dist[0] < 10:  # Within reasonable distance
+                    end_idx = idx[0]
+                    if end_idx != start_idx:
+                        path_array = np.array(path, dtype=np.float32)
+                        diffs = np.diff(path_array, axis=0)
+                        length = np.sum(np.sqrt(np.sum(diffs ** 2, axis=1)))
+
+                        return TracedEdge(
+                            start_idx=start_idx,
+                            end_idx=end_idx,
+                            path=path_array,
+                            length=length,
+                        )
+            return None
+
+        # Filter out visited neighbors
+        unvisited = [(ny, nx) for ny, nx in neighbors if (ny, nx) not in visited]
+
+        if len(unvisited) == 0:
+            # All neighbors visited - no edge found
+            return None
+
+        # Choose next pixel
+        if len(unvisited) == 1:
+            next_y, next_x = unvisited[0]
+        else:
+            next_y, next_x = _choose_next_pixel(
+                unvisited, current_y, current_x, path, orientation
+            )
+
+        # Check if we've reached another vertex
+        end_vertex = vertex_mask[next_y, next_x]
+        if end_vertex >= 0 and end_vertex != start_idx:
+            # Found another vertex
+            path.append((next_x, next_y))
+            path_array = np.array(path, dtype=np.float32)
+            diffs = np.diff(path_array, axis=0)
+            length = np.sum(np.sqrt(np.sum(diffs ** 2, axis=1)))
+
+            return TracedEdge(
+                start_idx=start_idx,
+                end_idx=end_vertex,
+                path=path_array,
+                length=length,
+            )
+
+        # Continue tracing
+        visited.add((next_y, next_x))
+        path.append((next_x, next_y))
+        current_y, current_x = next_y, next_x
+
+    # Max steps reached
+    return None
