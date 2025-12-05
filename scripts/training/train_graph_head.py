@@ -24,7 +24,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import OneCycleLR, CosineAnnealingLR
-from torch.amp import GradScaler, autocast
+from torch.cuda.amp import GradScaler, autocast
 import numpy as np
 from tqdm import tqdm
 import json
@@ -270,7 +270,7 @@ class GraphHeadTrainer:
                     # Forward through graph head
                     seg_probs = torch.softmax(pixel_outputs["segmentation"][i:i+1], dim=1)
 
-                    with autocast(device_type=self.device, enabled=self.use_amp):
+                    with autocast(enabled=self.use_amp):
                         outputs = self.graph_head(
                             vertices=vertices,
                             edge_index=edge_index,
