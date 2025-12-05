@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 """
-Train the graph head on ground truth graphs.
+Train the Graph Head (Phase 2).
 
-This script trains the graph neural network to predict edge existence
-and M/V/B/U assignments using ground truth vertex positions.
+This script trains the graph neural network to predict edge existence,
+M/V/B/U assignments, and vertex refinement using candidate graphs
+extracted from frozen pixel head outputs.
 
 Usage:
-    python scripts/train_graph_head.py --fold-dir data/training/full-training/fold
+    python scripts/train_graph_head.py \
+        --pixel-checkpoint checkpoints/checkpoint_epoch_8.pt \
+        --data-dir data/training/full-training \
+        --epochs 30
 """
 
 import argparse
@@ -19,406 +23,692 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 from torch.optim import AdamW
-from torch.optim.lr_scheduler import CosineAnnealingLR
+from torch.optim.lr_scheduler import OneCycleLR, CosineAnnealingLR
+from torch.amp import GradScaler, autocast
 import numpy as np
 from tqdm import tqdm
 import json
 from datetime import datetime
 
-from src.data.graph_dataset import GraphDataset
+try:
+    import wandb
+    WANDB_AVAILABLE = True
+except ImportError:
+    WANDB_AVAILABLE = False
+
+from src.models import CreasePatternDetector
 from src.models.graph import GraphHead
 from src.models.losses import GraphLoss, compute_graph_metrics
-from src.models.backbone import HRNetBackbone
+from src.data.graph_labels import generate_graph_labels
+from src.data.dataset import CreasePatternDataset
+from src.postprocessing.graph_extraction import GraphExtractor, GraphExtractorConfig
 
 
-class GraphTrainer:
-    """Trainer for graph head."""
+def collate_fn(batch):
+    """Custom collate that handles variable-size graph data."""
+    images = torch.stack([item['image'] for item in batch])
+
+    # Keep graph data as list (variable size graphs)
+    graphs = [item.get('graph') for item in batch]
+
+    return {
+        'image': images,
+        'graph': graphs,
+    }
+
+
+class GraphHeadTrainer:
+    """
+    Training loop for Graph Head (Phase 2).
+
+    Features:
+    - Frozen backbone + pixel head
+    - Graph extraction from pixel head outputs
+    - Edge existence + assignment + vertex refinement losses
+    """
 
     def __init__(
         self,
-        model: nn.Module,
-        backbone: nn.Module,
+        pixel_model: CreasePatternDetector,
+        graph_head: GraphHead,
         train_loader: DataLoader,
         val_loader: DataLoader,
-        optimizer: torch.optim.Optimizer,
-        scheduler: torch.optim.lr_scheduler._LRScheduler,
-        loss_fn: nn.Module,
+        config: dict,
         device: str = "cuda",
-        checkpoint_dir: str = "checkpoints/graph_head",
     ):
-        self.model = model
-        self.backbone = backbone
+        self.pixel_model = pixel_model.to(device)
+        self.graph_head = graph_head.to(device)
         self.train_loader = train_loader
         self.val_loader = val_loader
-        self.optimizer = optimizer
-        self.scheduler = scheduler
-        self.loss_fn = loss_fn
+        self.config = config
         self.device = device
-        self.checkpoint_dir = Path(checkpoint_dir)
-        self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
-        self.best_val_f1 = 0.0
-        self.epoch = 0
+        # Freeze pixel model
+        self.pixel_model.eval()
+        for param in self.pixel_model.parameters():
+            param.requires_grad = False
+
+        # Training params
+        self.epochs = config.get("epochs", 30)
+        self.learning_rate = config.get("learning_rate", 5e-4)
+        self.weight_decay = config.get("weight_decay", 0.01)
+        self.max_grad_norm = config.get("max_grad_norm", 1.0)
+        self.use_amp = config.get("amp", True) and device == "cuda"
+
+        # Graph extraction
+        extractor_config = GraphExtractorConfig(
+            junction_threshold=config.get("junction_threshold", 0.3),
+            junction_min_distance=config.get("junction_min_distance", 5),
+            seg_threshold=config.get("seg_threshold", 0.5),
+        )
+        self.graph_extractor = GraphExtractor(extractor_config)
+
+        # Loss function
+        self.criterion = GraphLoss(
+            existence_weight=config.get("existence_weight", 1.0),
+            assignment_weight=config.get("assignment_weight", 1.0),
+            refinement_weight=config.get("refinement_weight", 0.5),
+        )
+
+        # Optimizer
+        self.optimizer = AdamW(
+            self.graph_head.parameters(),
+            lr=self.learning_rate,
+            weight_decay=self.weight_decay,
+        )
+
+        # Scheduler
+        total_steps = len(train_loader) * self.epochs
+        scheduler_type = config.get("scheduler", "onecycle")
+
+        if scheduler_type == "onecycle":
+            self.scheduler = OneCycleLR(
+                self.optimizer,
+                max_lr=self.learning_rate,
+                total_steps=total_steps,
+                pct_start=0.1,
+                anneal_strategy="cos",
+            )
+            self.step_per_batch = True
+        else:
+            self.scheduler = CosineAnnealingLR(
+                self.optimizer,
+                T_max=self.epochs,
+            )
+            self.step_per_batch = False
+
+        # Mixed precision
+        self.scaler = GradScaler() if self.use_amp else None
+
+        # Checkpointing
+        self.checkpoint_dir = Path(config.get("checkpoint_dir", "checkpoints/graph"))
+        self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
+        self.save_every = config.get("save_every", 1)
+
+        # Best model tracking
+        self.best_val_metric = 0.0
+        self.best_epoch = 0
+
+        # Logging
+        self.log_every = config.get("log_every", 50)
+        self.use_wandb = config.get("use_wandb", False) and WANDB_AVAILABLE
+
+        if self.use_wandb:
+            wandb.init(
+                project=config.get("wandb_project", "cp-detector-graph"),
+                config=config,
+            )
+
+        # Matching params
+        self.vertex_match_threshold = config.get("vertex_match_threshold", 8.0)
+        self.image_size = config.get("image_size", 512)
+        self.padding = config.get("padding", 50)
+
+        self.current_epoch = 0
+
+    def train(self) -> dict:
+        """Run full training loop."""
+        print(f"\nTraining for {self.epochs} epochs...")
+        print(f"Train batches: {len(self.train_loader)}")
+        print(f"Val batches: {len(self.val_loader)}")
+        print(f"Device: {self.device}")
+        print(f"AMP: {self.use_amp}")
+
+        for epoch in range(self.current_epoch, self.epochs):
+            self.current_epoch = epoch
+
+            train_metrics = self.train_epoch()
+            val_metrics = self.validate()
+
+            self._log_epoch(epoch, train_metrics, val_metrics)
+
+            # Save checkpoint
+            is_best = val_metrics["existence_f1"] > self.best_val_metric
+            if is_best:
+                self.best_val_metric = val_metrics["existence_f1"]
+                self.best_epoch = epoch
+
+            if (epoch + 1) % self.save_every == 0 or is_best:
+                self.save_checkpoint(epoch, is_best)
+
+        self.save_checkpoint(self.epochs - 1, is_best=False, final=True)
+
+        return {
+            "best_val_metric": self.best_val_metric,
+            "best_epoch": self.best_epoch,
+        }
 
     def train_epoch(self) -> dict:
         """Train for one epoch."""
-        self.model.train()
-        self.backbone.eval()  # Keep backbone frozen
+        self.graph_head.train()
 
-        total_loss = 0.0
-        total_existence_loss = 0.0
-        total_assignment_loss = 0.0
+        metrics = {
+            "loss": 0.0,
+            "existence_loss": 0.0,
+            "assignment_loss": 0.0,
+            "refinement_loss": 0.0,
+        }
         num_batches = 0
 
-        pbar = tqdm(self.train_loader, desc=f"Epoch {self.epoch}")
-        for batch in pbar:
-            images = batch['images'].to(self.device)
-            vertices_list = batch['vertices_list']
-            edge_index_list = batch['edge_index_list']
-            edge_existence_list = batch['edge_existence_list']
-            edge_assignment_list = batch['edge_assignment_list']
+        pbar = tqdm(
+            self.train_loader,
+            desc=f"Epoch {self.current_epoch + 1}/{self.epochs}",
+            leave=True,
+        )
 
-            # Extract backbone features (frozen)
+        for batch_idx, batch in enumerate(pbar):
+            images = batch["image"].to(self.device)
+
+            # Get pixel head outputs (frozen)
             with torch.no_grad():
-                features = self.backbone(images)
+                pixel_outputs = self.pixel_model(images, return_features=True)
 
-            # Process each graph in the batch
-            batch_loss = 0.0
-            batch_existence_loss = 0.0
-            batch_assignment_loss = 0.0
+            # Process each sample
+            batch_loss = torch.tensor(0.0, device=self.device)
+            batch_losses = {"existence": 0.0, "assignment": 0.0, "refinement": 0.0}
+            valid_samples = 0
 
-            for i in range(len(vertices_list)):
-                vertices = vertices_list[i].to(self.device)
-                edge_index = edge_index_list[i].to(self.device)
-                edge_existence = edge_existence_list[i].to(self.device)
-                edge_assignment = edge_assignment_list[i].to(self.device)
+            for i in range(images.shape[0]):
+                try:
+                    # Extract candidate graph
+                    seg_pred = pixel_outputs["segmentation"][i].argmax(dim=0).cpu().numpy()
+                    junction_heatmap = pixel_outputs["junction"][i, 0].cpu().numpy()
 
-                if len(vertices) < 2 or edge_index.size(1) == 0:
+                    candidate_graph = self.graph_extractor.extract(
+                        seg_pred,
+                        junction_heatmap,
+                    )
+
+                    if candidate_graph is None or len(candidate_graph.vertices) < 2:
+                        continue
+
+                    vertices = torch.from_numpy(candidate_graph.vertices).float().to(self.device)
+                    edge_index = torch.from_numpy(candidate_graph.edges.T).long().to(self.device)
+
+                    if edge_index.shape[1] == 0:
+                        continue
+
+                    # Get GT graph data (already in pixel coords from dataset)
+                    gt_graph = batch.get("graph")
+                    if gt_graph is None or gt_graph[i] is None:
+                        continue
+
+                    gt_vertices = gt_graph[i]["vertices"].to(self.device)
+                    gt_edges = gt_graph[i]["edges"].T.to(self.device)  # (N, 2) -> (2, E)
+                    gt_assignments = gt_graph[i]["assignments"].to(self.device)
+
+                    # Generate labels
+                    labels = generate_graph_labels(
+                        candidate_vertices=vertices,
+                        candidate_edges=edge_index,
+                        gt_vertices=gt_vertices,
+                        gt_edges=gt_edges,
+                        gt_assignments=gt_assignments,
+                        vertex_match_threshold=self.vertex_match_threshold,
+                    )
+
+                    # Forward through graph head
+                    seg_probs = torch.softmax(pixel_outputs["segmentation"][i:i+1], dim=1)
+
+                    with autocast(device_type=self.device, enabled=self.use_amp):
+                        outputs = self.graph_head(
+                            vertices=vertices,
+                            edge_index=edge_index,
+                            backbone_features=pixel_outputs["features"][i:i+1],
+                            seg_probs=seg_probs,
+                            image_size=self.image_size,
+                        )
+
+                        # Compute loss
+                        targets = {
+                            "edge_existence": labels.edge_existence,
+                            "edge_assignment": labels.edge_assignment,
+                            "vertex_offset": labels.vertex_offset,
+                            "vertex_matched": labels.vertex_matched,
+                        }
+                        loss_dict = self.criterion(outputs, targets)
+
+                    batch_loss = batch_loss + loss_dict["loss"]
+                    batch_losses["existence"] += loss_dict["existence_loss"].item()
+                    batch_losses["assignment"] += loss_dict["assignment_loss"].item()
+                    batch_losses["refinement"] += loss_dict["refinement_loss"].item()
+                    valid_samples += 1
+
+                except Exception as e:
+                    # Skip problematic samples
+                    if batch_idx == 0 and i == 0:
+                        print(f"Warning: Sample failed: {e}")
                     continue
 
-                # Forward pass
-                feat = features[i:i+1]  # (1, C, H, W)
-                verts = vertices.unsqueeze(0)  # (1, N, 2)
+            if valid_samples == 0:
+                continue
 
-                outputs = self.model(feat, verts, edge_index)
+            # Average loss
+            batch_loss = batch_loss / valid_samples
 
-                # Compute loss
-                targets = {
-                    'edge_existence': edge_existence,
-                    'edge_assignment': edge_assignment,
-                }
-                losses = self.loss_fn(outputs, targets)
-
-                batch_loss += losses['loss']
-                batch_existence_loss += losses['existence_loss'].item()
-                batch_assignment_loss += losses['assignment_loss'].item()
-
-            if batch_loss > 0:
-                # Backward pass
-                self.optimizer.zero_grad()
+            # Backward
+            self.optimizer.zero_grad()
+            if self.scaler is not None:
+                self.scaler.scale(batch_loss).backward()
+                self.scaler.unscale_(self.optimizer)
+                nn.utils.clip_grad_norm_(self.graph_head.parameters(), self.max_grad_norm)
+                self.scaler.step(self.optimizer)
+                self.scaler.update()
+            else:
                 batch_loss.backward()
-                torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
+                nn.utils.clip_grad_norm_(self.graph_head.parameters(), self.max_grad_norm)
                 self.optimizer.step()
 
-                total_loss += batch_loss.item()
-                total_existence_loss += batch_existence_loss
-                total_assignment_loss += batch_assignment_loss
-                num_batches += 1
+            if self.step_per_batch:
+                self.scheduler.step()
+
+            # Update metrics
+            metrics["loss"] += batch_loss.item()
+            metrics["existence_loss"] += batch_losses["existence"] / valid_samples
+            metrics["assignment_loss"] += batch_losses["assignment"] / valid_samples
+            metrics["refinement_loss"] += batch_losses["refinement"] / valid_samples
+            num_batches += 1
 
             pbar.set_postfix({
-                'loss': f"{total_loss / max(num_batches, 1):.4f}",
-                'exist': f"{total_existence_loss / max(num_batches, 1):.4f}",
-                'assign': f"{total_assignment_loss / max(num_batches, 1):.4f}",
+                "loss": f"{batch_loss.item():.4f}",
+                "lr": f"{self.optimizer.param_groups[0]['lr']:.2e}",
             })
 
-        return {
-            'loss': total_loss / max(num_batches, 1),
-            'existence_loss': total_existence_loss / max(num_batches, 1),
-            'assignment_loss': total_assignment_loss / max(num_batches, 1),
-        }
+            if self.use_wandb and (batch_idx + 1) % self.log_every == 0:
+                wandb.log({
+                    "train/loss": batch_loss.item(),
+                    "train/existence_loss": batch_losses["existence"] / valid_samples,
+                    "train/assignment_loss": batch_losses["assignment"] / valid_samples,
+                    "train/refinement_loss": batch_losses["refinement"] / valid_samples,
+                    "train/lr": self.optimizer.param_groups[0]["lr"],
+                })
+
+        if not self.step_per_batch:
+            self.scheduler.step()
+
+        if num_batches > 0:
+            for key in metrics:
+                metrics[key] /= num_batches
+
+        return metrics
 
     @torch.no_grad()
     def validate(self) -> dict:
         """Run validation."""
-        self.model.eval()
-        self.backbone.eval()
+        self.graph_head.eval()
 
-        all_metrics = {
-            'existence_precision': [],
-            'existence_recall': [],
-            'existence_f1': [],
-            'existence_accuracy': [],
-            'assignment_accuracy': [],
-        }
+        all_metrics = []
 
-        total_loss = 0.0
-        num_samples = 0
+        for batch in tqdm(self.val_loader, desc="Validating", leave=False):
+            images = batch["image"].to(self.device)
+            pixel_outputs = self.pixel_model(images, return_features=True)
 
-        for batch in tqdm(self.val_loader, desc="Validation"):
-            images = batch['images'].to(self.device)
-            vertices_list = batch['vertices_list']
-            edge_index_list = batch['edge_index_list']
-            edge_existence_list = batch['edge_existence_list']
-            edge_assignment_list = batch['edge_assignment_list']
+            for i in range(images.shape[0]):
+                try:
+                    seg_pred = pixel_outputs["segmentation"][i].argmax(dim=0).cpu().numpy()
+                    junction_heatmap = pixel_outputs["junction"][i, 0].cpu().numpy()
 
-            # Extract backbone features
-            features = self.backbone(images)
+                    candidate_graph = self.graph_extractor.extract(
+                        seg_pred,
+                        junction_heatmap,
+                    )
 
-            for i in range(len(vertices_list)):
-                vertices = vertices_list[i].to(self.device)
-                edge_index = edge_index_list[i].to(self.device)
-                edge_existence = edge_existence_list[i].to(self.device)
-                edge_assignment = edge_assignment_list[i].to(self.device)
+                    if candidate_graph is None or len(candidate_graph.vertices) < 2:
+                        continue
 
-                if len(vertices) < 2 or edge_index.size(1) == 0:
+                    vertices = torch.from_numpy(candidate_graph.vertices).float().to(self.device)
+                    edge_index = torch.from_numpy(candidate_graph.edges.T).long().to(self.device)
+
+                    if edge_index.shape[1] == 0:
+                        continue
+
+                    gt_graph = batch.get("graph")
+                    if gt_graph is None or gt_graph[i] is None:
+                        continue
+
+                    gt_vertices = gt_graph[i]["vertices"].to(self.device)
+                    gt_edges = gt_graph[i]["edges"].T.to(self.device)  # (N, 2) -> (2, E)
+                    gt_assignments = gt_graph[i]["assignments"].to(self.device)
+
+                    labels = generate_graph_labels(
+                        candidate_vertices=vertices,
+                        candidate_edges=edge_index,
+                        gt_vertices=gt_vertices,
+                        gt_edges=gt_edges,
+                        gt_assignments=gt_assignments,
+                        vertex_match_threshold=self.vertex_match_threshold,
+                    )
+
+                    seg_probs = torch.softmax(pixel_outputs["segmentation"][i:i+1], dim=1)
+
+                    outputs = self.graph_head(
+                        vertices=vertices,
+                        edge_index=edge_index,
+                        backbone_features=pixel_outputs["features"][i:i+1],
+                        seg_probs=seg_probs,
+                        image_size=self.image_size,
+                    )
+
+                    targets = {
+                        "edge_existence": labels.edge_existence,
+                        "edge_assignment": labels.edge_assignment,
+                        "vertex_offset": labels.vertex_offset,
+                        "vertex_matched": labels.vertex_matched,
+                    }
+
+                    sample_metrics = compute_graph_metrics(outputs, targets)
+                    all_metrics.append(sample_metrics)
+
+                except Exception:
                     continue
 
-                # Forward pass
-                feat = features[i:i+1]
-                verts = vertices.unsqueeze(0)
+        if len(all_metrics) == 0:
+            return {
+                "existence_precision": 0.0,
+                "existence_recall": 0.0,
+                "existence_f1": 0.0,
+                "assignment_accuracy": 0.0,
+                "mean_offset_error": 0.0,
+            }
 
-                outputs = self.model(feat, verts, edge_index)
-
-                # Compute loss
-                targets = {
-                    'edge_existence': edge_existence,
-                    'edge_assignment': edge_assignment,
-                }
-                losses = self.loss_fn(outputs, targets)
-                total_loss += losses['loss'].item()
-
-                # Compute metrics
-                metrics = compute_graph_metrics(outputs, targets)
-                for key, value in metrics.items():
-                    all_metrics[key].append(value)
-
-                num_samples += 1
-
-        # Average metrics
-        avg_metrics = {
-            key: np.mean(values) if values else 0.0
-            for key, values in all_metrics.items()
-        }
-        avg_metrics['loss'] = total_loss / max(num_samples, 1)
+        avg_metrics = {}
+        for key in all_metrics[0]:
+            avg_metrics[key] = sum(m[key] for m in all_metrics) / len(all_metrics)
 
         return avg_metrics
 
-    def train(self, num_epochs: int):
-        """Full training loop."""
-        print(f"\nTraining for {num_epochs} epochs...")
-        print(f"Train samples: {len(self.train_loader.dataset)}")
-        print(f"Val samples: {len(self.val_loader.dataset)}")
+    def _log_epoch(self, epoch: int, train_metrics: dict, val_metrics: dict):
+        """Log epoch metrics."""
+        print(
+            f"\nEpoch {epoch + 1}/{self.epochs} - "
+            f"Train Loss: {train_metrics['loss']:.4f} - "
+            f"Val Exist F1: {val_metrics['existence_f1']:.4f} - "
+            f"Val Assign Acc: {val_metrics['assignment_accuracy']:.4f}"
+        )
 
-        for epoch in range(num_epochs):
-            self.epoch = epoch + 1
+        if self.use_wandb:
+            log_dict = {"epoch": epoch}
+            for key, value in train_metrics.items():
+                log_dict[f"train/{key}"] = value
+            for key, value in val_metrics.items():
+                log_dict[f"val/{key}"] = value
+            wandb.log(log_dict)
 
-            # Train
-            train_metrics = self.train_epoch()
-            print(f"\nEpoch {self.epoch} Train: loss={train_metrics['loss']:.4f}")
-
-            # Validate
-            val_metrics = self.validate()
-            print(f"Epoch {self.epoch} Val: loss={val_metrics['loss']:.4f}, "
-                  f"F1={val_metrics['existence_f1']:.4f}, "
-                  f"assign_acc={val_metrics['assignment_accuracy']:.4f}")
-
-            # Update scheduler
-            self.scheduler.step()
-
-            # Save checkpoint
-            if val_metrics['existence_f1'] > self.best_val_f1:
-                self.best_val_f1 = val_metrics['existence_f1']
-                self.save_checkpoint('best_graph_head.pt', val_metrics)
-                print(f"  New best model! F1={self.best_val_f1:.4f}")
-
-            # Save periodic checkpoint
-            if self.epoch % 10 == 0:
-                self.save_checkpoint(f'graph_head_epoch_{self.epoch}.pt', val_metrics)
-
-        # Save final checkpoint
-        self.save_checkpoint('final_graph_head.pt', val_metrics)
-        print(f"\nTraining complete! Best F1: {self.best_val_f1:.4f}")
-
-    def save_checkpoint(self, filename: str, metrics: dict):
+    def save_checkpoint(self, epoch: int, is_best: bool = False, final: bool = False):
         """Save model checkpoint."""
         checkpoint = {
-            'epoch': self.epoch,
-            'model_state_dict': self.model.state_dict(),
-            'optimizer_state_dict': self.optimizer.state_dict(),
-            'scheduler_state_dict': self.scheduler.state_dict(),
-            'best_val_f1': self.best_val_f1,
-            'metrics': metrics,
+            "epoch": epoch,
+            "graph_head_state_dict": self.graph_head.state_dict(),
+            "optimizer_state_dict": self.optimizer.state_dict(),
+            "scheduler_state_dict": self.scheduler.state_dict(),
+            "best_val_metric": self.best_val_metric,
+            "best_epoch": self.best_epoch,
+            "config": self.config,
         }
-        torch.save(checkpoint, self.checkpoint_dir / filename)
+
+        if self.scaler is not None:
+            checkpoint["scaler_state_dict"] = self.scaler.state_dict()
+
+        # Save regular checkpoint
+        if not final:
+            path = self.checkpoint_dir / f"graph_epoch_{epoch + 1}.pt"
+            torch.save(checkpoint, path)
+            print(f"Saved checkpoint: {path}")
+
+        # Save latest
+        torch.save(checkpoint, self.checkpoint_dir / "graph_latest.pt")
+
+        # Save best
+        if is_best:
+            torch.save(checkpoint, self.checkpoint_dir / "graph_best.pt")
+            print(f"New best model (epoch {epoch + 1}, F1: {self.best_val_metric:.4f})")
+
+        # Save final
+        if final:
+            torch.save(checkpoint, self.checkpoint_dir / "graph_final.pt")
+
+    def load_checkpoint(self, path: str):
+        """Load from checkpoint."""
+        checkpoint = torch.load(path, map_location=self.device)
+        self.graph_head.load_state_dict(checkpoint["graph_head_state_dict"])
+        self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        self.best_val_metric = checkpoint["best_val_metric"]
+        self.best_epoch = checkpoint["best_epoch"]
+        self.current_epoch = checkpoint["epoch"] + 1
+
+        if self.scaler and "scaler_state_dict" in checkpoint:
+            self.scaler.load_state_dict(checkpoint["scaler_state_dict"])
+
+        print(f"Loaded checkpoint from epoch {checkpoint['epoch'] + 1}")
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Train graph head")
+    parser = argparse.ArgumentParser(description="Train Graph Head (Phase 2)")
     parser.add_argument(
-        "--fold-dir",
+        "--pixel-checkpoint",
         type=str,
         required=True,
-        help="Directory containing .fold files",
+        help="Path to pixel head checkpoint",
     )
     parser.add_argument(
-        "--backbone-checkpoint",
+        "--data-dir",
         type=str,
-        default=None,
-        help="Path to pixel head checkpoint (for backbone weights)",
+        required=True,
+        help="Data directory with images/ and fold/ subdirectories",
     )
     parser.add_argument(
         "--image-size",
         type=int,
         default=512,
-        help="Image size",
+        help="Image size (default: 512)",
     )
     parser.add_argument(
         "--batch-size",
         type=int,
         default=4,
-        help="Batch size",
+        help="Batch size (default: 4)",
     )
     parser.add_argument(
         "--epochs",
         type=int,
-        default=50,
-        help="Number of training epochs",
+        default=30,
+        help="Number of epochs (default: 30)",
     )
     parser.add_argument(
         "--lr",
         type=float,
-        default=1e-4,
-        help="Learning rate",
+        default=5e-4,
+        help="Learning rate (default: 5e-4)",
     )
     parser.add_argument(
-        "--hidden-dim",
+        "--node-dim",
         type=int,
-        default=256,
-        help="GNN hidden dimension",
+        default=128,
+        help="Node feature dimension (default: 128)",
+    )
+    parser.add_argument(
+        "--edge-dim",
+        type=int,
+        default=128,
+        help="Edge feature dimension (default: 128)",
     )
     parser.add_argument(
         "--num-gnn-layers",
         type=int,
-        default=3,
-        help="Number of GNN layers",
-    )
-    parser.add_argument(
-        "--negative-ratio",
-        type=float,
-        default=1.0,
-        help="Ratio of negative to positive edges",
+        default=4,
+        help="Number of GNN layers (default: 4)",
     )
     parser.add_argument(
         "--checkpoint-dir",
         type=str,
-        default="checkpoints/graph_head",
-        help="Directory to save checkpoints",
+        default="checkpoints/graph",
+        help="Checkpoint directory (default: checkpoints/graph)",
     )
     parser.add_argument(
-        "--device",
+        "--resume",
         type=str,
-        default="cuda" if torch.cuda.is_available() else "cpu",
-        help="Device to use",
+        default=None,
+        help="Resume from checkpoint",
+    )
+    parser.add_argument(
+        "--num-workers",
+        type=int,
+        default=4,
+        help="DataLoader workers (default: 4)",
+    )
+    parser.add_argument(
+        "--no-amp",
+        action="store_true",
+        help="Disable automatic mixed precision",
+    )
+    parser.add_argument(
+        "--wandb",
+        action="store_true",
+        help="Enable Weights & Biases logging",
+    )
+    parser.add_argument(
+        "--wandb-project",
+        type=str,
+        default="cp-detector-graph",
+        help="W&B project name",
     )
     args = parser.parse_args()
 
-    print(f"Device: {args.device}")
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"Device: {device}")
+
+    # Load pixel model
+    print(f"\nLoading pixel model from: {args.pixel_checkpoint}")
+    pixel_checkpoint = torch.load(args.pixel_checkpoint, map_location=device, weights_only=False)
+
+    pixel_model = CreasePatternDetector(
+        backbone="hrnet_w32",
+        num_seg_classes=5,
+    )
+    pixel_model.load_state_dict(pixel_checkpoint["model_state_dict"])
+    pixel_model.eval()
+    print("Pixel model loaded")
+
+    # Get backbone output channels
+    with torch.no_grad():
+        dummy = torch.zeros(1, 3, args.image_size, args.image_size)
+        dummy_out = pixel_model(dummy, return_features=True)
+        backbone_channels = dummy_out["features"].shape[1]
+        print(f"Backbone channels: {backbone_channels}")
+
+    # Create graph head
+    print("\nCreating graph head...")
+    graph_head = GraphHead(
+        backbone_channels=backbone_channels,
+        node_dim=args.node_dim,
+        edge_dim=args.edge_dim,
+        num_gnn_layers=args.num_gnn_layers,
+        num_classes=5,  # M, V, B, U, BG
+    )
+    print(f"Graph head parameters: {sum(p.numel() for p in graph_head.parameters()):,}")
 
     # Create datasets
-    print(f"\nLoading dataset from: {args.fold_dir}")
-    train_dataset = GraphDataset(
-        fold_dir=args.fold_dir,
+    print(f"\nLoading data from: {args.data_dir}")
+    data_dir = Path(args.data_dir)
+
+    # Train dataset
+    train_dataset = CreasePatternDataset(
+        fold_dir=data_dir / "fold",
+        image_dir=data_dir / "images",
         image_size=args.image_size,
-        negative_ratio=args.negative_ratio,
-        augment_vertices=True,
         split="train",
     )
-    val_dataset = GraphDataset(
-        fold_dir=args.fold_dir,
+
+    # Validation dataset
+    val_dataset = CreasePatternDataset(
+        fold_dir=data_dir / "fold",
+        image_dir=data_dir / "images",
         image_size=args.image_size,
-        negative_ratio=args.negative_ratio,
-        augment_vertices=False,
         split="val",
     )
+
+    print(f"Train samples: {len(train_dataset)}")
+    print(f"Val samples: {len(val_dataset)}")
 
     train_loader = DataLoader(
         train_dataset,
         batch_size=args.batch_size,
         shuffle=True,
-        num_workers=4,
-        collate_fn=GraphDataset.collate_fn,
+        num_workers=args.num_workers,
+        collate_fn=collate_fn,
+        pin_memory=True,
     )
     val_loader = DataLoader(
         val_dataset,
         batch_size=args.batch_size,
         shuffle=False,
-        num_workers=4,
-        collate_fn=GraphDataset.collate_fn,
+        num_workers=args.num_workers,
+        collate_fn=collate_fn,
+        pin_memory=True,
     )
 
-    # Create backbone (for feature extraction)
-    print("\nCreating backbone...")
-    backbone = HRNetBackbone(
-        variant="hrnet_w32",
-        pretrained=True,
-        output_stride=4,
-    ).to(args.device)
-
-    # Load backbone weights from pixel head checkpoint if provided
-    if args.backbone_checkpoint:
-        print(f"Loading backbone from: {args.backbone_checkpoint}")
-        checkpoint = torch.load(args.backbone_checkpoint, map_location=args.device, weights_only=False)
-        # Extract backbone weights from full model
-        backbone_state = {}
-        for key, value in checkpoint['model_state_dict'].items():
-            if key.startswith('backbone.'):
-                backbone_state[key.replace('backbone.', '')] = value
-        backbone.load_state_dict(backbone_state)
-
-    # Freeze backbone
-    for param in backbone.parameters():
-        param.requires_grad = False
-    backbone.eval()
-
-    # Create graph head
-    print("\nCreating graph head...")
-    model = GraphHead(
-        in_channels=backbone.out_channels,
-        vertex_dim=128,
-        hidden_dim=args.hidden_dim,
-        num_gnn_layers=args.num_gnn_layers,
-        num_heads=4,
-        dropout=0.1,
-        num_classes=4,
-    ).to(args.device)
-
-    print(f"Graph head parameters: {sum(p.numel() for p in model.parameters()):,}")
-
-    # Create optimizer and scheduler
-    optimizer = AdamW(model.parameters(), lr=args.lr, weight_decay=0.01)
-    scheduler = CosineAnnealingLR(optimizer, T_max=args.epochs, eta_min=1e-6)
-
-    # Create loss function
-    loss_fn = GraphLoss(
-        existence_weight=1.0,
-        assignment_weight=1.0,
-    )
+    # Config
+    config = {
+        "epochs": args.epochs,
+        "learning_rate": args.lr,
+        "batch_size": args.batch_size,
+        "image_size": args.image_size,
+        "node_dim": args.node_dim,
+        "edge_dim": args.edge_dim,
+        "num_gnn_layers": args.num_gnn_layers,
+        "backbone_channels": backbone_channels,
+        "checkpoint_dir": args.checkpoint_dir,
+        "amp": not args.no_amp,
+        "use_wandb": args.wandb,
+        "wandb_project": args.wandb_project,
+        "scheduler": "onecycle",
+        "existence_weight": 1.0,
+        "assignment_weight": 1.0,
+        "refinement_weight": 0.5,
+        "vertex_match_threshold": 8.0,
+        "junction_threshold": 0.3,
+        "junction_min_distance": 5,
+    }
 
     # Create trainer
-    trainer = GraphTrainer(
-        model=model,
-        backbone=backbone,
+    trainer = GraphHeadTrainer(
+        pixel_model=pixel_model,
+        graph_head=graph_head,
         train_loader=train_loader,
         val_loader=val_loader,
-        optimizer=optimizer,
-        scheduler=scheduler,
-        loss_fn=loss_fn,
-        device=args.device,
-        checkpoint_dir=args.checkpoint_dir,
+        config=config,
+        device=device,
     )
 
+    # Resume if specified
+    if args.resume:
+        trainer.load_checkpoint(args.resume)
+
     # Train
-    trainer.train(args.epochs)
+    results = trainer.train()
+
+    print(f"\nTraining complete!")
+    print(f"Best F1: {results['best_val_metric']:.4f} at epoch {results['best_epoch'] + 1}")
 
 
 if __name__ == "__main__":

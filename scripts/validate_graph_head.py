@@ -509,52 +509,56 @@ def test_with_real_data(checkpoint_path: str, fold_path: str = None):
 
     # Load pixel head model
     from src.models import CreasePatternDetector
-    from src.postprocessing.graph_extraction import CandidateGraphExtractor
+    from src.postprocessing.graph_extraction import GraphExtractor
 
     print("\n  Loading pixel head model...")
     checkpoint = torch.load(checkpoint_path, map_location=device)
 
     model = CreasePatternDetector(
-        backbone_name="hrnet_w32",
+        backbone="hrnet_w32",
         num_seg_classes=5,
     ).to(device)
     model.load_state_dict(checkpoint['model_state_dict'])
     model.eval()
     print("  ✓ Model loaded")
 
-    # Create graph head
+    # Create graph head (960 backbone channels from HRNet, 5 seg classes)
     graph_head = GraphHead(
-        backbone_channels=480,
+        backbone_channels=960,  # HRNet-W32 outputs 960 channels with return_features=True
         node_dim=128,
         edge_dim=128,
         num_gnn_layers=4,
+        num_classes=5,  # Match pixel head seg classes
     ).to(device)
     print("  ✓ Graph head created")
 
     # Create graph extractor
-    extractor = CandidateGraphExtractor(
+    from src.postprocessing.graph_extraction import GraphExtractorConfig
+    config = GraphExtractorConfig(
         junction_threshold=0.3,
         junction_min_distance=5,
     )
+    extractor = GraphExtractor(config)
 
     # Create dummy image
     print("\n  Running forward pass with dummy image...")
     dummy_image = torch.randn(1, 3, 512, 512).to(device)
 
     with torch.no_grad():
-        pixel_outputs = model(dummy_image)
+        pixel_outputs = model(dummy_image, return_features=True)
 
     print(f"    Segmentation: {pixel_outputs['segmentation'].shape}")
     print(f"    Junction: {pixel_outputs['junction'].shape}")
     print(f"    Features: {pixel_outputs['features'].shape}")
 
     # Extract candidate graph
-    seg_probs = torch.softmax(pixel_outputs['segmentation'], dim=1)
-    junction_heatmap = pixel_outputs['junction']
+    # Convert logits to class predictions
+    seg_pred = pixel_outputs['segmentation'][0].argmax(dim=0).cpu().numpy()
+    junction_heatmap = pixel_outputs['junction'][0, 0].cpu().numpy()
 
     candidate_graph = extractor.extract(
-        seg_probs[0].cpu().numpy(),
-        junction_heatmap[0, 0].cpu().numpy(),
+        seg_pred,
+        junction_heatmap,
     )
 
     if candidate_graph is None or len(candidate_graph.vertices) == 0:
@@ -569,6 +573,9 @@ def test_with_real_data(checkpoint_path: str, fold_path: str = None):
     # Run through graph head
     vertices = torch.from_numpy(candidate_graph.vertices).float().to(device)
     edge_index = torch.from_numpy(candidate_graph.edges.T).long().to(device)
+
+    # Get seg probs for graph head
+    seg_probs = torch.softmax(pixel_outputs['segmentation'], dim=1)
 
     outputs = graph_head(
         vertices=vertices,
