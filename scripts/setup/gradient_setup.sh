@@ -18,7 +18,7 @@ python -c "import torch; print(f'CUDA available: {torch.cuda.is_available()}'); 
 # Quick sanity check
 echo ""
 echo "=== Running Quick Sanity Check ==="
-python scripts/sanity_check.py --fold-dir full_train --quick
+python scripts/validation/sanity_check.py --fold-dir full_train --quick
 
 echo ""
 echo "=== Setup Complete! ==="
