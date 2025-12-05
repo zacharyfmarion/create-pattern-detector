@@ -161,7 +161,8 @@ class NodeUpdateLayer(nn.Module):
             return torch.zeros(num_nodes, values.shape[1], dtype=dtype, device=device)
 
         # Average scores across heads for simplicity
-        scores_mean = scores.mean(dim=1)  # (E,)
+        # Cast to match dtype for AMP compatibility with scatter ops
+        scores_mean = scores.mean(dim=1).to(dtype)  # (E,)
 
         # Compute max per destination for numerical stability
         max_scores = torch.full((num_nodes,), float('-inf'), dtype=dtype, device=device)
@@ -181,14 +182,14 @@ class NodeUpdateLayer(nn.Module):
 
         # Sum of exp_scores per destination
         sum_exp = torch.zeros(num_nodes, dtype=dtype, device=device)
-        sum_exp.scatter_add_(0, indices, exp_scores)
+        sum_exp.scatter_add_(0, indices, exp_scores.to(dtype))
         sum_exp_expanded = sum_exp[indices] + 1e-6  # (E,)
 
         attn_weights = exp_scores / sum_exp_expanded  # (E,)
         attn_weights = self.dropout(attn_weights)
 
-        # Weighted values
-        weighted_values = values * attn_weights.unsqueeze(1)  # (E, node_dim)
+        # Weighted values - ensure dtype matches for scatter
+        weighted_values = (values * attn_weights.unsqueeze(1)).to(dtype)  # (E, node_dim)
 
         # Aggregate by destination
         output = torch.zeros(num_nodes, values.shape[1], dtype=dtype, device=device)
