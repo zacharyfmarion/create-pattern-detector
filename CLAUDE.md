@@ -17,14 +17,22 @@ pip install -e .
 
 ### Training
 ```bash
-python scripts/train.py --fold-dir full_train --epochs 5 --save-every 1 --batch-size 8 --image-size 512 --wandb --wandb-project cp-detector --resume checkpoints/<checkpoint>.pt
+python scripts/training/train_pixel_head.py --fold-dir full_train --epochs 5 --save-every 1 --batch-size 8 --image-size 512 --wandb --wandb-project cp-detector --resume checkpoints/<checkpoint>.pt
+
+python scripts/training/train_graph_head.py \
+   --pixel-checkpoint checkpoints/checkpoint_epoch_8.pt \
+   --data-dir data/training/full-training \
+   --epochs 30 \
+   --batch-size 4 \
+   --lr 5e-4 \
+   --checkpoint-dir checkpoints/graph
 ```
 
 ### Validation/Testing
 ```bash
-python scripts/validate_pipeline.py --fold-dir data/output/synthetic/raw/tier-a
-python scripts/test_graph_extraction.py
-python scripts/sanity_check.py
+python scripts/validation/validate_pipeline.py --fold-dir data/output/synthetic/raw/tier-a
+python scripts/debug/test_graph_extraction.py
+python scripts/validation/sanity_check.py
 ```
 
 ### Data Generation (TypeScript/Bun)

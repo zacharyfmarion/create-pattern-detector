@@ -3,14 +3,14 @@
 Visualize model predictions vs ground truth.
 
 Usage:
-    python scripts/visualize_predictions.py --checkpoint checkpoints/best_model.pt --fold-dir data_small --num-samples 5
+    python scripts/visualize/predictions.py --checkpoint checkpoints/best_model.pt --fold-dir data_small --num-samples 5
 """
 
 import argparse
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 import matplotlib.pyplot as plt
 import numpy as np

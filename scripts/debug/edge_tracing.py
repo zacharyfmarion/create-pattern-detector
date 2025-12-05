@@ -2,11 +2,12 @@
 """Debug edge tracing to understand why edges are missing."""
 
 import sys
-sys.path.insert(0, '/Users/zacharymarion/src/cp-custom-detector')
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 import numpy as np
 import matplotlib.pyplot as plt
-from pathlib import Path
 
 from src.data.fold_parser import FOLDParser, transform_coords
 from src.data.annotations import GroundTruthGenerator
@@ -158,7 +159,7 @@ def analyze_skeleton_connectivity(fold_path: Path, image_size: int = 512):
     plt.tight_layout()
 
     # Save
-    output_dir = Path('/Users/zacharymarion/src/cp-custom-detector/visualizations/edge_tracing_debug')
+    output_dir = Path('str(Path(__file__).parent.parent.parent)/visualizations/edge_tracing_debug')
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / f'{fold_path.stem}_debug.png'
     plt.savefig(output_path, dpi=150)
@@ -173,7 +174,7 @@ def analyze_skeleton_connectivity(fold_path: Path, image_size: int = 512):
 
 if __name__ == '__main__':
     # Test on a few files
-    data_dir = Path('/Users/zacharymarion/src/cp-custom-detector/data/training/full-training/fold')
+    data_dir = Path('str(Path(__file__).parent.parent.parent)/data/training/full-training/fold')
 
     # Get files and sort by vertex count to pick simple/medium/complex examples
     fold_files = sorted(data_dir.glob('*.fold'))[:20]  # Check first 20

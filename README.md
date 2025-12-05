@@ -15,11 +15,11 @@ pip install -e .
 ### Validate Pipeline
 
 ```bash
-python scripts/validate_pipeline.py --fold-dir data/output/synthetic/raw/tier-a
+python scripts/validation/validate_pipeline.py --fold-dir data/output/synthetic/raw/tier-a
 ```
 
 ### Train Model
 
 ```bash
-python scripts/train.py --fold-dir data/output/synthetic/raw/tier-a
+python scripts/training/train_pixel_head.py --fold-dir data/output/synthetic/raw/tier-a
 ```

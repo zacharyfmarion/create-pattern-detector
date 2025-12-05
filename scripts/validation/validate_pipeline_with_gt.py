@@ -9,14 +9,14 @@ This script tests the theoretical upper bound of the pipeline by:
 4. Computing metrics (vertex/edge precision/recall, assignment accuracy)
 
 Usage:
-    python scripts/validate_pipeline_with_gt.py --fold-dir data/training/full-training/fold
+    python scripts/validation/validate_pipeline_with_gt.py --fold-dir data/training/full-training/fold
 """
 
 import argparse
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 import numpy as np
 from typing import Dict, List, Tuple, Optional

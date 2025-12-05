@@ -7,7 +7,7 @@ M/V/B/U assignments, and vertex refinement using candidate graphs
 extracted from frozen pixel head outputs.
 
 Usage:
-    python scripts/train_graph_head.py \
+    python scripts/training/train_graph_head.py \
         --pixel-checkpoint checkpoints/checkpoint_epoch_8.pt \
         --data-dir data/training/full-training \
         --epochs 30
@@ -17,7 +17,7 @@ import argparse
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 import torch
 import torch.nn as nn

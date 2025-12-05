@@ -3,8 +3,8 @@
 Training script for crease pattern detection.
 
 Usage:
-    python scripts/train.py --fold-dir data/output/synthetic/raw/tier-a --epochs 50
-    python scripts/train.py --config configs/base.yaml
+    python scripts/training/train_pixel_head.py --fold-dir data/output/synthetic/raw/tier-a --epochs 50
+    python scripts/training/train_pixel_head.py --config configs/base.yaml
 """
 
 import argparse
@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 
 # Add src to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 import torch
 import yaml
@@ -254,7 +254,7 @@ def main():
     print(f"Best validation IoU: {results['best_val_metric']:.4f} (epoch {results['best_epoch'] + 1})")
     print(f"Checkpoints saved to: {config['checkpoint_dir']}")
     print(f"\nTo resume training from latest checkpoint:")
-    print(f"  python scripts/train.py --fold-dir {config['fold_dir']} --resume {config['checkpoint_dir']}/latest.pt --epochs <total_epochs>")
+    print(f"  python scripts/training/train_pixel_head.py --fold-dir {config['fold_dir']} --resume {config['checkpoint_dir']}/latest.pt --epochs <total_epochs>")
 
 
 if __name__ == "__main__":

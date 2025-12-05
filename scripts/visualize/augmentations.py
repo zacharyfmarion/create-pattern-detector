@@ -3,14 +3,14 @@
 Visualize data augmentations to validate they work correctly.
 
 Usage:
-    python scripts/visualize_augmentations.py --fold-dir data/output/synthetic/raw/tier-a-small --num-samples 3
+    python scripts/visualize/augmentations.py --fold-dir data/output/synthetic/raw/tier-a-small --num-samples 3
 """
 
 import argparse
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 import matplotlib.pyplot as plt
 import numpy as np

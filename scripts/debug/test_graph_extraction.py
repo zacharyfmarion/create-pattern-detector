@@ -3,14 +3,14 @@
 Test graph extraction on model predictions.
 
 Usage:
-    python scripts/test_graph_extraction.py --checkpoint checkpoints/best_model.pt --fold-dir data_small
+    python scripts/debug/test_graph_extraction.py --checkpoint checkpoints/best_model.pt --fold-dir data_small
 """
 
 import argparse
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 import matplotlib.pyplot as plt
 import numpy as np

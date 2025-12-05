@@ -5,7 +5,7 @@ Incremental validation script for Graph Head.
 Run this before full training to catch issues early.
 
 Usage:
-    python scripts/validate_graph_head.py --checkpoint checkpoints/best_model.pt
+    python scripts/validation/validate_graph_head.py --checkpoint checkpoints/best_model.pt
 """
 
 import argparse
@@ -16,7 +16,7 @@ from pathlib import Path
 import sys
 
 # Add src to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from src.models.graph.layers import EdgeUpdateLayer, NodeUpdateLayer, GraphConvBlock, GraphNetwork
 from src.models.graph.features import NodeFeatureExtractor, EdgeFeatureExtractor

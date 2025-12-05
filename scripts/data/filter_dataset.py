@@ -8,7 +8,7 @@ This script analyzes FOLD files and filters out those with:
 3. Other quality issues
 
 Usage:
-    python scripts/filter_dataset.py --fold-dir data/training/full-training/fold --output-dir data/training/filtered
+    python scripts/data/filter_dataset.py --fold-dir data/training/full-training/fold --output-dir data/training/filtered
 """
 
 import argparse
@@ -19,7 +19,7 @@ from pathlib import Path
 from dataclasses import dataclass
 from typing import List, Tuple, Optional
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 import numpy as np
 from tqdm import tqdm

@@ -11,7 +11,7 @@ Checks:
 6. Gradient health - no vanishing/exploding gradients?
 
 Usage:
-    python scripts/sanity_check.py --fold-dir data/output/synthetic/raw/tier-a
+    python scripts/validation/sanity_check.py --fold-dir data/output/synthetic/raw/tier-a
 """
 
 import argparse
@@ -19,7 +19,7 @@ import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 import numpy as np
 import torch
