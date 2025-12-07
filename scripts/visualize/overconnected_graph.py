@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Visualize pixel head predictions on raw images (no ground truth required).
+Visualize the overconnected graph extracted from pixel head predictions.
 
 Usage:
-    python scripts/visualize/pixel_head_predictions.py --checkpoint checkpoints/checkpoint_epoch_8.pt --image-dir data/output/scraped-images --num-samples 5
+    python scripts/visualize/overconnected_graph.py --checkpoint checkpoints/pixel_head_attempt_2/checkpoint_epoch_10.pt --image-dir /tmp/maypel_benchmark --num-samples 3
 """
 
 import argparse
@@ -19,30 +19,7 @@ from PIL import Image
 from torchvision import transforms
 
 from src.models import CreasePatternDetector
-
-
-# Color map for segmentation classes
-# BG=0 (white), M=1 (red), V=2 (blue), B=3 (black), U=4 (gray)
-SEG_COLORS = np.array(
-    [
-        [255, 255, 255],  # Background - white
-        [255, 0, 0],  # M - red
-        [0, 0, 255],  # V - blue
-        [0, 0, 0],  # B - black
-        [128, 128, 128],  # U - gray
-    ],
-    dtype=np.uint8,
-)
-
-
-def seg_to_color(seg: np.ndarray) -> np.ndarray:
-    """Convert segmentation mask to RGB image."""
-    h, w = seg.shape
-    rgb = np.zeros((h, w, 3), dtype=np.uint8)
-    for c in range(5):
-        mask = seg == c
-        rgb[mask] = SEG_COLORS[c]
-    return rgb
+from src.postprocessing.graph_extraction import GraphExtractor, GraphExtractorConfig
 
 
 def load_and_preprocess_image(
@@ -63,80 +40,78 @@ def load_and_preprocess_image(
     return tensor, original_np
 
 
-def visualize_sample(
+def visualize_graph(
     image: np.ndarray,
     pred_seg: np.ndarray,
-    pred_junction: np.ndarray,
-    pred_orientation: np.ndarray,
+    graph,
     filename: str,
     save_path: Path = None,
 ):
-    """Visualize predictions for a single image."""
-    fig, axes = plt.subplots(2, 3, figsize=(15, 10))
+    """Visualize the extracted overconnected graph."""
+    fig, axes = plt.subplots(1, 3, figsize=(18, 6))
 
-    # Row 1: Input, Segmentation, Overlay
-    axes[0, 0].imshow(image)
-    axes[0, 0].set_title("Input Image")
-    axes[0, 0].axis("off")
-
-    axes[0, 1].imshow(seg_to_color(pred_seg))
-    axes[0, 1].set_title("Predicted Segmentation")
-    axes[0, 1].axis("off")
-
-    # Create overlay
     h, w = pred_seg.shape
-    # Resize input image to match prediction size
     img_resized = np.array(Image.fromarray(image).resize((w, h)))
-    overlay = img_resized.copy()
-    pred_color = seg_to_color(pred_seg)
-    mask = pred_seg > 0
-    overlay[mask] = (0.5 * overlay[mask] + 0.5 * pred_color[mask]).astype(np.uint8)
 
-    axes[0, 2].imshow(overlay)
-    axes[0, 2].set_title("Segmentation Overlay")
-    axes[0, 2].axis("off")
+    # Color map for assignments
+    assignment_colors = {
+        0: 'red',      # M
+        1: 'blue',     # V
+        2: 'green',    # B (using green for visibility)
+        3: 'gray',     # U
+    }
 
-    # Row 2: Junctions, Orientation, Combined
-    axes[1, 0].imshow(pred_junction, cmap="hot", vmin=0, vmax=1)
-    axes[1, 0].set_title("Predicted Junctions")
-    axes[1, 0].axis("off")
+    # 1. Segmentation
+    from scripts.visualize.pixel_head_predictions import seg_to_color
+    axes[0].imshow(seg_to_color(pred_seg))
+    axes[0].set_title("Predicted Segmentation")
+    axes[0].axis("off")
 
-    # Orientation visualization - show as HSV color wheel
-    angle = np.arctan2(pred_orientation[1], pred_orientation[0])
-    magnitude = np.sqrt(pred_orientation[0] ** 2 + pred_orientation[1] ** 2)
-    # Normalize angle to [0, 1] for hue
-    hue = (angle + np.pi) / (2 * np.pi)
-    # Create HSV image
-    hsv = np.zeros((h, w, 3), dtype=np.float32)
-    hsv[..., 0] = hue
-    hsv[..., 1] = magnitude  # Saturation based on magnitude
-    hsv[..., 2] = (pred_seg > 0).astype(np.float32)  # Value only where creases exist
-    # Convert HSV to RGB
-    from matplotlib.colors import hsv_to_rgb
+    # 2. Graph on segmentation
+    axes[1].imshow(seg_to_color(pred_seg), alpha=0.5)
 
-    orient_rgb = hsv_to_rgb(hsv)
+    # Draw edges
+    for i, (v1_idx, v2_idx) in enumerate(graph.edges):
+        v1 = graph.vertices[v1_idx]
+        v2 = graph.vertices[v2_idx]
+        color = assignment_colors.get(graph.assignments[i], 'gray')
+        axes[1].plot([v1[0], v2[0]], [v1[1], v2[1]],
+                    color=color, linewidth=1.5, alpha=0.8)
 
-    axes[1, 1].imshow(orient_rgb)
-    axes[1, 1].set_title("Orientation Field")
-    axes[1, 1].axis("off")
+    # Draw vertices
+    for i, v in enumerate(graph.vertices):
+        marker_color = 'lime' if graph.is_boundary[i] else 'yellow'
+        axes[1].plot(v[0], v[1], 'o', color=marker_color, markersize=4,
+                    markeredgecolor='black', markeredgewidth=0.5)
 
-    # Combined view: overlay with junction peaks marked
-    combined = overlay.copy()
-    # Find junction peaks using local maximum detection (NMS-like)
-    from scipy.ndimage import maximum_filter
+    axes[1].set_title(f"Overconnected Graph: {len(graph.vertices)} vertices, {len(graph.edges)} edges")
+    axes[1].set_xlim(0, w)
+    axes[1].set_ylim(h, 0)
+    axes[1].axis("off")
 
-    # Local max detection: a pixel is a peak if it's the max in its neighborhood
-    local_max = maximum_filter(pred_junction, size=7)  # 7x7 neighborhood
-    peaks = (pred_junction == local_max) & (pred_junction > 0.6)  # Must be local max AND above threshold
-    ys, xs = np.where(peaks)
+    # 3. Graph on original image
+    axes[2].imshow(img_resized)
 
-    axes[1, 2].imshow(combined)
-    if len(xs) > 0:
-        axes[1, 2].scatter(xs, ys, c="lime", s=20, marker="o", alpha=0.8)
-    axes[1, 2].set_title(f"Overlay + Junctions ({len(xs)} detected)")
-    axes[1, 2].axis("off")
+    # Draw edges
+    for i, (v1_idx, v2_idx) in enumerate(graph.edges):
+        v1 = graph.vertices[v1_idx]
+        v2 = graph.vertices[v2_idx]
+        color = assignment_colors.get(graph.assignments[i], 'gray')
+        axes[2].plot([v1[0], v2[0]], [v1[1], v2[1]],
+                    color=color, linewidth=2, alpha=0.9)
 
-    plt.suptitle(f"Pixel Head Predictions: {filename}", fontsize=14)
+    # Draw vertices
+    for i, v in enumerate(graph.vertices):
+        marker_color = 'lime' if graph.is_boundary[i] else 'yellow'
+        axes[2].plot(v[0], v[1], 'o', color=marker_color, markersize=5,
+                    markeredgecolor='black', markeredgewidth=0.5)
+
+    axes[2].set_title("Graph on Image")
+    axes[2].set_xlim(0, w)
+    axes[2].set_ylim(h, 0)
+    axes[2].axis("off")
+
+    plt.suptitle(f"Overconnected Graph: {filename}", fontsize=14)
     plt.tight_layout()
 
     if save_path:
@@ -149,7 +124,7 @@ def visualize_sample(
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Visualize pixel head predictions on images")
+    parser = argparse.ArgumentParser(description="Visualize overconnected graph from pixel predictions")
     parser.add_argument(
         "--checkpoint",
         type=str,
@@ -171,7 +146,7 @@ def main():
     parser.add_argument(
         "--output-dir",
         type=str,
-        default="visualizations/pixel_head",
+        default="visualizations/overconnected",
         help="Directory to save visualizations",
     )
     parser.add_argument(
@@ -206,6 +181,11 @@ def main():
     model.eval()
     print("Model loaded successfully")
 
+    # Create graph extractor
+    extractor_config = GraphExtractorConfig()
+    extractor = GraphExtractor(extractor_config)
+    print(f"Graph extractor config: junction_threshold={extractor_config.junction_threshold}")
+
     # Find images
     image_dir = Path(args.image_dir)
     image_extensions = {".png", ".jpg", ".jpeg", ".webp"}
@@ -238,14 +218,24 @@ def main():
             pred_seg = outputs["segmentation"].argmax(dim=1).cpu().numpy()[0]
             pred_junction = torch.sigmoid(outputs["junction"]).cpu().numpy()[0, 0]
             pred_orientation = outputs["orientation"].cpu().numpy()[0]  # (2, H, W)
+            # Transpose to (H, W, 2) for edge tracing
+            pred_orientation = np.transpose(pred_orientation, (1, 2, 0))
+
+            # Extract graph
+            graph = extractor.extract(
+                segmentation=pred_seg,
+                junction_heatmap=pred_junction,
+                orientation=pred_orientation,
+            )
+
+            print(f"  Extracted: {graph.num_vertices()} vertices, {graph.num_edges()} edges")
 
             # Visualize
-            save_path = output_dir / f"{image_path.stem}_prediction.png"
-            visualize_sample(
+            save_path = output_dir / f"{image_path.stem}_graph.png"
+            visualize_graph(
                 image=original_np,
                 pred_seg=pred_seg,
-                pred_junction=pred_junction,
-                pred_orientation=pred_orientation,
+                graph=graph,
                 filename=image_path.name,
                 save_path=save_path,
             )

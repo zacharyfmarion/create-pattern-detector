@@ -129,7 +129,7 @@ def evaluate_checkpoint(checkpoint_path: str, fold_dir: str, image_size: int = 1
     print(f"Checkpoint: {checkpoint_path}")
 
     # Load checkpoint
-    checkpoint = torch.load(checkpoint_path, map_location=device)
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
     print(f"Loaded checkpoint from epoch {checkpoint.get('epoch', 'unknown')}")
 
     # Create model
