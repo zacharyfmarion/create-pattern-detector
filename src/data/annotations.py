@@ -275,33 +275,36 @@ class GroundTruthGenerator:
         Includes:
         - Interior vertices with at least 2 incident crease edges (M or V)
         - Border vertices where crease edges meet the border
+        - Border corners where 2+ border edges meet (paper corners)
         """
         heatmap = np.zeros((self.image_size, self.image_size), dtype=np.float32)
 
-        # Count incident creases per vertex (M or V only, not B or U)
         num_vertices = len(vertices)
+
+        # Count incident creases per vertex (M or V only, not B or U)
         crease_degrees = np.zeros(num_vertices, dtype=np.int32)
+        # Count incident border edges per vertex
+        border_degrees = np.zeros(num_vertices, dtype=np.int32)
 
         for edge_idx, (v1_idx, v2_idx) in enumerate(edges):
             assignment = assignments[edge_idx]
-            # Only count M (0) and V (1) as creases
-            if assignment in (0, 1):
+            if assignment in (0, 1):  # M or V
                 crease_degrees[v1_idx] += 1
                 crease_degrees[v2_idx] += 1
+            elif assignment == 2:  # Border
+                border_degrees[v1_idx] += 1
+                border_degrees[v2_idx] += 1
 
         # Check which vertices are on the border
-        is_border_vertex = np.zeros(num_vertices, dtype=bool)
-        for edge_idx, (v1_idx, v2_idx) in enumerate(edges):
-            if assignments[edge_idx] == 2:  # Border
-                is_border_vertex[v1_idx] = True
-                is_border_vertex[v2_idx] = True
+        is_border_vertex = border_degrees > 0
 
         # Add Gaussian at vertices that are junctions
         for v_idx, coords in enumerate(vertices):
             if is_border_vertex[v_idx]:
-                # Border vertex: include if it has at least 1 crease edge
-                # (this is where a crease meets the paper boundary)
-                if crease_degrees[v_idx] >= 1:
+                # Border vertex: include if:
+                # - It has at least 1 crease edge (crease meets boundary), OR
+                # - It has at least 2 border edges (paper corner)
+                if crease_degrees[v_idx] >= 1 or border_degrees[v_idx] >= 2:
                     self._add_gaussian(heatmap, coords)
             else:
                 # Interior vertex: include if it has at least 2 crease edges
