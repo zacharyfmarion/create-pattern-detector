@@ -709,8 +709,60 @@ def add_boundary_vertices_overcomplete(
             np.zeros(len(junctions), dtype=bool),
             np.ones(len(boundary_vertices), dtype=bool),
         ])
+
+        # Merge close vertices (boundary vertices take priority)
+        # This handles cases where a junction is very close to a boundary intersection
+        all_vertices, is_boundary = _merge_with_boundary_priority(
+            all_vertices, is_boundary, merge_distance=boundary_distance
+        )
     else:
         all_vertices = junctions
         is_boundary = np.zeros(len(junctions), dtype=bool)
 
     return all_vertices, is_boundary
+
+
+def _merge_with_boundary_priority(
+    vertices: np.ndarray,
+    is_boundary: np.ndarray,
+    merge_distance: float,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Merge close vertices, prioritizing boundary vertices.
+
+    When a boundary vertex is close to an interior vertex, keep the boundary vertex.
+    """
+    from scipy.spatial.distance import cdist
+
+    if len(vertices) <= 1:
+        return vertices, is_boundary
+
+    dists = cdist(vertices, vertices)
+    n = len(vertices)
+    used = np.zeros(n, dtype=bool)
+    merged_vertices = []
+    merged_is_boundary = []
+
+    # Process boundary vertices first (they have priority)
+    boundary_indices = np.where(is_boundary)[0]
+    interior_indices = np.where(~is_boundary)[0]
+    process_order = np.concatenate([boundary_indices, interior_indices])
+
+    for i in process_order:
+        if used[i]:
+            continue
+
+        # Find all vertices within merge_distance
+        nearby = np.where((dists[i] <= merge_distance) & ~used)[0]
+
+        # Mark all nearby as used
+        used[nearby] = True
+
+        # Keep this vertex (boundary vertices processed first, so they win)
+        merged_vertices.append(vertices[i])
+        merged_is_boundary.append(is_boundary[i])
+
+    return (
+        np.array(merged_vertices, dtype=np.float32),
+        np.array(merged_is_boundary, dtype=bool),
+    )

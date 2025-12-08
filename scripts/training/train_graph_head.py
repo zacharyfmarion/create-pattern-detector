@@ -782,7 +782,7 @@ def main():
         node_dim=args.node_dim,
         edge_dim=args.edge_dim,
         num_gnn_layers=args.num_gnn_layers,
-        num_classes=4,  # M=0, V=1, B=2, U=3 (matches FOLD assignments)
+        num_classes=5,  # BG=0, M=1, V=2, B=3, U=4 (matches pixel head segmentation)
     )
     print(f"Graph head parameters: {sum(p.numel() for p in graph_head.parameters()):,}")
 
