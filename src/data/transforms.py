@@ -408,6 +408,7 @@ class CreasePatternTransform:
                 # Noise/blur/compression transforms
                 A.GaussNoise(std_range=(0.02, 0.1), p=0.2),
                 A.ImageCompression(quality_range=(70, 95), p=0.3),  # JPEG artifacts
+                A.MotionBlur(blur_limit=(3, 7), p=0.15),  # Camera shake
 
                 # Occlusion transforms
                 A.CoarseDropout(
