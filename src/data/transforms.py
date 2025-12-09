@@ -382,15 +382,16 @@ class CreasePatternTransform:
         elif self.strength == "medium":
             transforms.extend([
                 # Geometric transforms - no perspective/skew (assume rectified input)
-                # fit_output=True preserves content, then Resize ensures consistent batch size
+                # Small rotations clip edges slightly but preserve pattern scale
                 A.Affine(
                     scale=(0.98, 1.02),  # Slight scale variation
                     translate_percent=(-0.01, 0.01),  # Slight position shift
                     rotate=(-3, 3),  # Small rotation for robustness
-                    fit_output=True,
+                    border_mode=0,  # cv2.BORDER_CONSTANT
+                    fill=(255, 255, 255),  # White fill for image edges
+                    fill_mask=0,  # Background class (0) for segmentation edges
                     p=0.3,
                 ),
-                A.Resize(height=self.image_size, width=self.image_size, p=1.0),
 
                 # Color/lighting transforms
                 A.ColorJitter(

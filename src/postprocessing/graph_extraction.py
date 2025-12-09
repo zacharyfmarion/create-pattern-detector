@@ -21,6 +21,12 @@ from .junctions import (
     add_boundary_vertices_overcomplete,
 )
 from .edge_tracing import trace_edges_overcomplete, edges_to_arrays
+from .edge_detection import (
+    detect_edges_direct,
+    detect_edges_hybrid,
+    filter_overlapping_edges,
+    edges_to_arrays as direct_edges_to_arrays,
+)
 from .cleanup import (
     assign_edge_labels,
     remove_short_edges,
@@ -90,6 +96,9 @@ class GraphExtractorConfig:
     spurious edges/vertices than miss real ones. The Graph Head
     will learn to filter out the noise.
     """
+    # Edge detection method: "hybrid", "direct", or "skeleton" (default)
+    edge_detection_method: str = "skeleton"
+
     # Junction detection - LOW thresholds for high recall
     junction_threshold: float = 0.55  # Just above 0.5 baseline - catch more peaks
     junction_min_distance: int = 3  # Small NMS distance - allow close vertices
@@ -97,7 +106,13 @@ class GraphExtractorConfig:
     use_skeleton_endpoints: bool = True  # Include skeleton endpoints as vertices
     junction_merge_distance: float = 3.0  # Soft merge only very close vertices
 
-    # Edge tracing - permissive settings
+    # Direct/Hybrid edge detection settings
+    direct_min_coverage: float = 0.5  # Min fraction of line covered by crease pixels
+    direct_line_width: int = 3  # Width of line to sample
+    direct_max_edge_length: float = None  # Max edge length (None = auto, for "direct" only)
+    hybrid_vertex_radius: int = 8  # Radius to search for skeleton near vertex (for "hybrid")
+
+    # Skeleton-based edge tracing (when edge_detection_method="skeleton")
     junction_radius: int = 5  # Radius for finding skeleton near junction
     min_edge_length: float = 3.0  # Very short min - include spurs
     bridge_gap_pixels: int = 2  # Bridge small skeleton gaps
@@ -165,7 +180,7 @@ class GraphExtractor:
         h, w = segmentation.shape
         image_size = max(h, w)
 
-        # Step 1: Skeletonize
+        # Step 1: Skeletonize (needed for vertex detection even with direct edge method)
         skeleton, skeleton_labels = skeletonize_segmentation(
             segmentation,
             preserve_labels=True,
@@ -192,50 +207,107 @@ class GraphExtractor:
             include_corners=self.config.include_boundary_corners,
         )
 
-        # Step 3: Trace over-complete edges
-        # Include: all skeleton paths, bridge small gaps, include endpoint edges
-        traced_edges = trace_edges_overcomplete(
-            skeleton,
-            vertices,
-            orientation=orientation,
-            junction_radius=self.config.junction_radius,
-            min_edge_length=self.config.min_edge_length,
-            bridge_gap_pixels=self.config.bridge_gap_pixels,
-            include_endpoint_edges=self.config.include_endpoint_edges,
-        )
-
-        if len(traced_edges) == 0:
-            # No edges found
-            return ExtractedGraph(
-                vertices=vertices,
-                edges=np.empty((0, 2), dtype=np.int64),
-                assignments=np.empty(0, dtype=np.int8),
-                confidence=np.empty(0, dtype=np.float32),
-                is_boundary=is_boundary,
-                edge_paths=[],
+        # Step 3: Detect edges using configured method
+        if self.config.edge_detection_method == "hybrid":
+            # Hybrid: use skeleton for connectivity, validate with segmentation
+            detected_edges = detect_edges_hybrid(
+                vertices,
+                segmentation,
+                skeleton,
+                orientation=orientation,
+                vertex_radius=self.config.hybrid_vertex_radius,
+                min_coverage=self.config.direct_min_coverage,
+                line_width=self.config.direct_line_width,
+                boundary_vertices=is_boundary,
             )
 
-        # Convert edges to arrays
-        edges, edge_paths = edges_to_arrays(traced_edges, len(vertices))
+            # Filter overlapping edges
+            detected_edges = filter_overlapping_edges(detected_edges, vertices)
 
-        # Step 4: Assign labels
-        assignments, confidence = assign_edge_labels(
-            traced_edges,
-            segmentation,
-            skeleton_labels,
-        )
+            if len(detected_edges) == 0:
+                return ExtractedGraph(
+                    vertices=vertices,
+                    edges=np.empty((0, 2), dtype=np.int64),
+                    assignments=np.empty(0, dtype=np.int8),
+                    confidence=np.empty(0, dtype=np.float32),
+                    is_boundary=is_boundary,
+                    edge_paths=[],
+                )
 
-        # Step 5: MINIMAL cleanup for over-complete graph
+            # Convert to arrays
+            edges, assignments, confidence = direct_edges_to_arrays(detected_edges)
+            edge_paths = []
 
-        # Only remove very short edges (< min_edge_length)
-        # But keep this lenient - 3px default
-        edges, edge_paths, assignments, confidence = remove_short_edges(
-            edges, edge_paths, assignments, confidence, vertices,
-            min_length=self.config.min_edge_length,
-        )
+        elif self.config.edge_detection_method == "direct":
+            # Direct vertex-to-vertex edge detection (slow for dense graphs)
+            detected_edges = detect_edges_direct(
+                vertices,
+                segmentation,
+                orientation=orientation,
+                max_edge_length=self.config.direct_max_edge_length,
+                min_coverage=self.config.direct_min_coverage,
+                line_width=self.config.direct_line_width,
+                boundary_vertices=is_boundary,
+            )
 
-        # DON'T merge collinear edges - let graph head decide
-        # (keeping this off by default in config)
+            # Filter overlapping edges
+            detected_edges = filter_overlapping_edges(detected_edges, vertices)
+
+            if len(detected_edges) == 0:
+                return ExtractedGraph(
+                    vertices=vertices,
+                    edges=np.empty((0, 2), dtype=np.int64),
+                    assignments=np.empty(0, dtype=np.int8),
+                    confidence=np.empty(0, dtype=np.float32),
+                    is_boundary=is_boundary,
+                    edge_paths=[],
+                )
+
+            # Convert to arrays
+            edges, assignments, confidence = direct_edges_to_arrays(detected_edges)
+            edge_paths = []
+
+        else:
+            # Skeleton-based edge tracing (original method)
+            traced_edges = trace_edges_overcomplete(
+                skeleton,
+                vertices,
+                orientation=orientation,
+                junction_radius=self.config.junction_radius,
+                min_edge_length=self.config.min_edge_length,
+                bridge_gap_pixels=self.config.bridge_gap_pixels,
+                include_endpoint_edges=self.config.include_endpoint_edges,
+            )
+
+            if len(traced_edges) == 0:
+                return ExtractedGraph(
+                    vertices=vertices,
+                    edges=np.empty((0, 2), dtype=np.int64),
+                    assignments=np.empty(0, dtype=np.int8),
+                    confidence=np.empty(0, dtype=np.float32),
+                    is_boundary=is_boundary,
+                    edge_paths=[],
+                )
+
+            # Convert edges to arrays
+            edges, edge_paths = edges_to_arrays(traced_edges, len(vertices))
+
+            # Assign labels
+            assignments, confidence = assign_edge_labels(
+                traced_edges,
+                segmentation,
+                skeleton_labels,
+            )
+
+            # Remove very short edges
+            edges, edge_paths, assignments, confidence = remove_short_edges(
+                edges, edge_paths, assignments, confidence, vertices,
+                min_length=self.config.min_edge_length,
+            )
+
+        # Step 4: Cleanup (common for both methods)
+
+        # Merge collinear edges if enabled
         if self.config.merge_collinear and len(edges) > 0:
             edges, assignments, vertices = merge_collinear_edges(
                 edges, assignments, vertices,
@@ -247,13 +319,13 @@ class GraphExtractor:
         if self.config.snap_boundary:
             vertices = snap_to_boundary(vertices, is_boundary, image_size, segmentation)
 
-        # DON'T remove isolated vertices - might be needed by graph head
+        # Remove isolated vertices if enabled
         if self.config.remove_isolated and len(edges) > 0:
             vertices, edges, is_boundary = remove_isolated_vertices(
                 vertices, edges, is_boundary
             )
 
-        # Recompute confidence array to match edge count
+        # Ensure confidence array matches edge count
         if len(edges) != len(confidence):
             confidence = np.ones(len(edges), dtype=np.float32)
 

@@ -169,6 +169,8 @@ def main():
         # Get orientation and junction heatmap (need to transpose from CHW to HWC/HW)
         orientation = original["orientation"].permute(1, 2, 0).numpy()  # CHW -> HWC
         junction_heatmap = original["junction_heatmap"].squeeze(0).numpy()  # 1HW -> HW
+        junction_offset = original["junction_offset"].permute(1, 2, 0).numpy()  # CHW -> HWC
+        junction_mask = original["junction_mask"].numpy()  # HW
 
         for iteration in range(args.iterations):
             stats["total"] += 1
@@ -179,6 +181,8 @@ def main():
                 segmentation=original_seg.copy(),
                 orientation=orientation.copy(),
                 junction_heatmap=junction_heatmap.copy(),
+                junction_offset=junction_offset.copy(),
+                junction_mask=junction_mask.copy(),
                 vertices=vertices.copy(),
                 edges=edges.copy(),
                 assignments=assignments.copy(),

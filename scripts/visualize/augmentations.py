@@ -35,14 +35,14 @@ def visualize_individual_augmentations(sample_image: np.ndarray, output_dir: Pat
     axes[0, 0].axis("off")
 
     # Dark Mode
-    dark_mode = DarkMode(always_apply=True)
+    dark_mode = DarkMode(p=1.0)
     dark_img = dark_mode(image=sample_image)["image"]
     axes[0, 1].imshow(dark_img)
     axes[0, 1].set_title("Dark Mode")
     axes[0, 1].axis("off")
 
     # Hue Shift (apply multiple times to show variation)
-    hue_shift = HueShiftCreases(hue_shift_limit=20, always_apply=True)
+    hue_shift = HueShiftCreases(hue_shift_limit=20, p=1.0)
     shifted_img = hue_shift(image=sample_image)["image"]
     axes[0, 2].imshow(shifted_img)
     axes[0, 2].set_title("Hue Shift")
