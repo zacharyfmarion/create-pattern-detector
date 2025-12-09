@@ -381,19 +381,14 @@ class CreasePatternTransform:
             ])
         elif self.strength == "medium":
             transforms.extend([
-                # Geometric transforms - use fit_output to prevent clipping
+                # Geometric transforms - no perspective/skew (assume rectified input)
                 A.Affine(
-                    scale=(0.98, 1.02),  # Reduced to prevent clipping
-                    translate_percent=(-0.01, 0.01),  # Reduced to prevent clipping
-                    rotate=(-3, 3),  # Reduced rotation
+                    scale=(0.98, 1.02),  # Slight scale variation
+                    translate_percent=(-0.01, 0.01),  # Slight position shift
+                    rotate=(-3, 3),  # Small rotation for robustness
                     fit_output=True,  # Scale result to fit original size
                     p=0.3,
                 ),
-                A.Perspective(
-                    scale=(0.01, 0.03),  # Reduced perspective distortion
-                    fit_output=True,  # Ensure full content stays visible
-                    p=0.2,
-                ),  # Perspective distortion (photos)
 
                 # Color/lighting transforms
                 A.ColorJitter(
@@ -428,7 +423,7 @@ class CreasePatternTransform:
                 DarkMode(p=0.15),  # Dark mode simulation (dark bg, original line colors)
                 GrayBackground(p=0.15),  # Gray background (helps border detection)
                 LineThicknessVariation(max_kernel_size=3, p=0.2),  # Varying line weights
-                TextOverlay(num_texts_range=(1, 3), p=0.15),  # Random text labels/annotations
+                TextOverlay(num_texts_range=(1, 3), font_scale_range=(0.8, 2.0), p=0.15),  # Random text labels
             ])
         elif self.strength == "light":
             transforms.extend([
@@ -591,28 +586,9 @@ class CreasePatternTransform:
         # Choose mode: all_black (most common), all_random, or partial
         mode = np.random.choice(["all_black", "all_random", "partial"], p=[0.5, 0.2, 0.3])
 
-        # Find M and V pixels from BOTH segmentation AND image colors
-        # This catches anti-aliased edges that segmentation might miss
-        is_mountain_seg = segmentation == 1  # CLASS_M
-        is_valley_seg = segmentation == 2    # CLASS_V
-
-        # Also detect by color (red = high R, low G/B; blue = high B, low R/G)
-        is_red = (image[:, :, 0] > 200) & (image[:, :, 1] < 100) & (image[:, :, 2] < 100)
-        is_blue = (image[:, :, 2] > 200) & (image[:, :, 0] < 100) & (image[:, :, 1] < 100)
-
-        # Combine segmentation and color detection
-        is_mountain = is_mountain_seg | is_red
-        is_valley = is_valley_seg | is_blue
-
-        # Dilate masks slightly to catch anti-aliased edges
-        kernel = np.ones((3, 3), np.uint8)
-        is_mountain = cv2.dilate(is_mountain.astype(np.uint8), kernel, iterations=1).astype(bool)
-        is_valley = cv2.dilate(is_valley.astype(np.uint8), kernel, iterations=1).astype(bool)
-
-        # Don't overwrite background - only replace where there's already a crease
-        is_any_crease = segmentation > 0
-        is_mountain = is_mountain & is_any_crease
-        is_valley = is_valley & is_any_crease
+        # Find M and V pixels from segmentation mask
+        is_mountain = segmentation == 1  # CLASS_M
+        is_valley = segmentation == 2    # CLASS_V
 
         result_img = image.copy()
         result_seg = segmentation.copy()
