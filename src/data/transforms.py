@@ -455,6 +455,8 @@ class CreasePatternTransform:
         segmentation: np.ndarray,
         orientation: np.ndarray,
         junction_heatmap: np.ndarray,
+        junction_offset: np.ndarray,
+        junction_mask: np.ndarray,
         vertices: np.ndarray,
         edges: np.ndarray,
         assignments: np.ndarray,
@@ -467,6 +469,8 @@ class CreasePatternTransform:
             segmentation: (H, W) segmentation mask
             orientation: (H, W, 2) orientation field
             junction_heatmap: (H, W) junction heatmap
+            junction_offset: (H, W, 2) sub-pixel junction offsets
+            junction_mask: (H, W) bool mask for junction offset loss
             vertices: (N, 2) vertex coordinates
             edges: (E, 2) edge indices
             assignments: (E,) edge assignments
@@ -516,6 +520,14 @@ class CreasePatternTransform:
             self.image_size,
         )
 
+        # Recompute junction offsets from transformed vertices
+        result["junction_offset"], result["junction_mask"] = self._recompute_junction_offsets(
+            result["vertices"],
+            edges,
+            assignments,
+            self.image_size,
+        )
+
         return result
 
     def _recompute_orientation(
@@ -558,6 +570,81 @@ class CreasePatternTransform:
             orientation[mask_bool, 1] = sin_theta
 
         return orientation
+
+    def _recompute_junction_offsets(
+        self,
+        vertices: np.ndarray,
+        edges: np.ndarray,
+        assignments: np.ndarray,
+        image_size: int,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """Recompute junction offset and mask after geometric transform.
+
+        Uses the same junction detection logic as annotations.py:
+        - Interior vertices with 2+ crease edges (M or V)
+        - Border vertices where crease edges meet boundary
+        - Border corners where 2+ border edges meet
+
+        Args:
+            vertices: (N, 2) transformed vertex coordinates
+            edges: (E, 2) edge indices
+            assignments: (E,) edge assignments (M=0, V=1, B=2, U=3)
+            image_size: image dimensions
+
+        Returns:
+            junction_offset: (H, W, 2) float32 - sub-pixel offsets
+            junction_mask: (H, W) bool - where offset loss applies
+        """
+        offset = np.zeros((image_size, image_size, 2), dtype=np.float32)
+        mask = np.zeros((image_size, image_size), dtype=bool)
+
+        num_vertices = len(vertices)
+
+        # Count incident creases per vertex (M or V only)
+        crease_degrees = np.zeros(num_vertices, dtype=np.int32)
+        # Count incident border edges per vertex
+        border_degrees = np.zeros(num_vertices, dtype=np.int32)
+
+        for edge_idx, (v1_idx, v2_idx) in enumerate(edges):
+            assignment = assignments[edge_idx]
+            if assignment in (0, 1):  # M or V
+                crease_degrees[v1_idx] += 1
+                crease_degrees[v2_idx] += 1
+            elif assignment == 2:  # Border
+                border_degrees[v1_idx] += 1
+                border_degrees[v2_idx] += 1
+
+        is_border_vertex = border_degrees > 0
+
+        for v_idx, (x, y) in enumerate(vertices):
+            is_junction = False
+
+            if is_border_vertex[v_idx]:
+                if crease_degrees[v_idx] >= 1 or border_degrees[v_idx] >= 2:
+                    is_junction = True
+            else:
+                if crease_degrees[v_idx] >= 2:
+                    is_junction = True
+
+            if not is_junction:
+                continue
+
+            # Anchor pixel (integer coords using round)
+            j = int(round(x))  # column
+            i = int(round(y))  # row
+
+            if not (0 <= i < image_size and 0 <= j < image_size):
+                continue
+
+            # Sub-pixel offset from pixel center to true junction
+            dx = x - j
+            dy = y - i
+
+            offset[i, j, 0] = dx
+            offset[i, j, 1] = dy
+            mask[i, j] = True
+
+        return offset, mask
 
     def _maybe_remove_assignments(
         self,

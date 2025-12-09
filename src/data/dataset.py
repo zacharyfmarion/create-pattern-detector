@@ -111,6 +111,8 @@ class CreasePatternDataset(Dataset):
                 segmentation=gt["segmentation"],
                 orientation=gt["orientation"],
                 junction_heatmap=gt["junction_heatmap"],
+                junction_offset=gt["junction_offset"],
+                junction_mask=gt["junction_mask"],
                 vertices=gt["vertices"],
                 edges=gt["edges"],
                 assignments=gt["assignments"],
@@ -119,6 +121,8 @@ class CreasePatternDataset(Dataset):
             gt["segmentation"] = transformed["segmentation"]
             gt["orientation"] = transformed["orientation"]
             gt["junction_heatmap"] = transformed["junction_heatmap"]
+            gt["junction_offset"] = transformed["junction_offset"]
+            gt["junction_mask"] = transformed["junction_mask"]
             gt["vertices"] = transformed["vertices"]
             gt["edges"] = transformed["edges"]
             gt["assignments"] = transformed["assignments"]
@@ -135,6 +139,10 @@ class CreasePatternDataset(Dataset):
             "junction_heatmap": torch.from_numpy(gt["junction_heatmap"]).unsqueeze(0).float(),
             # Edge distance: (1, H, W) float32
             "edge_distance": torch.from_numpy(gt["edge_distance"]).unsqueeze(0).float(),
+            # Junction offset: (2, H, W) float32 - sub-pixel (dx, dy) from pixel center
+            "junction_offset": torch.from_numpy(gt["junction_offset"]).permute(2, 0, 1).float(),
+            # Junction mask: (H, W) bool - where offset loss should be applied
+            "junction_mask": torch.from_numpy(gt["junction_mask"]).bool(),
         }
 
         # Include graph data for potential GNN usage
@@ -301,7 +309,10 @@ def collate_fn(batch: List[Dict]) -> Dict:
     but keeps graph data as lists since they have variable sizes.
     """
     # Keys that can be stacked (fixed size)
-    stackable_keys = ['image', 'segmentation', 'orientation', 'junction_heatmap', 'edge_distance']
+    stackable_keys = [
+        'image', 'segmentation', 'orientation', 'junction_heatmap',
+        'edge_distance', 'junction_offset', 'junction_mask'
+    ]
 
     # Keys that should be kept as lists (variable size)
     list_keys = ['graph', 'meta']

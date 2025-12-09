@@ -90,12 +90,17 @@ class GroundTruthGenerator:
         orientation = self._generate_orientation(pixel_vertices, cp.edges, cp.assignments)
         junction_heatmap = self._generate_junctions(pixel_vertices, cp.edges, cp.assignments)
         edge_distance = self._generate_edge_distance(segmentation)
+        junction_offset, junction_mask = self._generate_junction_offsets(
+            pixel_vertices, cp.edges, cp.assignments
+        )
 
         return {
             "segmentation": segmentation,
             "orientation": orientation,
             "junction_heatmap": junction_heatmap,
             "edge_distance": edge_distance,
+            "junction_offset": junction_offset,
+            "junction_mask": junction_mask,
             "vertices": pixel_vertices,
             "edges": cp.edges,
             "assignments": cp.assignments,
@@ -356,6 +361,78 @@ class GroundTruthGenerator:
         distance = distance_transform_edt(~crease_mask)
 
         return distance.astype(np.float32)
+
+    def _generate_junction_offsets(
+        self,
+        vertices: np.ndarray,
+        edges: np.ndarray,
+        assignments: np.ndarray,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Generate sub-pixel offset ground truth for junctions.
+
+        For each junction vertex, computes the offset from the anchor pixel
+        (rounded integer coords) to the true sub-pixel junction location.
+
+        Returns:
+            junction_offset: (H, W, 2) float32 - (dx, dy) offset from pixel center
+            junction_mask: (H, W) bool - where offset loss should be applied
+        """
+        offset = np.zeros((self.image_size, self.image_size, 2), dtype=np.float32)
+        mask = np.zeros((self.image_size, self.image_size), dtype=bool)
+
+        num_vertices = len(vertices)
+
+        # Count incident creases per vertex (M or V only, not B or U)
+        crease_degrees = np.zeros(num_vertices, dtype=np.int32)
+        # Count incident border edges per vertex
+        border_degrees = np.zeros(num_vertices, dtype=np.int32)
+
+        for edge_idx, (v1_idx, v2_idx) in enumerate(edges):
+            assignment = assignments[edge_idx]
+            if assignment in (0, 1):  # M or V
+                crease_degrees[v1_idx] += 1
+                crease_degrees[v2_idx] += 1
+            elif assignment == 2:  # Border
+                border_degrees[v1_idx] += 1
+                border_degrees[v2_idx] += 1
+
+        # Check which vertices are on the border
+        is_border_vertex = border_degrees > 0
+
+        # Add offset for vertices that are junctions (same logic as _generate_junctions)
+        for v_idx, (x, y) in enumerate(vertices):
+            is_junction = False
+
+            if is_border_vertex[v_idx]:
+                # Border vertex: include if it has crease edges or 2+ border edges
+                if crease_degrees[v_idx] >= 1 or border_degrees[v_idx] >= 2:
+                    is_junction = True
+            else:
+                # Interior vertex: include if it has at least 2 crease edges
+                if crease_degrees[v_idx] >= 2:
+                    is_junction = True
+
+            if not is_junction:
+                continue
+
+            # Anchor pixel (integer coords using round)
+            j = int(round(x))  # column
+            i = int(round(y))  # row
+
+            if not (0 <= i < self.image_size and 0 <= j < self.image_size):
+                continue
+
+            # Sub-pixel offset from pixel center to true junction
+            # Offset in range [-0.5, 0.5]
+            dx = x - j  # true_x - pixel_x
+            dy = y - i  # true_y - pixel_y
+
+            offset[i, j, 0] = dx
+            offset[i, j, 1] = dy
+            mask[i, j] = True
+
+        return offset, mask
 
 
 def visualize_ground_truth(

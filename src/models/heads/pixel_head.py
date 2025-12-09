@@ -4,7 +4,8 @@ Pixel-level prediction head for crease pattern detection.
 Outputs:
 1. Segmentation: 5-class per-pixel classification (BG, M, V, B, U)
 2. Orientation: 2-channel direction field (cos θ, sin θ)
-3. Junction: Single-channel heatmap for vertex detection
+3. Junction heatmap: Single-channel heatmap for vertex detection
+4. Junction offset: 2-channel sub-pixel offset (dx, dy) for refined vertex positions
 """
 
 import torch
@@ -46,6 +47,7 @@ class PixelHead(nn.Module):
     - Segmentation logits: (B, 5, H, W) for 5 classes
     - Orientation field: (B, 2, H, W) for (cos θ, sin θ)
     - Junction heatmap: (B, 1, H, W) for vertex detection
+    - Junction offset: (B, 2, H, W) for sub-pixel vertex refinement
     """
 
     def __init__(
@@ -94,6 +96,12 @@ class PixelHead(nn.Module):
             nn.Sigmoid(),
         )
 
+        # Junction offset branch (sub-pixel refinement, no activation)
+        self.junction_offset_head = nn.Sequential(
+            ConvBNReLU(hidden_channels, hidden_channels // 2),
+            nn.Conv2d(hidden_channels // 2, 2, kernel_size=1),
+        )
+
         # Initialize weights
         self._init_weights()
 
@@ -125,6 +133,7 @@ class PixelHead(nn.Module):
             - 'segmentation': (B, num_classes, H, W) logits
             - 'orientation': (B, 2, H, W) normalized direction vectors
             - 'junction': (B, 1, H, W) heatmap values in [0, 1]
+            - 'junction_offset': (B, 2, H, W) sub-pixel offsets in [-0.5, 0.5]
         """
         # Shared feature processing
         x = self.shared_conv(features)
@@ -133,9 +142,13 @@ class PixelHead(nn.Module):
         seg_logits = self.seg_head(x)
         orientation = self.orient_head(x)
         junction = self.junction_head(x)
+        junction_offset = self.junction_offset_head(x)
 
         # Normalize orientation to unit vectors
         orientation = F.normalize(orientation, dim=1, eps=1e-6)
+
+        # Clamp junction offset to [-0.5, 0.5] range
+        junction_offset = torch.clamp(junction_offset, -0.5, 0.5)
 
         # Compute target size for upsampling
         if target_size is None:
@@ -161,6 +174,12 @@ class PixelHead(nn.Module):
             mode="bilinear",
             align_corners=False,
         )
+        junction_offset = F.interpolate(
+            junction_offset,
+            size=target_size,
+            mode="bilinear",
+            align_corners=False,
+        )
 
         # Re-normalize orientation after interpolation
         orientation = F.normalize(orientation, dim=1, eps=1e-6)
@@ -169,6 +188,7 @@ class PixelHead(nn.Module):
             "segmentation": seg_logits,
             "orientation": orientation,
             "junction": junction,
+            "junction_offset": junction_offset,
         }
 
 
@@ -223,6 +243,13 @@ class DeepPixelHead(nn.Module):
             nn.Sigmoid(),
         )
 
+        # Junction offset branch (sub-pixel refinement)
+        self.junction_offset_refine = nn.Sequential(
+            ConvBNReLU(hidden_channels, hidden_channels // 2),
+            ConvBNReLU(hidden_channels // 2, hidden_channels // 4),
+        )
+        self.junction_offset_out = nn.Conv2d(hidden_channels // 4, 2, kernel_size=1)
+
     def forward(
         self,
         features: torch.Tensor,
@@ -239,14 +266,19 @@ class DeepPixelHead(nn.Module):
         seg_feat = self.seg_refine(x)
         orient_feat = self.orient_refine(x)
         junction_feat = self.junction_refine(x)
+        junction_offset_feat = self.junction_offset_refine(x)
 
         # Output predictions
         seg_logits = self.seg_out(seg_feat)
         orientation = self.orient_out(orient_feat)
         junction = self.junction_out(junction_feat)
+        junction_offset = self.junction_offset_out(junction_offset_feat)
 
         # Normalize orientation
         orientation = F.normalize(orientation, dim=1, eps=1e-6)
+
+        # Clamp junction offset to [-0.5, 0.5] range
+        junction_offset = torch.clamp(junction_offset, -0.5, 0.5)
 
         # Compute target size
         if target_size is None:
@@ -257,6 +289,7 @@ class DeepPixelHead(nn.Module):
         seg_logits = F.interpolate(seg_logits, size=target_size, mode="bilinear", align_corners=False)
         orientation = F.interpolate(orientation, size=target_size, mode="bilinear", align_corners=False)
         junction = F.interpolate(junction, size=target_size, mode="bilinear", align_corners=False)
+        junction_offset = F.interpolate(junction_offset, size=target_size, mode="bilinear", align_corners=False)
 
         # Re-normalize after interpolation
         orientation = F.normalize(orientation, dim=1, eps=1e-6)
@@ -265,6 +298,7 @@ class DeepPixelHead(nn.Module):
             "segmentation": seg_logits,
             "orientation": orientation,
             "junction": junction,
+            "junction_offset": junction_offset,
         }
 
 

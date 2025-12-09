@@ -229,11 +229,54 @@ class JunctionLoss(nn.Module):
             return weighted_loss
 
 
+class JunctionOffsetLoss(nn.Module):
+    """
+    L1 loss for sub-pixel junction offset prediction.
+
+    Computes loss only at junction anchor pixels (sparse supervision).
+    Predicts (dx, dy) offset from pixel center to true junction location.
+    """
+
+    def __init__(self):
+        super().__init__()
+
+    def forward(
+        self,
+        pred: torch.Tensor,
+        target: torch.Tensor,
+        mask: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        Compute junction offset loss.
+
+        Args:
+            pred: (B, 2, H, W) predicted offsets (dx, dy)
+            target: (B, 2, H, W) ground truth offsets
+            mask: (B, H, W) boolean mask of junction pixels
+
+        Returns:
+            Scalar loss value
+        """
+        # Expand mask to match pred shape (B, 1, H, W) -> (B, 2, H, W)
+        mask_expanded = mask.unsqueeze(1).expand_as(pred).float()
+
+        # L1 loss at masked pixels
+        l1_loss = torch.abs(pred - target)
+        masked_loss = l1_loss * mask_expanded
+
+        # Average over junction pixels only
+        num_junctions = mask_expanded.sum()
+        if num_junctions > 0:
+            return masked_loss.sum() / num_junctions
+        else:
+            return torch.tensor(0.0, device=pred.device, requires_grad=True)
+
+
 class PixelLoss(nn.Module):
     """
     Combined pixel-level loss for crease pattern detection.
 
-    Combines segmentation, orientation, and junction losses with configurable weights.
+    Combines segmentation, orientation, junction heatmap, and junction offset losses.
     """
 
     def __init__(
@@ -241,6 +284,7 @@ class PixelLoss(nn.Module):
         seg_weight: float = 1.0,
         orient_weight: float = 0.5,
         junction_weight: float = 1.0,
+        junction_offset_weight: float = 0.5,
         seg_alpha: Optional[List[float]] = None,
         seg_gamma: float = 2.0,
         junction_pos_weight: float = 10.0,
@@ -251,20 +295,23 @@ class PixelLoss(nn.Module):
         Args:
             seg_weight: Weight for segmentation loss
             orient_weight: Weight for orientation loss
-            junction_weight: Weight for junction loss
+            junction_weight: Weight for junction heatmap loss
+            junction_offset_weight: Weight for junction offset loss
             seg_alpha: Per-class weights for segmentation
             seg_gamma: Focal loss gamma for segmentation
-            junction_pos_weight: Positive weight for junction loss
+            junction_pos_weight: Positive weight for junction heatmap loss
         """
         super().__init__()
 
         self.seg_weight = seg_weight
         self.orient_weight = orient_weight
         self.junction_weight = junction_weight
+        self.junction_offset_weight = junction_offset_weight
 
         self.seg_loss = SegmentationLoss(alpha=seg_alpha, gamma=seg_gamma)
         self.orient_loss = OrientationLoss()
         self.junction_loss = JunctionLoss(pos_weight=junction_pos_weight)
+        self.junction_offset_loss = JunctionOffsetLoss()
 
     def forward(
         self,
@@ -275,15 +322,17 @@ class PixelLoss(nn.Module):
         Compute combined pixel loss.
 
         Args:
-            outputs: Model outputs with 'segmentation', 'orientation', 'junction'
-            targets: Ground truth with 'segmentation', 'orientation', 'junction_heatmap'
+            outputs: Model outputs with 'segmentation', 'orientation', 'junction', 'junction_offset'
+            targets: Ground truth with 'segmentation', 'orientation', 'junction_heatmap',
+                     'junction_offset', 'junction_mask'
 
         Returns:
             Dictionary with:
             - 'total': Combined loss
             - 'seg': Segmentation loss
             - 'orient': Orientation loss
-            - 'junction': Junction loss
+            - 'junction': Junction heatmap loss
+            - 'junction_offset': Junction offset loss
         """
         # Segmentation loss
         seg_loss = self.seg_loss(outputs["segmentation"], targets["segmentation"])
@@ -297,10 +346,17 @@ class PixelLoss(nn.Module):
             crease_mask,
         )
 
-        # Junction loss
+        # Junction heatmap loss
         junction_loss = self.junction_loss(
             outputs["junction"],
             targets["junction_heatmap"],
+        )
+
+        # Junction offset loss (only at junction anchor pixels)
+        junction_offset_loss = self.junction_offset_loss(
+            outputs["junction_offset"],
+            targets["junction_offset"],
+            targets["junction_mask"],
         )
 
         # Combined loss
@@ -308,6 +364,7 @@ class PixelLoss(nn.Module):
             self.seg_weight * seg_loss
             + self.orient_weight * orient_loss
             + self.junction_weight * junction_loss
+            + self.junction_offset_weight * junction_offset_loss
         )
 
         return {
@@ -315,4 +372,5 @@ class PixelLoss(nn.Module):
             "seg": seg_loss,
             "orient": orient_loss,
             "junction": junction_loss,
+            "junction_offset": junction_offset_loss,
         }

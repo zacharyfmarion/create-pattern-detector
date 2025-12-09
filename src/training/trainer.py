@@ -184,6 +184,7 @@ class Trainer:
             "seg_loss": 0.0,
             "orient_loss": 0.0,
             "junction_loss": 0.0,
+            "junction_offset_loss": 0.0,
         }
         num_batches = len(self.train_loader)
 
@@ -200,6 +201,8 @@ class Trainer:
                 "segmentation": batch["segmentation"].to(self.device),
                 "orientation": batch["orientation"].to(self.device),
                 "junction_heatmap": batch["junction_heatmap"].to(self.device),
+                "junction_offset": batch["junction_offset"].to(self.device),
+                "junction_mask": batch["junction_mask"].to(self.device),
             }
 
             # Zero gradients
@@ -232,6 +235,7 @@ class Trainer:
             metrics["seg_loss"] += loss_dict["seg"].item()
             metrics["orient_loss"] += loss_dict["orient"].item()
             metrics["junction_loss"] += loss_dict["junction"].item()
+            metrics["junction_offset_loss"] += loss_dict["junction_offset"].item()
 
             # Update progress bar
             pbar.set_postfix({
@@ -246,6 +250,7 @@ class Trainer:
                     "train/seg_loss": loss_dict["seg"].item(),
                     "train/orient_loss": loss_dict["orient"].item(),
                     "train/junction_loss": loss_dict["junction"].item(),
+                    "train/junction_offset_loss": loss_dict["junction_offset"].item(),
                     "train/lr": self.optimizer.param_groups[0]["lr"],
                     "step": self.current_epoch * num_batches + batch_idx,
                 })
@@ -275,6 +280,7 @@ class Trainer:
             "seg_loss": 0.0,
             "orient_loss": 0.0,
             "junction_loss": 0.0,
+            "junction_offset_loss": 0.0,
             "seg_iou": 0.0,
             "junction_f1": 0.0,
         }
@@ -286,6 +292,8 @@ class Trainer:
                 "segmentation": batch["segmentation"].to(self.device),
                 "orientation": batch["orientation"].to(self.device),
                 "junction_heatmap": batch["junction_heatmap"].to(self.device),
+                "junction_offset": batch["junction_offset"].to(self.device),
+                "junction_mask": batch["junction_mask"].to(self.device),
             }
 
             # Forward pass
@@ -297,6 +305,7 @@ class Trainer:
             metrics["seg_loss"] += loss_dict["seg"].item()
             metrics["orient_loss"] += loss_dict["orient"].item()
             metrics["junction_loss"] += loss_dict["junction"].item()
+            metrics["junction_offset_loss"] += loss_dict["junction_offset"].item()
 
             # Compute IoU for segmentation
             seg_iou = self._compute_seg_iou(outputs["segmentation"], targets["segmentation"])
@@ -432,10 +441,12 @@ class Trainer:
                 "train/epoch_seg_loss": train_metrics["seg_loss"],
                 "train/epoch_orient_loss": train_metrics["orient_loss"],
                 "train/epoch_junction_loss": train_metrics["junction_loss"],
+                "train/epoch_junction_offset_loss": train_metrics["junction_offset_loss"],
                 "val/loss": val_metrics["loss"],
                 "val/seg_loss": val_metrics["seg_loss"],
                 "val/orient_loss": val_metrics["orient_loss"],
                 "val/junction_loss": val_metrics["junction_loss"],
+                "val/junction_offset_loss": val_metrics["junction_offset_loss"],
                 "val/seg_iou": val_metrics["seg_iou"],
                 "val/junction_f1": val_metrics["junction_f1"],
             })
