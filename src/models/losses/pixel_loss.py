@@ -229,77 +229,6 @@ class JunctionLoss(nn.Module):
             return weighted_loss
 
 
-class JunctionFocalLoss(nn.Module):
-    """
-    Binary focal loss for junction heatmap detection.
-
-    Focal loss helps with extreme class imbalance by down-weighting
-    easy negatives and focusing on hard examples. This is better than
-    weighted MSE for junction detection where background dominates.
-    """
-
-    def __init__(
-        self,
-        alpha: float = 0.25,
-        gamma: float = 2.0,
-        pos_weight: float = 10.0,
-    ):
-        """
-        Initialize junction focal loss.
-
-        Args:
-            alpha: Balance factor for positive class (typically 0.25)
-            gamma: Focusing parameter - higher means more focus on hard examples
-            pos_weight: Additional weight multiplier for positive pixels
-        """
-        super().__init__()
-        self.alpha = alpha
-        self.gamma = gamma
-        self.pos_weight = pos_weight
-
-    def forward(
-        self,
-        pred: torch.Tensor,
-        target: torch.Tensor,
-    ) -> torch.Tensor:
-        """
-        Compute junction focal loss.
-
-        Args:
-            pred: (B, 1, H, W) predicted heatmap (after sigmoid, values 0-1)
-            target: (B, 1, H, W) or (B, H, W) ground truth heatmap
-
-        Returns:
-            Scalar loss value
-        """
-        # Ensure target has channel dimension
-        if target.dim() == 3:
-            target = target.unsqueeze(1)
-
-        # Clamp predictions to avoid log(0)
-        pred = torch.clamp(pred, min=1e-7, max=1 - 1e-7)
-
-        # Binary cross entropy components
-        bce_pos = -target * torch.log(pred)
-        bce_neg = -(1 - target) * torch.log(1 - pred)
-
-        # Focal weights: (1 - p_t)^gamma
-        # For positives: p_t = pred, so weight = (1 - pred)^gamma
-        # For negatives: p_t = 1 - pred, so weight = pred^gamma
-        focal_weight_pos = (1 - pred) ** self.gamma
-        focal_weight_neg = pred ** self.gamma
-
-        # Alpha weighting (higher alpha for positives)
-        # Also apply additional pos_weight for extreme imbalance
-        alpha_pos = self.alpha * self.pos_weight
-        alpha_neg = 1 - self.alpha
-
-        # Combined focal loss
-        loss = alpha_pos * focal_weight_pos * bce_pos + alpha_neg * focal_weight_neg * bce_neg
-
-        return loss.mean()
-
-
 class PixelLoss(nn.Module):
     """
     Combined pixel-level loss for crease pattern detection.
@@ -315,8 +244,6 @@ class PixelLoss(nn.Module):
         seg_alpha: Optional[List[float]] = None,
         seg_gamma: float = 2.0,
         junction_pos_weight: float = 10.0,
-        junction_focal: bool = False,
-        junction_focal_gamma: float = 2.0,
     ):
         """
         Initialize combined pixel loss.
@@ -328,8 +255,6 @@ class PixelLoss(nn.Module):
             seg_alpha: Per-class weights for segmentation
             seg_gamma: Focal loss gamma for segmentation
             junction_pos_weight: Positive weight for junction loss
-            junction_focal: If True, use focal loss for junctions instead of MSE
-            junction_focal_gamma: Gamma for junction focal loss (if enabled)
         """
         super().__init__()
 
@@ -339,16 +264,7 @@ class PixelLoss(nn.Module):
 
         self.seg_loss = SegmentationLoss(alpha=seg_alpha, gamma=seg_gamma)
         self.orient_loss = OrientationLoss()
-
-        # Choose junction loss type
-        if junction_focal:
-            self.junction_loss = JunctionFocalLoss(
-                alpha=0.25,
-                gamma=junction_focal_gamma,
-                pos_weight=junction_pos_weight,
-            )
-        else:
-            self.junction_loss = JunctionLoss(pos_weight=junction_pos_weight)
+        self.junction_loss = JunctionLoss(pos_weight=junction_pos_weight)
 
     def forward(
         self,
