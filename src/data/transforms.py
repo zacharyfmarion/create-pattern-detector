@@ -382,11 +382,11 @@ class CreasePatternTransform:
         elif self.strength == "medium":
             transforms.extend([
                 # Geometric transforms - no perspective/skew (assume rectified input)
+                # Note: fit_output=False to maintain consistent image sizes across batch
                 A.Affine(
                     scale=(0.98, 1.02),  # Slight scale variation
                     translate_percent=(-0.01, 0.01),  # Slight position shift
                     rotate=(-3, 3),  # Small rotation for robustness
-                    fit_output=True,  # Scale result to fit original size
                     p=0.3,
                 ),
 
