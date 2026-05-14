@@ -15,6 +15,8 @@ test("BP Studio F auxiliaries become valleys in strict canonical output", () => 
   expect(normalized.edges_assignment).not.toContain("F");
   expect(normalized.edges_assignment.filter((assignment) => assignment === "V")).toHaveLength(4);
   expect(normalized.edges_bpRole).toEqual(expect.arrayContaining(["border", "axis", "hinge"]));
+  expect(normalized.edges_bpStudioSource).toHaveLength(normalized.edges_vertices.length);
+  expect(normalized.edges_bpStudioSource?.some((source) => source.kind === "device-draw-ridge")).toBe(true);
 });
 
 test("normalization retains and splits borders while removing duplicate segment geometry", () => {
@@ -106,6 +108,16 @@ function bpStudioFoldFixture(): FOLDFormat {
     ],
     edges_assignment: ["B", "B", "B", "B", "F", "F", "V", "M"],
     edges_bpRole: ["border", "border", "border", "border", "axis", "axis", "hinge", "ridge"],
+    edges_bpStudioSource: [
+      { kind: "sheet-border", mandatory: true },
+      { kind: "sheet-border", mandatory: true },
+      { kind: "sheet-border", mandatory: true },
+      { kind: "sheet-border", mandatory: true },
+      { kind: "node-contour", mandatory: true },
+      { kind: "node-contour", mandatory: true },
+      { kind: "device-axis-parallel", mandatory: true },
+      { kind: "device-draw-ridge", mandatory: true },
+    ],
     bp_metadata: {
       gridSize: 2,
       bpSubfamily: "two-flap-stretch",

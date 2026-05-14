@@ -1,5 +1,15 @@
 export type EdgeAssignment = "B" | "M" | "V" | "F" | "U" | "C";
 export type BPRole = "border" | "hinge" | "ridge" | "axis" | "stretch";
+export interface BPStudioEdgeSource {
+  kind: string;
+  creaseType?: number;
+  mandatory?: boolean;
+  ownerId?: number | string;
+  stretchId?: string;
+  deviceIndex?: number;
+  lineIndex?: number;
+  clippedSegmentIndex?: number;
+}
 export type BPSubfamily =
   | "two-flap-stretch"
   | "dense-molecule-tessellation"
@@ -87,6 +97,7 @@ export interface FOLDFormat {
   edges_assignment: EdgeAssignment[];
   edges_foldAngle?: number[];
   edges_bpRole?: BPRole[];
+  edges_bpStudioSource?: BPStudioEdgeSource[];
   bp_metadata?: BPMetadata;
   density_metadata?: DensityMetadata;
   design_tree?: DesignTreeMetadata;

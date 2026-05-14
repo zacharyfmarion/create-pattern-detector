@@ -1,5 +1,5 @@
 import { normalizeFold } from "./fold-utils.ts";
-import type { BPRole, EdgeAssignment, FOLDFormat } from "./types.ts";
+import type { BPRole, BPStudioEdgeSource, EdgeAssignment, FOLDFormat } from "./types.ts";
 
 type Point = [number, number];
 
@@ -8,6 +8,7 @@ interface Segment {
   p2: Point;
   assignment: EdgeAssignment;
   role: BPRole;
+  source?: BPStudioEdgeSource;
 }
 
 interface ArrangementEdge {
@@ -15,6 +16,7 @@ interface ArrangementEdge {
   b: number;
   assignment: EdgeAssignment;
   role: BPRole;
+  source?: BPStudioEdgeSource;
 }
 
 const EPSILON = 1e-9;
@@ -25,6 +27,7 @@ export function arrangeFoldGraph(fold: FOLDFormat, creator = fold.file_creator):
     p2: fold.vertices_coords[b],
     assignment: fold.edges_assignment[index] ?? "U",
     role: fold.edges_bpRole?.[index] ?? roleFromAssignment(fold.edges_assignment[index] ?? "U"),
+    source: fold.edges_bpStudioSource?.[index],
   }));
   return arrangeSegments(segments, creator, fold.bp_metadata);
 }
@@ -69,7 +72,7 @@ export function arrangeSegments(
       const b = vertexIndex(points[j + 1]);
       if (a === b) continue;
       const key = edgeKey(a, b);
-      const candidate: ArrangementEdge = { a, b, assignment: segment.assignment, role: segment.role };
+      const candidate: ArrangementEdge = { a, b, assignment: segment.assignment, role: segment.role, source: segment.source };
       const existing = edges.get(key);
       edges.set(key, existing ? mergeEdge(existing, candidate) : candidate);
     }
@@ -86,6 +89,7 @@ export function arrangeSegments(
       edges_vertices: arrangedEdges.map((edge) => [edge.a, edge.b]),
       edges_assignment: arrangedEdges.map((edge) => edge.assignment),
       edges_bpRole: arrangedEdges.map((edge) => edge.role),
+      edges_bpStudioSource: arrangedEdges.map((edge) => edge.source ?? { kind: "unknown-arranged-edge" }),
       bp_metadata: bpMetadata,
     },
     creator,
@@ -118,7 +122,8 @@ function intersectionPoints(a: Segment, b: Segment): Point[] {
 function mergeEdge(a: ArrangementEdge, b: ArrangementEdge): ArrangementEdge {
   const role = rolePriority(a.role) >= rolePriority(b.role) ? a.role : b.role;
   const assignment = assignmentPriority(a.assignment) >= assignmentPriority(b.assignment) ? a.assignment : b.assignment;
-  return { ...a, role, assignment };
+  const source = sourcePriority(a.source) >= sourcePriority(b.source) ? a.source : b.source;
+  return { ...a, role, assignment, source };
 }
 
 function roleFromAssignment(assignment: EdgeAssignment): BPRole {
@@ -133,6 +138,19 @@ function rolePriority(role: BPRole): number {
 
 function assignmentPriority(assignment: EdgeAssignment): number {
   return { B: 5, M: 4, V: 3, F: 2, U: 1, C: 0 }[assignment];
+}
+
+function sourcePriority(source: BPStudioEdgeSource | undefined): number {
+  if (!source) return 0;
+  return (source.mandatory ? 100 : 0) + sourceKindPriority(source.kind);
+}
+
+function sourceKindPriority(kind: string): number {
+  if (kind.includes("border")) return 50;
+  if (kind.includes("ridge")) return 40;
+  if (kind.includes("axis")) return 30;
+  if (kind.includes("contour")) return 20;
+  return 10;
 }
 
 function uniquePoints(points: Point[]): Point[] {

@@ -4,7 +4,7 @@ export interface BpStudioAdapterSpec {
   sheet: SheetSpec;
   useAuxiliary?: boolean;
   completeRepositories?: boolean;
-  exportMode?: "outer" | "expanded";
+  exportMode?: BPStudioExportMode;
   optimizeLayout?: boolean;
   optimizerLayout?: "view" | "random";
   optimizerSeed?: number;
@@ -47,9 +47,24 @@ export interface FoldDocument {
   edges_vertices: [number, number][];
   edges_assignment: Assignment[];
   edges_foldAngle: number[];
+  edges_bpRole: BPRole[];
+  edges_bpStudioSource: BPStudioEdgeSource[];
 }
 
 export type Assignment = "B" | "M" | "V" | "F" | "U";
+export type BPRole = "border" | "hinge" | "ridge" | "axis" | "stretch";
+export type BPStudioExportMode = "outer" | "final" | "expanded";
+
+export interface BPStudioEdgeSource {
+  kind: string;
+  creaseType: number;
+  mandatory: boolean;
+  ownerId?: number | string;
+  stretchId?: string;
+  deviceIndex?: number;
+  lineIndex?: number;
+  clippedSegmentIndex?: number;
+}
 
 export interface AdapterMetadata {
   adapter: {
@@ -65,7 +80,7 @@ export interface AdapterMetadata {
     sheet: SheetSpec;
     useAuxiliary: boolean;
     completeRepositories: boolean;
-    exportMode: "outer" | "expanded";
+    exportMode: BPStudioExportMode;
     optimizeLayout: boolean;
     optimizerLayout: "view" | "random";
     optimizerSeed: number | null;
@@ -77,6 +92,7 @@ export interface AdapterMetadata {
     vertexCount: number;
     edgeCount: number;
     assignmentCounts: Record<Assignment, number>;
+    roleCounts: Record<BPRole, number>;
   };
   stretches: StretchMetadata[];
 }

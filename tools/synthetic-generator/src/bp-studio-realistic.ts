@@ -33,7 +33,7 @@ interface AdapterSpec {
   sheet: { width: number; height: number };
   useAuxiliary: boolean;
   completeRepositories: boolean;
-  exportMode: "outer" | "expanded";
+  exportMode: "outer" | "final" | "expanded";
   optimizeLayout: boolean;
   optimizerLayout: "view" | "random";
   optimizerSeed: number;
@@ -75,6 +75,7 @@ export function generateBPStudioRealisticFold(config: GenerationConfig): FOLDFor
   const bucket = bucketFor(config);
   const archetype = config.realisticArchetype as BPStudioArchetype | undefined;
   let lastError = "unknown error";
+  const attemptErrors: string[] = [];
 
   for (let attempt = 0; attempt < 12; attempt++) {
     const attemptSeed = config.seed + attempt * 104729;
@@ -112,9 +113,12 @@ export function generateBPStudioRealisticFold(config: GenerationConfig): FOLDFor
       return fold;
     } catch (error) {
       lastError = error instanceof Error ? error.message : String(error);
+      attemptErrors.push(`attempt ${attempt}: ${truncate(lastError, 1200)}`);
     }
   }
-  throw new Error(`BP Studio realistic generator failed after retries: ${lastError}`);
+  throw new Error(
+    `BP Studio realistic generator failed after retries: ${lastError}\nRecent attempts:\n${attemptErrors.slice(-5).join("\n")}`,
+  );
 }
 
 function ensureAdapterAvailable(): void {
@@ -130,6 +134,7 @@ function runAdapter(spec: AdapterSpec): { fold: FOLDFormat; metadata: AdapterMet
   const specPath = join(dir, "spec.json");
   const foldPath = join(dir, "out.fold");
   const metadataPath = join(dir, "metadata.json");
+  let preserveTempDir = false;
   try {
     writeFileSync(specPath, `${JSON.stringify(spec, null, 2)}\n`);
     const result = spawnSync(
@@ -149,8 +154,15 @@ function runAdapter(spec: AdapterSpec): { fold: FOLDFormat; metadata: AdapterMet
       fold: JSON.parse(readFileSync(foldPath, "utf8")) as FOLDFormat,
       metadata: JSON.parse(readFileSync(metadataPath, "utf8")) as AdapterMetadata,
     };
+  } catch (error) {
+    if (process.env.CP_KEEP_BP_STUDIO_TMP === "1") {
+      preserveTempDir = true;
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`${message}\nBP Studio temp dir preserved: ${dir}`);
+    }
+    throw error;
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    if (!preserveTempDir) rmSync(dir, { recursive: true, force: true });
   }
 }
 
@@ -176,7 +188,7 @@ function toAdapterSpec(spec: BPStudioAdapterSpec): AdapterSpec {
     },
     useAuxiliary: true,
     completeRepositories: true,
-    exportMode: "outer",
+    exportMode: "final",
     optimizeLayout: true,
     optimizerLayout: "view",
     optimizerSeed: spec.seed,
@@ -243,7 +255,7 @@ function bodyToAdapterFlap(
 }
 
 function attachBPStudioMetadata(fold: FOLDFormat, spec: BPStudioAdapterSpec, adapterMetadata: AdapterMetadata): void {
-  fold.edges_bpRole = assignBPRolesByGeometry(fold);
+  fold.edges_bpRole = assignBPRoles(fold);
   fold.edges_foldAngle = fold.edges_assignment.map(assignmentToFoldAngle);
   const counts = roleCounts(fold);
   const moleculeCounts = makeMoleculeCounts(spec, adapterMetadata);
@@ -297,6 +309,11 @@ function localPrecheck(fold: FOLDFormat): { ok: boolean; kawasakiBad: number[]; 
   } catch {
     return { ok: false, kawasakiBad: [-1], maekawaBad: [-1], sampleBadVertices: [-1] };
   }
+}
+
+function assignBPRoles(fold: FOLDFormat): BPRole[] {
+  const geometryRoles = assignBPRolesByGeometry(fold);
+  return fold.edges_vertices.map((_, edgeIndex) => fold.edges_bpRole?.[edgeIndex] ?? geometryRoles[edgeIndex]);
 }
 
 function assignBPRolesByGeometry(fold: FOLDFormat): BPRole[] {
@@ -463,4 +480,8 @@ function isDiagonal45(a: Point, b: Point): boolean {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
+}
+
+function truncate(value: string, maxLength: number): string {
+  return value.length <= maxLength ? value : `${value.slice(0, maxLength)}...`;
 }

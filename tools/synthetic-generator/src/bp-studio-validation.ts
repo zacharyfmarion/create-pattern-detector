@@ -1,6 +1,6 @@
 import { assignmentCounts, roleCounts } from "./fold-utils.ts";
 import { arrangeSegments } from "./line-arrangement.ts";
-import type { BPRole, EdgeAssignment, FOLDFormat, ValidationConfig, ValidationResult } from "./types.ts";
+import type { BPRole, BPStudioEdgeSource, EdgeAssignment, FOLDFormat, ValidationConfig, ValidationResult } from "./types.ts";
 import { validateFold } from "./validate.ts";
 
 type Point = [number, number];
@@ -57,11 +57,12 @@ export interface BPStudioLineExport {
   [key: string]: unknown;
 }
 
-export type BPStudioFoldLike = Omit<Partial<FOLDFormat>, "vertices_coords" | "edges_vertices" | "edges_assignment" | "edges_bpRole"> & {
+export type BPStudioFoldLike = Omit<Partial<FOLDFormat>, "vertices_coords" | "edges_vertices" | "edges_assignment" | "edges_bpRole" | "edges_bpStudioSource"> & {
   vertices_coords: readonly unknown[];
   edges_vertices: readonly unknown[];
   edges_assignment?: readonly unknown[];
   edges_bpRole?: readonly unknown[];
+  edges_bpStudioSource?: readonly BPStudioEdgeSource[];
   edges_foldAngle?: readonly unknown[];
   [key: string]: unknown;
 };
@@ -100,6 +101,7 @@ interface RawSegment {
   p2: Point;
   assignment: unknown;
   role: unknown;
+  source?: BPStudioEdgeSource;
   sourceIndex: number;
 }
 
@@ -108,6 +110,7 @@ interface CanonicalSegment {
   p2: Point;
   assignment: EdgeAssignment;
   role: BPRole;
+  source?: BPStudioEdgeSource;
 }
 
 interface NormalizationBuild {
@@ -138,6 +141,7 @@ const METADATA_SKIP_KEYS = new Set([
   "edges_assignment",
   "edges_foldAngle",
   "edges_bpRole",
+  "edges_bpStudioSource",
   "faces_vertices",
   "faces_edges",
   "lines",
@@ -247,7 +251,7 @@ function buildNormalization(input: BPStudioExportInput, options: BPStudioNormali
     const key = segmentGeometryKey(p1, p2);
     if (seenGeometry.has(key)) duplicateSegments += 1;
     seenGeometry.add(key);
-    arrangedSegments.push({ p1, p2, assignment, role });
+    arrangedSegments.push({ p1, p2, assignment, role, source: raw.source });
   }
 
   return {
@@ -318,6 +322,7 @@ function extractRawSegments(input: BPStudioExportInput): RawSegment[] {
       p2: vertices[b],
       assignment: input.edges_assignment?.[sourceIndex] ?? input.edges_foldAngle?.[sourceIndex] ?? "U",
       role: input.edges_bpRole?.[sourceIndex],
+      source: input.edges_bpStudioSource?.[sourceIndex],
       sourceIndex,
     };
   });
