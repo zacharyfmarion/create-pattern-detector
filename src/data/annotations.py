@@ -9,8 +9,16 @@ Generates multi-channel ground truth maps from FOLD data:
 
 from typing import Dict, Tuple
 import numpy as np
-import cv2
-from scipy.ndimage import distance_transform_edt
+
+try:
+    import cv2
+except ModuleNotFoundError:  # pragma: no cover - used by lightweight smoke environments.
+    cv2 = None
+
+try:
+    from scipy.ndimage import distance_transform_edt
+except ModuleNotFoundError:  # pragma: no cover - used by lightweight smoke environments.
+    distance_transform_edt = None
 
 from .fold_parser import CreasePattern, transform_coords
 
@@ -59,7 +67,7 @@ class GroundTruthGenerator:
         self.junction_radius = junction_radius
         self.junction_sigma = junction_sigma
         self.use_antialiasing = use_antialiasing
-        self.line_type = cv2.LINE_AA if use_antialiasing else cv2.LINE_8
+        self.line_type = cv2.LINE_AA if cv2 is not None and use_antialiasing else (cv2.LINE_8 if cv2 is not None else None)
 
     def generate(self, cp: CreasePattern) -> Dict[str, np.ndarray]:
         """
@@ -154,14 +162,7 @@ class GroundTruthGenerator:
 
                 # Draw anti-aliased line to grayscale buffer
                 line_mask = np.zeros((self.image_size, self.image_size), dtype=np.uint8)
-                cv2.line(
-                    line_mask,
-                    (int(round(v1[0])), int(round(v1[1]))),
-                    (int(round(v2[0])), int(round(v2[1]))),
-                    255,
-                    self.line_width,
-                    lineType=self.line_type,
-                )
+                self._draw_line(line_mask, v1, v2, 255)
 
                 # Convert to float and accumulate
                 line_float = line_mask.astype(np.float32) / 255.0
@@ -183,13 +184,7 @@ class GroundTruthGenerator:
                 v1 = vertices[v1_idx].astype(np.int32)
                 v2 = vertices[v2_idx].astype(np.int32)
 
-                cv2.line(
-                    seg,
-                    (int(v1[0]), int(v1[1])),
-                    (int(v2[0]), int(v2[1])),
-                    seg_class,
-                    self.line_width,
-                )
+                self._draw_line(seg, v1, v2, seg_class)
 
             seg = seg.astype(np.int64)
 
@@ -239,14 +234,7 @@ class GroundTruthGenerator:
         """Draw orientation values along a line segment with optional anti-aliasing."""
         # Create a mask for the line
         mask = np.zeros((self.image_size, self.image_size), dtype=np.uint8)
-        cv2.line(
-            mask,
-            (int(round(v1[0])), int(round(v1[1]))),
-            (int(round(v2[0])), int(round(v2[1]))),
-            255,
-            self.line_width,
-            lineType=self.line_type,
-        )
+        self._draw_line(mask, v1, v2, 255)
 
         if self.use_antialiasing:
             # Use anti-aliased blending for smooth orientation transitions
@@ -358,9 +346,43 @@ class GroundTruthGenerator:
         crease_mask = segmentation > 0
 
         # Distance transform (distance from background to nearest crease)
-        distance = distance_transform_edt(~crease_mask)
+        if distance_transform_edt is not None:
+            distance = distance_transform_edt(~crease_mask)
+        else:
+            distance = _chamfer_distance_transform(crease_mask)
 
         return distance.astype(np.float32)
+
+    def _draw_line(
+        self,
+        image: np.ndarray,
+        v1: np.ndarray,
+        v2: np.ndarray,
+        value: int,
+    ) -> None:
+        """Draw a line with OpenCV when available, otherwise use Pillow."""
+
+        p1 = (int(round(v1[0])), int(round(v1[1])))
+        p2 = (int(round(v2[0])), int(round(v2[1])))
+        if cv2 is not None:
+            cv2.line(image, p1, p2, value, self.line_width, lineType=self.line_type)
+            return
+
+        from PIL import Image, ImageDraw
+
+        scale = 3 if self.use_antialiasing else 1
+        canvas = Image.fromarray(image)
+        if scale > 1:
+            canvas = canvas.resize((self.image_size * scale, self.image_size * scale), Image.Resampling.NEAREST)
+        draw = ImageDraw.Draw(canvas)
+        draw.line(
+            [(p1[0] * scale, p1[1] * scale), (p2[0] * scale, p2[1] * scale)],
+            fill=int(value),
+            width=max(1, self.line_width * scale),
+        )
+        if scale > 1:
+            canvas = canvas.resize((self.image_size, self.image_size), Image.Resampling.LANCZOS)
+        image[:, :] = np.asarray(canvas, dtype=image.dtype)
 
     def _generate_junction_offsets(
         self,
@@ -433,6 +455,43 @@ class GroundTruthGenerator:
             mask[i, j] = True
 
         return offset, mask
+
+
+def _chamfer_distance_transform(crease_mask: np.ndarray) -> np.ndarray:
+    """Approximate distance transform used when SciPy is unavailable."""
+
+    h, w = crease_mask.shape
+    inf = float(h + w)
+    dist = np.where(crease_mask, 0.0, inf).astype(np.float32)
+    diag = np.float32(np.sqrt(2.0))
+
+    for y in range(h):
+        for x in range(w):
+            best = dist[y, x]
+            if x > 0:
+                best = min(best, dist[y, x - 1] + 1.0)
+            if y > 0:
+                best = min(best, dist[y - 1, x] + 1.0)
+            if x > 0 and y > 0:
+                best = min(best, dist[y - 1, x - 1] + diag)
+            if x + 1 < w and y > 0:
+                best = min(best, dist[y - 1, x + 1] + diag)
+            dist[y, x] = best
+
+    for y in range(h - 1, -1, -1):
+        for x in range(w - 1, -1, -1):
+            best = dist[y, x]
+            if x + 1 < w:
+                best = min(best, dist[y, x + 1] + 1.0)
+            if y + 1 < h:
+                best = min(best, dist[y + 1, x] + 1.0)
+            if x + 1 < w and y + 1 < h:
+                best = min(best, dist[y + 1, x + 1] + diag)
+            if x > 0 and y + 1 < h:
+                best = min(best, dist[y + 1, x - 1] + diag)
+            dist[y, x] = best
+
+    return dist
 
 
 def visualize_ground_truth(
