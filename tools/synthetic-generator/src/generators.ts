@@ -1,4 +1,5 @@
 import ear from "rabbit-ear";
+import { generateBPStudioRealisticFold } from "./bp-studio-realistic.ts";
 import { generateBoxPleatFold } from "./box-pleat.ts";
 import { generateDenseNonBPFold } from "./dense-non-bp.ts";
 import { generateRealisticBoxPleatFold } from "./realistic-box-pleat.ts";
@@ -17,6 +18,7 @@ export function generateFold(config: GenerationConfig): FOLDFormat {
   if (config.family === "single-vertex") return generateSingleVertexFold(config);
   if (config.family === "box-pleat") return generateBoxPleatFold(config);
   if (config.family === "realistic-box-pleat") return generateRealisticBoxPleatFold(config);
+  if (config.family === "bp-studio-realistic") return generateBPStudioRealisticFold(config);
   if (config.family === "dense-non-bp") return generateDenseNonBPFold(config);
   if (config.family === "grid-baseline") return generateGridBaselineFold(config);
   throw new Error(`Unknown generator family: ${String(config.family)}`);

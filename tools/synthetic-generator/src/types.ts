@@ -1,6 +1,13 @@
 export type EdgeAssignment = "B" | "M" | "V" | "F" | "U" | "C";
 export type BPRole = "border" | "hinge" | "ridge" | "axis" | "stretch";
-export type BPSubfamily = "two-flap-stretch" | "uniaxial-chain" | "symmetric-insect-lite" | "dense-molecule-tessellation" | "realistic-tree-base";
+export type BPSubfamily =
+  | "two-flap-stretch"
+  | "uniaxial-chain"
+  | "symmetric-insect-lite"
+  | "dense-molecule-tessellation"
+  | "realistic-tree-base"
+  | "bp-studio-export"
+  | "bp-studio-strict-completion";
 export type DenseNonBPSubfamily = "recursive-axiom" | "expanded-classic" | "radial-multi-vertex" | "tessellation-like";
 export type RealisticBPArchetype = "insect" | "quadruped" | "bird" | "object" | "abstract";
 export type BoxPleatMode = "simple" | "dense";
@@ -94,7 +101,16 @@ export interface FOLDFormat {
   [key: string]: unknown;
 }
 
-export const GENERATOR_FAMILIES = ["axiom", "classic", "single-vertex", "box-pleat", "realistic-box-pleat", "dense-non-bp", "grid-baseline"] as const;
+export const GENERATOR_FAMILIES = [
+  "axiom",
+  "classic",
+  "single-vertex",
+  "box-pleat",
+  "realistic-box-pleat",
+  "bp-studio-realistic",
+  "dense-non-bp",
+  "grid-baseline",
+] as const;
 export type GeneratorFamily = (typeof GENERATOR_FAMILIES)[number];
 export type GlobalValidationBackend = "rabbit-ear-solver" | "fold-cli";
 
@@ -135,6 +151,7 @@ export interface SyntheticRecipe {
   complexityBuckets: ComplexityBucket[];
   validation: ValidationConfig;
   renderVariants: RenderVariantConfig[];
+  bpStudioSampler?: Record<string, unknown>;
 }
 
 export interface GenerationConfig {

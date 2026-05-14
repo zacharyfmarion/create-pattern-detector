@@ -167,6 +167,19 @@ This gives us authentic BP structure first, with strict labels second.
   - Rendered variants.
   - Manifest rows containing BP Studio project metadata and strict validation metadata.
 
+## Implementation Status
+
+Current checkpoint:
+
+- BP Studio is pinned as `third_party/bp-studio` and wrapped by `tools/bp-studio-adapter/`.
+- `bp-studio-realistic` exists as a main generator family with `recipes/synthetic/bp_studio_realistic_v1.yaml`.
+- The generator samples BP Studio-style tree/layout specs, runs the BP Studio adapter, normalizes raw exports, records raw export metadata, and then uses a strict certified completion for accepted labels when the raw export fails local constraints.
+- A 4-sample smoke can generate, render, create folded previews, produce QA JSON, and load every manifest row through `SyntheticManifestDataset`.
+
+Important blocker discovered during implementation:
+
+- Raw BP Studio CP exports are useful candidates/calibration artifacts, but they can fail local Kawasaki/Maekawa after arrangement. They must not be treated as production labels until Phase 5 grows a certified BP Studio repair/completion layer. The current strict-completion fallback keeps the pipeline end-to-end valid, but it is not the final production distribution.
+
 ## Parallel Workstreams
 
 These are designed for sub-agents with disjoint write scopes.

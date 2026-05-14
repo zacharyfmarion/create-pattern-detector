@@ -13,6 +13,7 @@ const DEFAULT_RECIPE: SyntheticRecipe = {
     "single-vertex": 0.25,
     "box-pleat": 0.2,
     "realistic-box-pleat": 0,
+    "bp-studio-realistic": 0,
     "dense-non-bp": 0,
     "grid-baseline": 0,
   },

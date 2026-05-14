@@ -53,20 +53,29 @@ test("deterministic split helper preserves recipe ratios for smoke counts", () =
   expect(counts).toEqual({ train: 27, val: 4, test: 1 });
 });
 
-test("axiom, classic, single-vertex, box-pleat, realistic BP, dense non-BP, and baseline grid families produce accepted graphs", async () => {
-  const families: GeneratorFamily[] = ["axiom", "classic", "single-vertex", "box-pleat", "realistic-box-pleat", "dense-non-bp", "grid-baseline"];
+test("axiom, classic, single-vertex, BP, BP Studio, dense non-BP, and baseline grid families produce accepted graphs", async () => {
+  const families: GeneratorFamily[] = [
+    "axiom",
+    "classic",
+    "single-vertex",
+    "box-pleat",
+    "realistic-box-pleat",
+    "bp-studio-realistic",
+    "dense-non-bp",
+    "grid-baseline",
+  ];
   for (const family of families) {
-    const dense = family === "dense-non-bp" || family === "realistic-box-pleat";
+    const dense = family === "dense-non-bp" || family === "realistic-box-pleat" || family === "bp-studio-realistic";
     const fold = generateFold({ id: family, family, seed: 12345, numCreases: dense ? 220 : 32, bucket: dense ? "small" : "test", dense });
     const result = await validateFold(fold, {
       ...validation,
       maxVertices: 1200,
       maxEdges: 3000,
-      requireBoxPleat: family === "box-pleat" || family === "realistic-box-pleat",
-      boxPleatMode: family === "realistic-box-pleat" ? "dense" : "simple",
+      requireBoxPleat: family === "box-pleat" || family === "realistic-box-pleat" || family === "bp-studio-realistic",
+      boxPleatMode: family === "realistic-box-pleat" || family === "bp-studio-realistic" ? "dense" : "simple",
       requireDense: dense,
-      requireRealistic: family === "realistic-box-pleat",
-      minRealismScore: family === "realistic-box-pleat" ? 0.35 : undefined,
+      requireRealistic: family === "realistic-box-pleat" || family === "bp-studio-realistic",
+      minRealismScore: family === "realistic-box-pleat" || family === "bp-studio-realistic" ? 0.35 : undefined,
     });
     expect(result, `${family}: ${result.errors.join("; ")}`).toMatchObject({ valid: true });
   }
@@ -87,6 +96,23 @@ test("fixed seed produces identical realistic box-pleat FOLD output", () => {
     realisticArchetype: "insect" as const,
   };
   expect(JSON.stringify(generateFold(config))).toEqual(JSON.stringify(generateFold(config)));
+});
+
+test("fixed seed produces identical BP Studio-backed FOLD output with raw export metadata", () => {
+  const config = {
+    id: "bp-studio-fixed",
+    family: "bp-studio-realistic" as const,
+    seed: 24681357,
+    numCreases: 220,
+    bucket: "small",
+    realisticArchetype: "insect" as const,
+  };
+  const fold = generateFold(config);
+  expect(JSON.stringify(fold)).toEqual(JSON.stringify(generateFold(config)));
+  expect(fold.bp_metadata?.bpSubfamily).toBe("bp-studio-strict-completion");
+  expect(fold.bp_studio_metadata).toMatchObject({
+    strictCompletion: { used: true },
+  });
 });
 
 test("GOPS factor search rejects odd-overlap cases", () => {

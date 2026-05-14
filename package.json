@@ -4,6 +4,7 @@
     "generate": "bun run tools/synthetic-generator/src/index.ts",
     "folded-preview": "bun run tools/synthetic-generator/src/folded-preview.ts",
     "bp-realism-report": "bun run tools/synthetic-generator/src/bp-realism-report.ts",
+    "bpstudio-adapter": "bun --cwd tools/bp-studio-adapter run generate",
     "render-synthetic": "python3 scripts/data/render_synthetic_dataset.py"
   }
 }

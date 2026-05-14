@@ -114,6 +114,13 @@ The script refuses to replace a non-empty `data/output/scraped` directory unless
 
 Keep raw dataset files, crops, manifests, and generated reports out of git. Commit small code, docs, config examples, tests, and deterministic fixture manifests instead.
 
+BP Studio is pinned as a git submodule under `third_party/bp-studio`, with a headless adapter package in `tools/bp-studio-adapter/`. After cloning this worktree, initialize the submodule before running BP Studio-backed generation:
+
+```bash
+git submodule update --init --recursive
+bun install --cwd tools/bp-studio-adapter
+```
+
 ## Common Commands
 
 Light syntax check:
@@ -196,12 +203,28 @@ python scripts/data/render_folded_preview.py --root data/generated/synthetic/box
 bun run bp-realism-report -- --root data/generated/synthetic/box_pleat_realistic_v3
 ```
 
+BP Studio-backed realistic smoke:
+
+```bash
+bun run generate -- --recipe recipes/synthetic/bp_studio_realistic_v1.yaml --count 4 --out /tmp/bp_studio_realistic_v1 --max-attempts 120
+python scripts/data/render_synthetic_dataset.py --root /tmp/bp_studio_realistic_v1
+bun run folded-preview -- --root /tmp/bp_studio_realistic_v1 --limit 4
+python scripts/data/bp_realism_report.py --root /tmp/bp_studio_realistic_v1 --fail-under 0.35
+```
+
 Generator checks:
 
 ```bash
 cd tools/synthetic-generator
 bun run typecheck
 bun test
+```
+
+BP Studio adapter smoke:
+
+```bash
+bun --cwd tools/bp-studio-adapter test
+bun run bpstudio-adapter -- --spec tools/bp-studio-adapter/fixtures/two-flap.json --out /tmp/bps.fold --metadata /tmp/bps.meta.json
 ```
 
 Code quality, once dependencies are installed:
@@ -226,7 +249,8 @@ Do not rely on the console scripts in `pyproject.toml` (`cp-train`, `cp-evaluate
 - There is no finished inference CLI that takes an arbitrary image and writes a cleaned `.fold` file. `ExtractedGraph.to_fold_format()` exists, but full image rectification, graph-head filtering, coordinate denormalization, and validation are not wired into a productized path.
 - The Rabbit Ear generator uses `ear.graph.square()`, `ear.graph.flatFold(graph, vector, origin, assignment)`, `ear.singleVertex.validateKawasaki/validateMaekawa`, and `ear.layer.solver`. Keep tests aligned with the installed Rabbit Ear API before changing generator families. The `box-pleat` family is intentionally planar-arranged from BP-style gadgets and then validated strictly; do not replace it with a full-sheet alternating grid baseline.
 - Dense BP samples use strict molecule fields over grid/half-grid/45-degree geometry. The all-cell lattice is intentionally mixed with sparse checker diamond chains so visual QA is not only a ruled grid. Dense non-BP samples include radial families plus a Miura-like slanted tessellation.
-- Realistic BP V3 lives in the separate `realistic-box-pleat` family. It generates symbolic model trees and macro flap/body layouts, then builds strict macro-grid BP molecules with deterministic GF(2) diagonal assignment solving. Keep it separate from dense V2: V2 is a stress-test baseline, while V3 is the production-training candidate.
+- `bp-studio-realistic` is the production-facing BP Studio integration path. It samples BP Studio-style trees/layouts, runs the pinned BP Studio adapter, records the raw export as calibration metadata, then accepts only strict solver-passing completions. Raw BP Studio CP exports can fail local Kawasaki/Maekawa, so do not train on them directly until a certified completion/repair layer exists.
+- The older `realistic-box-pleat` family remains a strict certified completion baseline. Keep it separate from dense V2: V2 is a stress-test baseline, while BP Studio-backed generation is the production-training direction.
 - V3 realism gates intentionally score macro density variation, repetition, archetype metadata, molecule diversity, and nonuniform body/flap structure. If a sample looks like a uniform triangle lattice or plain ruled grid, fix the `realistic-box-pleat` layout/molecule selection rather than lowering `requireRealistic`.
 - `strictGlobal: true` with `globalBackend: rabbit-ear-solver` means the generator checks local Kawasaki/Maekawa, asks Rabbit Ear for globally consistent layer ordering, and computes finite flat-folded vertex coordinates. Use `folded-preview` when you need visual QA of the folded state, not only the CP drawing.
 - In lightweight Python environments without OpenCV/SciPy, `src/data/annotations.py` uses optimized Pillow/NumPy fallbacks. Keep dense manifest loading smoke-tested; a naive per-edge supersampled fallback is too slow for 1,000+ edge samples.

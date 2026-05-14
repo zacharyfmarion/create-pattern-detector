@@ -151,8 +151,10 @@ export function normalizeBPStudioFold(input: BPStudioExportInput, options: BPStu
 
   const summary = summarizeFromBuild(build, normalized);
   const existingBPStudioMetadata = (input as Record<string, unknown>).bp_studio_metadata;
+  const assignedBPStudioMetadata = normalized.bp_studio_metadata;
   normalized.bp_studio_metadata = {
     ...(isRecord(existingBPStudioMetadata) ? existingBPStudioMetadata : {}),
+    ...(isRecord(assignedBPStudioMetadata) ? assignedBPStudioMetadata : {}),
     normalization: summary,
   };
   return normalized;
