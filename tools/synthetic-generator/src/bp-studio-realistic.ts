@@ -60,6 +60,7 @@ interface AdapterMetadata {
       junctionCount?: number;
     };
   }>;
+  adapterTempDir?: string;
   [key: string]: unknown;
 }
 
@@ -106,8 +107,9 @@ export function generateBPStudioRealisticFold(config: GenerationConfig): FOLDFor
       attachBPStudioMetadata(fold, spec, adapterMetadata);
       const local = localPrecheck(fold);
       if (!local.ok) {
+        const tempDirNote = adapterMetadata.adapterTempDir ? `, tempDir=${adapterMetadata.adapterTempDir}` : "";
         throw new Error(
-          `raw BP Studio export failed local Kawasaki/Maekawa: kawasaki=${local.kawasakiBad.length}, maekawa=${local.maekawaBad.length}, sample=${local.sampleBadVertices.join(",")}`,
+          `raw BP Studio export failed local Kawasaki/Maekawa: kawasaki=${local.kawasakiBad.length}, maekawa=${local.maekawaBad.length}, sample=${local.sampleBadVertices.join(",")}${tempDirNote}`,
         );
       }
       return fold;
@@ -134,7 +136,8 @@ function runAdapter(spec: AdapterSpec): { fold: FOLDFormat; metadata: AdapterMet
   const specPath = join(dir, "spec.json");
   const foldPath = join(dir, "out.fold");
   const metadataPath = join(dir, "metadata.json");
-  let preserveTempDir = false;
+  const keepTempDir = process.env.CP_KEEP_BP_STUDIO_TMP === "1";
+  let preserveTempDir = keepTempDir;
   try {
     writeFileSync(specPath, `${JSON.stringify(spec, null, 2)}\n`);
     const result = spawnSync(
@@ -152,10 +155,13 @@ function runAdapter(spec: AdapterSpec): { fold: FOLDFormat; metadata: AdapterMet
     }
     return {
       fold: JSON.parse(readFileSync(foldPath, "utf8")) as FOLDFormat,
-      metadata: JSON.parse(readFileSync(metadataPath, "utf8")) as AdapterMetadata,
+      metadata: {
+        ...(JSON.parse(readFileSync(metadataPath, "utf8")) as AdapterMetadata),
+        ...(keepTempDir ? { adapterTempDir: dir } : {}),
+      },
     };
   } catch (error) {
-    if (process.env.CP_KEEP_BP_STUDIO_TMP === "1") {
+    if (keepTempDir) {
       preserveTempDir = true;
       const message = error instanceof Error ? error.message : String(error);
       throw new Error(`${message}\nBP Studio temp dir preserved: ${dir}`);
@@ -169,6 +175,7 @@ function runAdapter(spec: AdapterSpec): { fold: FOLDFormat; metadata: AdapterMet
 function toAdapterSpec(spec: BPStudioAdapterSpec): AdapterSpec {
   const idMap = makeNodeIdMap(spec);
   const leaves = leafNodeIds(spec);
+  const edges = adapterTreeEdges(spec);
   const flapByNode = new Map(spec.layout.flaps.map((flap) => [flap.nodeId, flap]));
   const bodyByNode = new Map(spec.layout.bodies.map((body) => [body.nodeId, body]));
   const flaps = [...leaves].map((nodeId) => {
@@ -194,7 +201,7 @@ function toAdapterSpec(spec: BPStudioAdapterSpec): AdapterSpec {
     optimizerSeed: spec.seed,
     optimizerUseDimension: true,
     tree: {
-      edges: spec.tree.edges.map((edge) => ({
+      edges: edges.map((edge) => ({
         n1: idMap.get(edge.from)!,
         n2: idMap.get(edge.to)!,
         length: edge.length,
@@ -205,17 +212,22 @@ function toAdapterSpec(spec: BPStudioAdapterSpec): AdapterSpec {
 }
 
 function makeNodeIdMap(spec: BPStudioAdapterSpec): Map<string, number> {
-  const ordered = [
-    spec.tree.rootId,
-    ...spec.tree.nodes.map((node) => node.id).filter((id) => id !== spec.tree.rootId),
-  ];
+  const referenced = new Set<string>();
+  for (const edge of adapterTreeEdges(spec)) {
+    referenced.add(edge.from);
+    referenced.add(edge.to);
+  }
+  for (const flap of spec.layout.flaps) referenced.add(flap.nodeId);
+  const ordered = spec.tree.nodes.map((node) => node.id).filter((id) => id !== spec.tree.rootId && referenced.has(id));
   return new Map(ordered.map((id, index) => [id, index]));
 }
 
 function leafNodeIds(spec: BPStudioAdapterSpec): Set<string> {
   const adjacency = new Map<string, number>();
-  for (const node of spec.tree.nodes) adjacency.set(node.id, 0);
-  for (const edge of spec.tree.edges) {
+  for (const node of spec.tree.nodes) {
+    if (node.id !== spec.tree.rootId) adjacency.set(node.id, 0);
+  }
+  for (const edge of adapterTreeEdges(spec)) {
     adjacency.set(edge.from, (adjacency.get(edge.from) ?? 0) + 1);
     adjacency.set(edge.to, (adjacency.get(edge.to) ?? 0) + 1);
   }
@@ -225,6 +237,10 @@ function leafNodeIds(spec: BPStudioAdapterSpec): Set<string> {
   }
   for (const flap of spec.layout.flaps) leaves.add(flap.nodeId);
   return leaves;
+}
+
+function adapterTreeEdges(spec: BPStudioAdapterSpec): BPStudioAdapterSpec["tree"]["edges"] {
+  return spec.tree.edges.filter((edge) => edge.from !== spec.tree.rootId && edge.to !== spec.tree.rootId);
 }
 
 function toAdapterFlap(id: number, flap: BPStudioFlapPlacement, sheetWidth: number, sheetHeight: number): AdapterSpec["tree"]["flaps"][number] {

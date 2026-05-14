@@ -40,4 +40,20 @@ describe("BP Studio adapter", () => {
     expect(fold.edges_bpStudioSource.every((source) => typeof source.kind === "string")).toBe(true);
     expect(metadata.cp.roleCounts.hinge).toBeGreaterThan(0);
   });
+
+  test("rejects unflapped leaves before BP Studio junction processing", async () => {
+    await expect(generate({
+      title: "bad dummy root",
+      sheet: { width: 16, height: 16 },
+      tree: {
+        edges: [
+          { n1: 0, n2: 1, length: 4 },
+          { n1: 1, n2: 2, length: 4 },
+        ],
+        flaps: [
+          { id: 2, x: 8, y: 8, width: 0, height: 0 },
+        ],
+      },
+    })).rejects.toThrow("missing flap ids: 0");
+  });
 });

@@ -7,7 +7,6 @@ import { Bridge } from "client/plugins/optimizer/bridge";
 import { TreeController } from "core/controller/treeController";
 import { Tree } from "core/design/context/tree";
 import { heightTask } from "core/design/tasks/height";
-import { Clip } from "core/math/sweepLine/clip/clip";
 import { Processor } from "core/service/processor";
 import { State, fullReset } from "core/service/state";
 import optimizer from "lib/optimizer/debug/optimizer.js";
@@ -58,6 +57,7 @@ const FOLD_ANGLE_BY_ASSIGNMENT: Record<Assignment, number> = {
   F: 0,
   U: 0
 };
+const GEOMETRY_EPSILON = 1e-8;
 
 export async function generate(specInput: unknown): Promise<GenerationResult> {
   const spec = normalizeSpec(specInput);
@@ -71,13 +71,15 @@ export async function generate(specInput: unknown): Promise<GenerationResult> {
   const optimizerLayout = spec.optimizerLayout ?? "view";
   const optimizerSeed = spec.optimizerSeed ?? null;
 
-  createBpStudioTree(edges, flaps);
+  validateLeafFlaps(edges, flaps);
+  createBpStudioTree(edges, flaps, { runTasks: !optimizeLayout || optimizerLayout === "random" });
   if(optimizeLayout) {
     const optimized = await optimizeTreeLayout(spec, flaps);
     sheet = optimized.sheet;
     flaps = optimized.flaps;
     spec.sheet = sheet;
-    createBpStudioTree(edges, flaps);
+    validateLeafFlaps(edges, flaps);
+    createBpStudioTree(edges, flaps, { runTasks: true });
   }
   if(completeRepositories) completeAllStretches();
 
@@ -107,7 +109,7 @@ async function main(): Promise<void> {
   if(args.metadata) await writeJson(args.metadata, metadata);
 }
 
-function createBpStudioTree(edges: EdgeSpec[], flaps: FlapSpec[]): void {
+function createBpStudioTree(edges: EdgeSpec[], flaps: FlapSpec[], options: { runTasks?: boolean } = {}): void {
   fullReset();
   const tree = new Tree(
     edges.map(e => ({
@@ -124,7 +126,7 @@ function createBpStudioTree(edges: EdgeSpec[], flaps: FlapSpec[]): void {
     })) as JFlap[]
   );
   State.m.$tree = tree;
-  Processor.$run(heightTask);
+  if(options.runTasks ?? true) Processor.$run(heightTask);
 }
 
 function completeAllStretches(): void {
@@ -366,47 +368,45 @@ function getExpandedCP(borders: Path, useAuxiliary: boolean): TaggedCPLine[] {
 }
 
 function clipTagged(lines: TaggedCPLine[]): TaggedCPLine[] {
-  return new Clip().$get(lines).map((line, clippedSegmentIndex) => {
-    const source = bestSourceForClippedLine(line, lines);
-    return {
+  const sanitized = sanitizeTaggedLines(lines);
+  const bounds = clipBoundsFromBorder(sanitized);
+  const clipped = sanitized.flatMap((line, clippedSegmentIndex) => {
+    const segment = line.type === CreaseType.Border
+      ? [line.p1, line.p2] as [IPoint, IPoint]
+      : clipSegmentToBounds(line.p1, line.p2, bounds);
+    if(!segment) return [];
+    const [p1, p2] = segment;
+    return [{
       ...line,
-      role: source.role,
+      p1,
+      p2,
       source: {
-        ...source.source,
+        ...line.source,
         creaseType: line.type,
         clippedSegmentIndex,
       },
-    };
+    }];
   });
+  return sanitizeTaggedLines(clipped);
 }
 
-function bestSourceForClippedLine(line: CPLine, sources: TaggedCPLine[]): TaggedCPLine {
-  const matches = sources
-    .filter(source => source.type == line.type && containsSegment(source, line))
-    .sort((a, b) => sourcePriority(b) - sourcePriority(a));
-  return matches[0] ?? {
-    ...line,
-    role: roleFromCreaseType(line.type),
-    source: {
-      kind: "unknown-clipped-line",
-      creaseType: line.type,
-      mandatory: line.type != CreaseType.Auxiliary,
-    },
-  };
-}
+function sanitizeTaggedLines(lines: TaggedCPLine[]): TaggedCPLine[] {
+  const byGeometry = new Map<string, TaggedCPLine>();
+  for(const line of lines) {
+    if(!isFinitePoint(line.p1) || !isFinitePoint(line.p2)) continue;
+    if(distance(line.p1, line.p2) <= GEOMETRY_EPSILON) continue;
 
-function containsSegment(source: CPLine, line: CPLine): boolean {
-  return pointOnSegment(line.p1, source) && pointOnSegment(line.p2, source);
-}
-
-function pointOnSegment(point: IPoint, segment: CPLine): boolean {
-  const cross = (segment.p2.x - segment.p1.x) * (point.y - segment.p1.y)
-    - (segment.p2.y - segment.p1.y) * (point.x - segment.p1.x);
-  if(Math.abs(cross) > 1e-8) return false;
-  return point.x >= Math.min(segment.p1.x, segment.p2.x) - 1e-8
-    && point.x <= Math.max(segment.p1.x, segment.p2.x) + 1e-8
-    && point.y >= Math.min(segment.p1.y, segment.p2.y) - 1e-8
-    && point.y <= Math.max(segment.p1.y, segment.p2.y) + 1e-8;
+    const key = lineGeometryKey(line);
+    const existing = byGeometry.get(key);
+    if(!existing || sourcePriority(line) > sourcePriority(existing)) {
+      byGeometry.set(key, {
+        ...line,
+        p1: roundPoint(line.p1),
+        p2: roundPoint(line.p2),
+      });
+    }
+  }
+  return [...byGeometry.values()];
 }
 
 function sourcePriority(line: TaggedCPLine): number {
@@ -414,11 +414,60 @@ function sourcePriority(line: TaggedCPLine): number {
   return rolePriority[line.role] + (line.source.mandatory ? 1 : 0);
 }
 
-function roleFromCreaseType(type: CreaseType): BPRole {
-  if(type == CreaseType.Border) return "border";
-  if(type == CreaseType.Mountain) return "ridge";
-  if(type == CreaseType.Valley) return "axis";
-  return "hinge";
+interface ClipBounds {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+}
+
+function clipBoundsFromBorder(lines: TaggedCPLine[]): ClipBounds {
+  const borderPoints = lines
+    .filter(line => line.type === CreaseType.Border)
+    .flatMap(line => [line.p1, line.p2]);
+  if(borderPoints.length === 0) {
+    const points = lines.flatMap(line => [line.p1, line.p2]);
+    return boundsForPoints(points);
+  }
+  return boundsForPoints(borderPoints);
+}
+
+function boundsForPoints(points: IPoint[]): ClipBounds {
+  return {
+    minX: Math.min(...points.map(point => point.x)),
+    minY: Math.min(...points.map(point => point.y)),
+    maxX: Math.max(...points.map(point => point.x)),
+    maxY: Math.max(...points.map(point => point.y)),
+  };
+}
+
+function clipSegmentToBounds(p1: IPoint, p2: IPoint, bounds: ClipBounds): [IPoint, IPoint] | null {
+  const dx = p2.x - p1.x;
+  const dy = p2.y - p1.y;
+  let t0 = 0;
+  let t1 = 1;
+  for(const [p, q] of [
+    [-dx, p1.x - bounds.minX],
+    [dx, bounds.maxX - p1.x],
+    [-dy, p1.y - bounds.minY],
+    [dy, bounds.maxY - p1.y],
+  ] as const) {
+    if(Math.abs(p) <= GEOMETRY_EPSILON) {
+      if(q < -GEOMETRY_EPSILON) return null;
+      continue;
+    }
+    const r = q / p;
+    if(p < 0) {
+      if(r > t1) return null;
+      if(r > t0) t0 = r;
+    } else {
+      if(r < t0) return null;
+      if(r < t1) t1 = r;
+    }
+  }
+  const a = { x: p1.x + t0 * dx, y: p1.y + t0 * dy };
+  const b = { x: p1.x + t1 * dx, y: p1.y + t1 * dy };
+  return distance(a, b) <= GEOMETRY_EPSILON ? null : [roundPoint(a), roundPoint(b)];
 }
 
 function toFold(lines: TaggedCPLine[], spec: BpStudioAdapterSpec): FoldDocument {
@@ -575,6 +624,53 @@ function countRoles(roles: BPRole[]): Record<BPRole, number> {
   return counts;
 }
 
+function validateLeafFlaps(edges: EdgeSpec[], flaps: FlapSpec[]): void {
+  const degree = new Map<number, number>();
+  for(const edge of edges) {
+    degree.set(edge.n1, (degree.get(edge.n1) ?? 0) + 1);
+    degree.set(edge.n2, (degree.get(edge.n2) ?? 0) + 1);
+  }
+  const flapIds = new Set(flaps.map(flap => flap.id));
+  const missing = [...degree.entries()]
+    .filter(([, count]) => count <= 1)
+    .map(([id]) => id)
+    .filter(id => !flapIds.has(id))
+    .sort((a, b) => a - b);
+  if(missing.length) {
+    throw new Error(`Every BP Studio leaf must have flap geometry; missing flap ids: ${missing.join(", ")}`);
+  }
+}
+
+function isFinitePoint(point: IPoint): boolean {
+  return Number.isFinite(point.x) && Number.isFinite(point.y);
+}
+
+function distance(a: IPoint, b: IPoint): number {
+  return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+function lineGeometryKey(line: TaggedCPLine): string {
+  const p1 = pointKey(roundPoint(line.p1));
+  const p2 = pointKey(roundPoint(line.p2));
+  const [a, b] = p1 <= p2 ? [p1, p2] : [p2, p1];
+  return `${line.type}:${a}:${b}`;
+}
+
+function pointKey(point: IPoint): string {
+  return `${point.x.toFixed(9)},${point.y.toFixed(9)}`;
+}
+
+function roundPoint(point: IPoint): IPoint {
+  return {
+    x: round(point.x),
+    y: round(point.y),
+  };
+}
+
+function round(value: number): number {
+  return Math.round(value * 1_000_000_000) / 1_000_000_000;
+}
+
 function getTreeParts(spec: BpStudioAdapterSpec): { edges: EdgeSpec[]; flaps: FlapSpec[] } {
   return {
     edges: spec.tree?.edges ?? spec.edges ?? [],
@@ -679,7 +775,11 @@ class VertexSet {
 
 if(import.meta.main) {
   main().catch(error => {
-    console.error(error instanceof Error ? error.message : error);
+    if(process.env.BP_STUDIO_ADAPTER_STACK === "1" && error instanceof Error) {
+      console.error(error.stack ?? error.message);
+    } else {
+      console.error(error instanceof Error ? error.message : error);
+    }
     process.exit(1);
   });
 }

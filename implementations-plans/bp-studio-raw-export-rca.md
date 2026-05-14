@@ -37,6 +37,13 @@ Final-rendered/source-ancestry experiment:
 - Diagnostic greedy local repair on the same two-flap fixture can make local checks pass only by unassigning all `30` folded non-border creases, leaving retention `0.0`. This proves that naive edge deletion/unassignment is not a viable production repair policy.
 - A 3-attempt production smoke with final-rendered export still produced `0/1` accepted; representative failures are now BP Studio internal layout/export crashes (`undefined is not an object` inside BP Studio geometry) before strict validation. The generator now supports `CP_KEEP_BP_STUDIO_TMP=1` to preserve the exact adapter spec/output temp directory for crash RCA.
 
+Adapter crash RCA and fixes:
+
+- Crash class `a.$AABB.$points[dir]`: our synthetic specs contained an artificial single-child root with no flap rectangle. BP Studio balancing can rotate that root into a directed leaf, then junction creation expects leaf AABB points and crashes. Fix: `bp-studio-realistic` now contracts the artificial root out of adapter specs, and the adapter rejects any input tree leaf without flap geometry before BP Studio junction processing.
+- Crash class `n.$right`: BP Studio's sweep-line `Clip` can crash on large final-mode line sets with tiny/duplicate segments. Fix: the adapter no longer uses BP Studio `Clip` for export; it now does conservative rectangle clipping, finite/tiny-line filtering, and exact same-type segment dedupe, leaving full planar intersection splitting to the downstream normalizer.
+- Preserved `n.$right` fixture `/var/folders/.../cp-bp-studio-BTkM9f/spec.json` now exports successfully after the adapter clip replacement: `1985` vertices, `1714` edges, assignments `{B:4, F:382, M:588, V:740}`.
+- Current 2-sample smoke after these fixes has moved the primary failure mode back to strictness: `0/1` accepted, with recent local failures such as `kawasaki=433, maekawa=461` on a medium-ish preserved export. This is expected until source-aware completion exists.
+
 ## Root Cause
 
 BP Studio's `LayoutController.getCP(...)` export is a designer/display CP export, not a certified flat-foldable FOLD-label export. The adapter is mostly using BP Studio's own headless test path correctly:
@@ -79,10 +86,11 @@ Ordered next patches:
 1. Use source-tagged BP Studio exports as the candidate geometry source. Keep `F`/auxiliary lines as candidate geometry, not forced strict valleys.
 2. Stabilize adapter/spec generation by collecting crash fixtures with `CP_KEEP_BP_STUDIO_TMP=1`, reducing the sampler's invalid layout rate, and adding fixture regressions for each BP Studio crash class.
 3. Compare local failure counts for `outer`, `final`, and carefully selected optional geometry on BP Studio fixtures. Do not use rough/trace contours as production labels unless a source-specific test proves they help.
-4. Implement a local completion layer guided by BP Studio geometry and source ancestry:
+4. Implement a scalable local completion layer guided by BP Studio geometry and source ancestry:
    - arrange/split all lines;
    - keep mandatory role lines unless a source-specific proof says they are optional;
    - solve/search active candidate geometry and M/V assignments under Kawasaki/Maekawa;
+   - avoid greedy full-graph repair on dense exports because naive per-edge reruns are too slow and tend to erase all folded labels;
    - then run Rabbit Ear global validation.
 5. Promote only source-ancestry-preserving, strict-global-passing repairs into the production generator. Greedy unassignment/deletion remains diagnostic-only.
 
