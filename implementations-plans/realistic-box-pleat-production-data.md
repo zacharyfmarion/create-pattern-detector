@@ -175,11 +175,13 @@ Current checkpoint:
 - `bp-studio-realistic` exists as a main generator family with `recipes/synthetic/bp_studio_realistic_v1.yaml`.
 - The old hand-written generator families, old recipes, and strict-completion fallback have been removed from the production synthetic path.
 - The generator now samples BP Studio-style tree/layout specs, runs the BP Studio adapter, normalizes raw exports, and fails unless the raw BP Studio-derived graph passes local precheck and the normal strict validator.
-- Raw-only generation is currently blocked: `0/2` accepted after 40 attempts in `/tmp/bp_studio_raw_only`.
+- Raw-only generation is currently blocked: current smokes still produce `0` accepted samples because the BP Studio export geometry is not locally strict after arrangement.
+- Diagnostic tooling now exists: `cd tools/synthetic-generator && bun run bp-local-diagnostics -- --fold <export.fold>` reports bad vertices by BP Studio source kind, role, assignment, degree, folded degree, and auxiliary policy.
 
 Important blocker discovered during implementation:
 
 - Raw BP Studio CP exports are useful candidates/calibration artifacts, but they can fail local Kawasaki/Maekawa after arrangement. They must not be treated as production labels until Phase 5 grows a certified BP Studio repair/completion layer.
+- Source-aware diagnostics show the problem is not merely F/U auxiliary mapping. Representative preserved exports have thousands of failures dominated by active `device-draw-ridge`, `device-axis-parallel`, and `node-ridge` lines; some interior vertices have impossible odd active folded degree. Assignment solving over existing edges is therefore necessary but not sufficient.
 - See `implementations-plans/bp-studio-raw-export-rca.md` for the current RCA.
 
 ## Parallel Workstreams

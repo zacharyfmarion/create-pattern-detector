@@ -44,6 +44,15 @@ Adapter crash RCA and fixes:
 - Preserved `n.$right` fixture `/var/folders/.../cp-bp-studio-BTkM9f/spec.json` now exports successfully after the adapter clip replacement: `1985` vertices, `1714` edges, assignments `{B:4, F:382, M:588, V:740}`.
 - Current 2-sample smoke after these fixes has moved the primary failure mode back to strictness: `0/1` accepted, with recent local failures such as `kawasaki=433, maekawa=461` on a medium-ish preserved export. This is expected until source-aware completion exists.
 
+Source-aware local diagnostics:
+
+- Added `bun run bp-local-diagnostics -- --fold <path>` to report local failures by BP Studio source kind, BP role, assignment, degree, folded degree, and auxiliary policy.
+- A preserved superdense BP Studio export (`/var/folders/.../cp-bp-studio-O4Mv4z/out.fold`) normalizes to `3249` vertices and `5225` edges with assignments `{B:72, M:2362, U:1228, V:1563}` and roles `{border:72, ridge:2362, hinge:1228, axis:1563}`.
+- The same export fails local checks with `2168` bad vertices (`1664` Kawasaki, `1872` Maekawa).
+- Bad-vertex incidents are dominated by active BP Studio crease sources, not only by auxiliary contours: `device-draw-ridge=3816`, `device-axis-parallel=1450`, `node-ridge=471`, `node-final-contour-outer=461`.
+- Mapping auxiliaries to valleys makes the preserved sample worse (`3138` bad vertices), so the issue is not an auxiliary color-map bug.
+- Several bad interior vertices have odd active folded degree, for example one sampled vertex has `degree=3`, `foldedDegree=1`, one active ridge plus two unassigned contour segments. If every non-border BP line is required to be an active crease, degree-3 interior vertices cannot satisfy Maekawa. This proves that assignment solving alone cannot certify the current exported geometry.
+
 ## Root Cause
 
 BP Studio's `LayoutController.getCP(...)` export is a designer/display CP export, not a certified flat-foldable FOLD-label export. The adapter is mostly using BP Studio's own headless test path correctly:
@@ -57,6 +66,11 @@ BP Studio's `LayoutController.getCP(...)` export is a designer/display CP export
 The problem is the export contract. BP Studio emits visible/design lines: sheet border, outer/final node contours, ridges, and selected device lines. These lines have meaningful BP roles, but they are not a solved strict M/V assignment. After our arrangement and assignment normalization, many vertices have impossible local patterns such as degree-3 all-mountain or degree-4 all-mountain/all-valley junctions.
 
 This is not only caused by the random sampler. BP Studio's own tiny two-flap fixture also fails local Rabbit Ear checks after export/normalization, which means raw BP Studio CP export cannot be treated as a production training label by itself.
+
+The blocker is now sharper than "need better assignments": the arranged BP Studio export contains locally impossible active-crease geometry under the planned strict policy that all non-border BP lines are M/V. A pure M/V CSP over existing edges cannot fix vertices whose active crease count/sector geometry violates Kawasaki/Maekawa before assignment. The next production step must either:
+
+- generate a BP Studio-derived geometry subset whose mandatory active edges are locally feasible; or
+- add a source-aware geometry completion stage that inserts/extends BP-compatible creases before assignment solving.
 
 ## Evidence
 
@@ -88,7 +102,8 @@ Ordered next patches:
 3. Compare local failure counts for `outer`, `final`, and carefully selected optional geometry on BP Studio fixtures. Do not use rough/trace contours as production labels unless a source-specific test proves they help.
 4. Implement a scalable local completion layer guided by BP Studio geometry and source ancestry:
    - arrange/split all lines;
-   - keep mandatory role lines unless a source-specific proof says they are optional;
+   - classify BP Studio source lines as mandatory folds, optional construction geometry, or completion candidates using source-specific tests;
+   - reject or complete any interior vertex whose active candidate set has impossible parity/sector geometry before assignment solving;
    - solve/search active candidate geometry and M/V assignments under Kawasaki/Maekawa;
    - avoid greedy full-graph repair on dense exports because naive per-edge reruns are too slow and tend to erase all folded labels;
    - then run Rabbit Ear global validation.
