@@ -21,7 +21,7 @@ The codebase is partly aspirational. Treat docs and comments as useful design no
 - `src/models/heads/pixel_head.py`: segmentation, orientation, junction heatmap, and junction offset branches.
 - `src/data/`: FOLD parser, ground-truth map generation, datasets, transforms, and manifest-based synthetic data tooling.
 - `tools/synthetic-generator/`: tracked Bun/Rabbit Ear validation and synthetic generation package. It writes canonical FOLD files plus raw manifests.
-- `recipes/synthetic/`: synthetic generation recipes.
+- `recipes/synthetic/`: synthetic generation recipes. `clean_cp_v1.yaml` mixes general strict Rabbit Ear families; `box_pleat_v1.yaml` is the BP-only strict smoke recipe. Dense V2 recipes are split into `box_pleat_dense_v2.yaml`, `non_box_dense_v2.yaml`, and `mixed_dense_v2.yaml`.
 - `src/postprocessing/`: pixel-to-graph extraction. `GraphExtractor` skeletonizes segmentation, finds vertices from heatmaps/skeleton/boundaries, traces candidate edges, assigns labels, and can export FOLD-like dictionaries.
 - `src/models/graph/`: graph head feature extraction, message passing layers, and edge/vertex prediction heads.
 - `scripts/training/train_pixel_head.py`: primary pixel-head training entrypoint.
@@ -151,6 +151,51 @@ python scripts/validation/validate_pipeline_with_gt.py --fold-dir data/output/sy
 python scripts/validation/validate_graph_head.py
 ```
 
+Synthetic data V1:
+
+```bash
+bun install --cwd tools/synthetic-generator
+bun run generate -- --recipe recipes/synthetic/clean_cp_v1.yaml --count 32 --out data/generated/synthetic/clean_cp_v1
+python scripts/data/render_synthetic_dataset.py --root data/generated/synthetic/clean_cp_v1
+```
+
+Synthetic box-pleat V1:
+
+```bash
+bun run generate -- --recipe recipes/synthetic/box_pleat_v1.yaml --count 32 --out data/generated/synthetic/box_pleat_v1
+python scripts/data/render_synthetic_dataset.py --root data/generated/synthetic/box_pleat_v1
+```
+
+Flat-folded solver previews:
+
+```bash
+bun run folded-preview -- --root data/generated/synthetic/box_pleat_v1 --limit 12
+python scripts/data/render_folded_preview.py --root data/generated/synthetic/box_pleat_v1 --limit 12
+```
+
+Dense synthetic V2 smoke:
+
+```bash
+bun run generate -- --recipe recipes/synthetic/box_pleat_dense_v2.yaml --count 12 --out /tmp/box_pleat_dense_v2
+bun run generate -- --recipe recipes/synthetic/non_box_dense_v2.yaml --count 12 --out /tmp/non_box_dense_v2
+python scripts/data/render_synthetic_dataset.py --root /tmp/box_pleat_dense_v2
+python scripts/data/render_synthetic_dataset.py --root /tmp/non_box_dense_v2
+bun run folded-preview -- --root /tmp/box_pleat_dense_v2 --limit 12
+bun run folded-preview -- --root /tmp/non_box_dense_v2 --limit 12
+python scripts/data/render_folded_preview.py --root /tmp/box_pleat_dense_v2 --limit 12
+python scripts/data/render_folded_preview.py --root /tmp/non_box_dense_v2 --limit 12
+```
+
+Realistic strict box-pleat V3:
+
+```bash
+bun run generate -- --recipe recipes/synthetic/box_pleat_realistic_v3.yaml --count 64 --out data/generated/synthetic/box_pleat_realistic_v3
+python scripts/data/render_synthetic_dataset.py --root data/generated/synthetic/box_pleat_realistic_v3
+bun run folded-preview -- --root data/generated/synthetic/box_pleat_realistic_v3 --limit 24
+python scripts/data/render_folded_preview.py --root data/generated/synthetic/box_pleat_realistic_v3 --limit 24
+bun run bp-realism-report -- --root data/generated/synthetic/box_pleat_realistic_v3
+```
+
 Generator checks:
 
 ```bash
@@ -179,7 +224,12 @@ Do not rely on the console scripts in `pyproject.toml` (`cp-train`, `cp-evaluate
 - `src/training/graph_trainer.py` currently calls the pixel model without `return_features=True` and expects a `crease_pattern` batch key. Prefer `scripts/training/train_graph_head.py` or fix the stale trainer first.
 - The postprocessing extractor is intentionally over-complete. Low precision is expected before the graph head; missing true edges are much more damaging than extra candidate edges.
 - There is no finished inference CLI that takes an arbitrary image and writes a cleaned `.fold` file. `ExtractedGraph.to_fold_format()` exists, but full image rectification, graph-head filtering, coordinate denormalization, and validation are not wired into a productized path.
+- The Rabbit Ear generator uses `ear.graph.square()`, `ear.graph.flatFold(graph, vector, origin, assignment)`, `ear.singleVertex.validateKawasaki/validateMaekawa`, and `ear.layer.solver`. Keep tests aligned with the installed Rabbit Ear API before changing generator families. The `box-pleat` family is intentionally planar-arranged from BP-style gadgets and then validated strictly; do not replace it with a full-sheet alternating grid baseline.
+- Dense BP samples use strict molecule fields over grid/half-grid/45-degree geometry. The all-cell lattice is intentionally mixed with sparse checker diamond chains so visual QA is not only a ruled grid. Dense non-BP samples include radial families plus a Miura-like slanted tessellation.
+- Realistic BP V3 lives in the separate `realistic-box-pleat` family. It generates symbolic model trees and macro flap/body layouts, then builds strict macro-grid BP molecules with deterministic GF(2) diagonal assignment solving. Keep it separate from dense V2: V2 is a stress-test baseline, while V3 is the production-training candidate.
+- V3 realism gates intentionally score macro density variation, repetition, archetype metadata, molecule diversity, and nonuniform body/flap structure. If a sample looks like a uniform triangle lattice or plain ruled grid, fix the `realistic-box-pleat` layout/molecule selection rather than lowering `requireRealistic`.
 - `strictGlobal: true` with `globalBackend: rabbit-ear-solver` means the generator checks local Kawasaki/Maekawa, asks Rabbit Ear for globally consistent layer ordering, and computes finite flat-folded vertex coordinates. Use `folded-preview` when you need visual QA of the folded state, not only the CP drawing.
+- In lightweight Python environments without OpenCV/SciPy, `src/data/annotations.py` uses optimized Pillow/NumPy fallbacks. Keep dense manifest loading smoke-tested; a naive per-edge supersampled fallback is too slow for 1,000+ edge samples.
 - Several older docs mention `scripts/render_dataset.py`; the current synthetic renderer is `scripts/data/render_synthetic_dataset.py`.
 - The repository currently contains tracked `.DS_Store` and some tracked `.pyc` files. Do not churn them unless the user asks for repository cleanup.
 

@@ -36,6 +36,11 @@ class SyntheticManifestRow:
     assignments: Dict[str, int]
     role_counts: Dict[str, int]
     bp_metadata: Optional[Dict[str, Any]]
+    density_metadata: Optional[Dict[str, Any]]
+    design_tree: Optional[Dict[str, Any]]
+    layout_metadata: Optional[Dict[str, Any]]
+    molecule_metadata: Optional[Dict[str, Any]]
+    realism_metadata: Optional[Dict[str, Any]]
     validation: Dict[str, Any]
 
     @classmethod
@@ -61,6 +66,21 @@ class SyntheticManifestRow:
             role_counts={str(k): int(v) for k, v in dict(row.get("role_counts", row.get("roleCounts", {}))).items()},
             bp_metadata=dict(row["bp_metadata"] if "bp_metadata" in row else row["bpMetadata"])
             if row.get("bp_metadata") is not None or row.get("bpMetadata") is not None
+            else None,
+            density_metadata=dict(row["density_metadata"] if "density_metadata" in row else row["densityMetadata"])
+            if row.get("density_metadata") is not None or row.get("densityMetadata") is not None
+            else None,
+            design_tree=dict(row["design_tree"] if "design_tree" in row else row["designTree"])
+            if row.get("design_tree") is not None or row.get("designTree") is not None
+            else None,
+            layout_metadata=dict(row["layout_metadata"] if "layout_metadata" in row else row["layoutMetadata"])
+            if row.get("layout_metadata") is not None or row.get("layoutMetadata") is not None
+            else None,
+            molecule_metadata=dict(row["molecule_metadata"] if "molecule_metadata" in row else row["moleculeMetadata"])
+            if row.get("molecule_metadata") is not None or row.get("moleculeMetadata") is not None
+            else None,
+            realism_metadata=dict(row["realism_metadata"] if "realism_metadata" in row else row["realismMetadata"])
+            if row.get("realism_metadata") is not None or row.get("realismMetadata") is not None
             else None,
             validation=dict(row["validation"]),
         )

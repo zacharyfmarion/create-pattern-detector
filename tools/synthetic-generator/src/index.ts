@@ -36,6 +36,12 @@ async function main(): Promise<void> {
   const bpSubfamilyRejectionCounts: Record<string, number> = {};
   const aggregateRoleCounts: Record<string, number> = {};
   const gridSizeCounts: Record<string, number> = {};
+  const densityBucketCounts: Record<string, number> = {};
+  const denseSubfamilyCounts: Record<string, number> = {};
+  const solverMsValues: number[] = [];
+  const faceCountValues: number[] = [];
+  const realismScoreValues: number[] = [];
+  const archetypeCounts: Record<string, number> = {};
   const maxAttempts = args.maxAttempts ?? args.count * 40;
   let attempts = 0;
 
@@ -51,6 +57,7 @@ async function main(): Promise<void> {
       seed: sampleSeed,
       numCreases: rng.int(bucket.minCreases, bucket.maxCreases),
       bucket: bucket.name,
+      dense: recipe.validation.requireDense === true,
     };
 
     try {
@@ -59,7 +66,14 @@ async function main(): Promise<void> {
       if (!validation.valid) {
         incrementRejections(rejectionCounts, validation.failed[0] ?? "invalid");
         if (fold.bp_metadata?.bpSubfamily) incrementRejections(bpSubfamilyRejectionCounts, fold.bp_metadata.bpSubfamily);
-        await writeJson(join(args.out, "rejected", `${id}.json`), { id, config, validation, bpMetadata: fold.bp_metadata });
+        await writeJson(join(args.out, "rejected", `${id}.json`), {
+          id,
+          config,
+          validation,
+          bpMetadata: fold.bp_metadata,
+          designTree: fold.design_tree,
+          realismMetadata: fold.realism_metadata,
+        });
         continue;
       }
 
@@ -81,6 +95,11 @@ async function main(): Promise<void> {
         assignments: assignmentCounts(fold),
         roleCounts: roleCounts(fold),
         bpMetadata: fold.bp_metadata,
+        densityMetadata: fold.density_metadata,
+        designTree: fold.design_tree,
+        layoutMetadata: fold.layout_metadata,
+        moleculeMetadata: fold.molecule_metadata,
+        realismMetadata: fold.realism_metadata,
         validation,
       };
       rows.push(row);
@@ -93,6 +112,16 @@ async function main(): Promise<void> {
         const gridKey = String(fold.bp_metadata.gridSize);
         gridSizeCounts[gridKey] = (gridSizeCounts[gridKey] ?? 0) + 1;
       }
+      if (fold.density_metadata) {
+        densityBucketCounts[fold.density_metadata.densityBucket] = (densityBucketCounts[fold.density_metadata.densityBucket] ?? 0) + 1;
+        denseSubfamilyCounts[fold.density_metadata.subfamily] = (denseSubfamilyCounts[fold.density_metadata.subfamily] ?? 0) + 1;
+      }
+      if (fold.design_tree?.archetype) {
+        archetypeCounts[fold.design_tree.archetype] = (archetypeCounts[fold.design_tree.archetype] ?? 0) + 1;
+      }
+      if (fold.realism_metadata?.score !== undefined) realismScoreValues.push(fold.realism_metadata.score);
+      if (validation.metrics?.solverMs !== undefined) solverMsValues.push(validation.metrics.solverMs);
+      if (validation.metrics?.faces !== undefined) faceCountValues.push(validation.metrics.faces);
       console.log(`[${rows.length}/${args.count}] accepted ${id} (${family}, ${countCreases(fold)} creases)`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -119,8 +148,14 @@ async function main(): Promise<void> {
     familyCounts,
     bpSubfamilyCounts,
     bpSubfamilyRejectionCounts,
+    densityBucketCounts,
+    denseSubfamilyCounts,
+    archetypeCounts,
+    realismScore: summarizeOrNull(realismScoreValues),
     roleCounts: aggregateRoleCounts,
     gridSizeCounts,
+    solverMs: summarizeOrNull(solverMsValues),
+    faces: summarizeOrNull(faceCountValues),
     rabbitEarStrictPassRate: recipe.validation.strictGlobal
       ? rows.filter((row) => row.validation.passed.includes("rabbit-ear-solver")).length / rows.length
       : null,
@@ -177,6 +212,10 @@ function summarize(values: number[]): { min: number; max: number; mean: number }
     max: Math.max(...values),
     mean: values.reduce((sum, value) => sum + value, 0) / values.length,
   };
+}
+
+function summarizeOrNull(values: number[]): { min: number; max: number; mean: number } | null {
+  return values.length ? summarize(values) : null;
 }
 
 main().catch((error) => {

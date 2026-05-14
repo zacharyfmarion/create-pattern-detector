@@ -3,6 +3,7 @@
   "scripts": {
     "generate": "bun run tools/synthetic-generator/src/index.ts",
     "folded-preview": "bun run tools/synthetic-generator/src/folded-preview.ts",
+    "bp-realism-report": "bun run tools/synthetic-generator/src/bp-realism-report.ts",
     "render-synthetic": "python3 scripts/data/render_synthetic_dataset.py"
   }
 }

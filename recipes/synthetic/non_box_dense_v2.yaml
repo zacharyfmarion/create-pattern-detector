@@ -1,0 +1,46 @@
+name: non_box_dense_v2
+seed: 9170
+imageSize: 768
+padding: 32
+
+splits:
+  train: 0.85
+  val: 0.10
+  test: 0.05
+
+families:
+  dense-non-bp: 1.0
+
+complexityBuckets:
+  - name: small
+    minCreases: 80
+    maxCreases: 180
+    weight: 0.35
+  - name: medium
+    minCreases: 180
+    maxCreases: 500
+    weight: 0.40
+  - name: dense
+    minCreases: 500
+    maxCreases: 1200
+    weight: 0.25
+
+validation:
+  strictGlobal: true
+  globalBackend: rabbit-ear-solver
+  minVertexDistance: 0.000001
+  maxVertices: 3000
+  maxEdges: 4000
+  requireBoxPleat: false
+  requireDense: true
+
+renderVariants:
+  - name: mv_color_clean
+    assignmentVisibility: visible
+    count: 1
+  - name: monochrome_ink
+    assignmentVisibility: hidden
+    count: 1
+  - name: faint_blueprint
+    assignmentVisibility: hidden
+    count: 1

@@ -18,6 +18,15 @@ const bpValidation: ValidationConfig = {
   requireBoxPleat: true,
 };
 
+const denseValidation: ValidationConfig = {
+  strictGlobal: false,
+  globalBackend: "rabbit-ear-solver",
+  minVertexDistance: 1e-5,
+  maxVertices: 256,
+  maxEdges: 512,
+  requireDense: true,
+};
+
 test("validation rejects missing borders", async () => {
   const result = await validateFold({ ...square(), edges_assignment: ["U", "U", "U", "U"] }, validation);
   expect(result.failed).toContain("complete-border");
@@ -119,6 +128,66 @@ test("box-pleat validation rejects non-grid coordinates", async () => {
   const fold = bpFixture();
   fold.vertices_coords[0] = [0.13, 0];
   const result = await validateFold(fold, bpValidation);
+  expect(result.failed).toContain("box-pleat-structure");
+});
+
+test("dense validation rejects too-simple graphs", async () => {
+  const result = await validateFold(
+    {
+      ...square(),
+      density_metadata: {
+        densityBucket: "small",
+        gridSize: 8,
+        targetEdgeRange: [80, 350],
+        subfamily: "recursive-axiom",
+        symmetry: "test",
+        generatorSteps: ["test"],
+        moleculeCounts: {},
+      },
+    },
+    denseValidation,
+  );
+  expect(result.failed).toContain("dense-structure");
+});
+
+test("realistic BP validation rejects missing design metadata", async () => {
+  const fold = bpFixture();
+  fold.density_metadata = {
+    densityBucket: "small",
+    gridSize: 4,
+    targetEdgeRange: [4, 128],
+    subfamily: "realistic-tree-base",
+    symmetry: "test",
+    generatorSteps: ["test"],
+    moleculeCounts: {},
+  };
+  const result = await validateFold(fold, {
+    ...bpValidation,
+    requireDense: true,
+    requireRealistic: true,
+    boxPleatMode: "dense",
+  });
+  expect(result.failed).toContain("realistic-structure");
+});
+
+test("dense BP validation rejects missing diagonal structure", async () => {
+  const fold = bpFixture();
+  fold.density_metadata = {
+    densityBucket: "small",
+    gridSize: 4,
+    targetEdgeRange: [4, 128],
+    subfamily: "dense-molecule-tessellation",
+    symmetry: "test",
+    generatorSteps: ["test"],
+    moleculeCounts: {},
+  };
+  fold.edges_bpRole = fold.edges_bpRole?.map((role) => (role === "ridge" ? "hinge" : role));
+  fold.edges_assignment = fold.edges_assignment.map((assignment) => (assignment === "M" ? "V" : assignment));
+  const result = await validateFold(fold, {
+    ...denseValidation,
+    requireBoxPleat: true,
+    boxPleatMode: "dense",
+  });
   expect(result.failed).toContain("box-pleat-structure");
 });
 

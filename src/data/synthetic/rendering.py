@@ -120,6 +120,11 @@ def render_dataset(
                     assignments=dict(raw_row["assignments"]),
                     role_counts=dict(raw_row.get("roleCounts", {})),
                     bp_metadata=dict(raw_row["bpMetadata"]) if raw_row.get("bpMetadata") is not None else None,
+                    density_metadata=dict(raw_row["densityMetadata"]) if raw_row.get("densityMetadata") is not None else None,
+                    design_tree=dict(raw_row["designTree"]) if raw_row.get("designTree") is not None else None,
+                    layout_metadata=dict(raw_row["layoutMetadata"]) if raw_row.get("layoutMetadata") is not None else None,
+                    molecule_metadata=dict(raw_row["moleculeMetadata"]) if raw_row.get("moleculeMetadata") is not None else None,
+                    realism_metadata=dict(raw_row["realismMetadata"]) if raw_row.get("realismMetadata") is not None else None,
                     validation=dict(raw_row["validation"]),
                 )
             )
@@ -186,6 +191,14 @@ def write_qa(root: Path, rows: Iterable[SyntheticManifestRow]) -> None:
     role_counts: Counter[str] = Counter()
     grid_sizes: Counter[str] = Counter()
     bp_subfamilies: Counter[str] = Counter()
+    density_buckets: Counter[str] = Counter()
+    dense_subfamilies: Counter[str] = Counter()
+    archetypes: Counter[str] = Counter()
+    realism_scores: List[float] = []
+    empty_space_ratios: List[float] = []
+    density_variances: List[float] = []
+    solver_ms: List[float] = []
+    faces: List[int] = []
     strict_passes = 0
     for row in rows:
         role_counts.update(row.role_counts)
@@ -194,8 +207,27 @@ def write_qa(root: Path, rows: Iterable[SyntheticManifestRow]) -> None:
             bp_subfamily = row.bp_metadata.get("bpSubfamily")
             if bp_subfamily:
                 bp_subfamilies[str(bp_subfamily)] += 1
+        if row.density_metadata:
+            density_buckets[str(row.density_metadata.get("densityBucket"))] += 1
+            dense_subfamily = row.density_metadata.get("subfamily")
+            if dense_subfamily:
+                dense_subfamilies[str(dense_subfamily)] += 1
+        if row.design_tree and row.design_tree.get("archetype"):
+            archetypes[str(row.design_tree["archetype"])] += 1
+        if row.realism_metadata:
+            if "score" in row.realism_metadata:
+                realism_scores.append(float(row.realism_metadata["score"]))
+            if "emptySpaceRatio" in row.realism_metadata:
+                empty_space_ratios.append(float(row.realism_metadata["emptySpaceRatio"]))
+            if "localDensityVariance" in row.realism_metadata:
+                density_variances.append(float(row.realism_metadata["localDensityVariance"]))
         if "rabbit-ear-solver" in row.validation.get("passed", []):
             strict_passes += 1
+        metrics = row.validation.get("metrics", {})
+        if "solverMs" in metrics:
+            solver_ms.append(float(metrics["solverMs"]))
+        if "faces" in metrics:
+            faces.append(int(metrics["faces"]))
     interior_roles = sum(count for role, count in role_counts.items() if role != "border")
     qa = {
         "rows": len(rows),
@@ -208,6 +240,14 @@ def write_qa(root: Path, rows: Iterable[SyntheticManifestRow]) -> None:
         "diagonalRidgeRatio": role_counts.get("ridge", 0) / max(1, interior_roles),
         "gridSizes": dict(sorted(grid_sizes.items())),
         "bpSubfamilies": dict(sorted(bp_subfamilies.items())),
+        "densityBuckets": dict(sorted(density_buckets.items())),
+        "denseSubfamilies": dict(sorted(dense_subfamilies.items())),
+        "archetypes": dict(sorted(archetypes.items())),
+        "realismScore": _summarize(realism_scores),
+        "emptySpaceRatio": _summarize(empty_space_ratios),
+        "localDensityVariance": _summarize(density_variances),
+        "solverMs": _summarize(solver_ms),
+        "faces": _summarize(faces),
         "rabbitEarStrictPassRate": strict_passes / max(1, len(rows)),
     }
     qa_path.write_text(json.dumps(qa, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -317,6 +357,16 @@ def _line_width(style: str, image_size: int) -> int:
     if style.startswith("faint"):
         return max(1, base - 1)
     return base
+
+
+def _summarize(values: List[float] | List[int]) -> Dict[str, float] | None:
+    if not values:
+        return None
+    return {
+        "min": min(values),
+        "max": max(values),
+        "mean": sum(values) / len(values),
+    }
 
 
 def _clamp(value: int) -> int:

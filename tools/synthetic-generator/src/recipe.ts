@@ -12,6 +12,8 @@ const DEFAULT_RECIPE: SyntheticRecipe = {
     classic: 0.2,
     "single-vertex": 0.25,
     "box-pleat": 0.2,
+    "realistic-box-pleat": 0,
+    "dense-non-bp": 0,
     "grid-baseline": 0,
   },
   complexityBuckets: [
@@ -26,6 +28,10 @@ const DEFAULT_RECIPE: SyntheticRecipe = {
     maxVertices: 700,
     maxEdges: 1400,
     requireBoxPleat: false,
+    boxPleatMode: "simple",
+    requireDense: false,
+    requireRealistic: false,
+    minRealismScore: 0,
   },
   renderVariants: [
     { name: "mv_color", assignmentVisibility: "visible", count: 1 },

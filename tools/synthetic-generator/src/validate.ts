@@ -2,6 +2,8 @@ import ear from "rabbit-ear";
 import { normalizeFold } from "./fold-utils.ts";
 import type { FOLDFormat, GlobalValidationBackend, ValidationConfig, ValidationResult } from "./types.ts";
 
+const GEOMETRY_EPSILON = 1e-9;
+
 export function preflightValidation(config: ValidationConfig): void {
   if (!config.strictGlobal) return;
   if (config.globalBackend === "rabbit-ear-solver") {
@@ -27,6 +29,7 @@ export async function validateFold(fold: FOLDFormat, config: ValidationConfig): 
   const passed: string[] = [];
   const failed: string[] = [];
   const errors: string[] = [];
+  const metrics: ValidationResult["metrics"] = {};
   const normalized = normalizeFold(fold);
 
   runCheck("schema", passed, failed, errors, () => checkSchema(normalized));
@@ -34,14 +37,20 @@ export async function validateFold(fold: FOLDFormat, config: ValidationConfig): 
   runCheck("edge-geometry", passed, failed, errors, () => checkEdgeGeometry(normalized));
   runCheck("no-self-intersections", passed, failed, errors, () => checkSelfIntersections(normalized));
   runCheck("complexity-bounds", passed, failed, errors, () => checkComplexity(normalized, config));
-  if (config.requireBoxPleat) {
-    runCheck("box-pleat-structure", passed, failed, errors, () => checkBoxPleatStructure(normalized));
+  if (config.requireDense) {
+    runCheck("dense-structure", passed, failed, errors, () => checkDenseStructure(normalized));
+  }
+  if (config.requireRealistic) {
+    runCheck("realistic-structure", passed, failed, errors, () => checkRealisticStructure(normalized, config.minRealismScore ?? 0));
+  }
+  if (config.requireBoxPleat || normalized.edges_bpRole || normalized.bp_metadata) {
+    runCheck("box-pleat-structure", passed, failed, errors, () => checkBoxPleatStructure(normalized, config.boxPleatMode ?? "simple"));
   }
   runCheck("local-flat-foldability", passed, failed, errors, () => checkLocalFlatFoldability(normalized));
 
   if (config.strictGlobal) {
     if (config.globalBackend === "rabbit-ear-solver") {
-      runCheck("rabbit-ear-solver", passed, failed, errors, () => checkRabbitEarSolver(normalized));
+      runCheck("rabbit-ear-solver", passed, failed, errors, () => Object.assign(metrics, checkRabbitEarSolver(normalized)));
     } else if (config.globalBackend === "fold-cli") {
       const result = await checkFoldCli(normalized, config);
       if (result.ok) passed.push("fold-cli");
@@ -57,6 +66,7 @@ export async function validateFold(fold: FOLDFormat, config: ValidationConfig): 
     passed,
     failed,
     errors,
+    metrics,
   };
 }
 
@@ -153,7 +163,54 @@ function checkComplexity(fold: FOLDFormat, config: ValidationConfig): void {
   }
 }
 
-function checkBoxPleatStructure(fold: FOLDFormat): void {
+function checkDenseStructure(fold: FOLDFormat): void {
+  const metadata = fold.density_metadata;
+  if (!metadata) throw new Error("density_metadata is required");
+  const [minEdges, maxEdges] = metadata.targetEdgeRange;
+  if (fold.edges_vertices.length < minEdges) {
+    throw new Error(`too few edges for dense bucket: ${fold.edges_vertices.length} < ${minEdges}`);
+  }
+  if (fold.edges_vertices.length > maxEdges) {
+    throw new Error(`too many edges for dense bucket: ${fold.edges_vertices.length} > ${maxEdges}`);
+  }
+  const assignmentTotals = countValues(fold.edges_assignment);
+  if ((assignmentTotals.M ?? 0) + (assignmentTotals.V ?? 0) < Math.min(40, minEdges / 2)) {
+    throw new Error("dense samples require substantial M/V crease assignments");
+  }
+  const graph = normalizeFold(fold);
+  ear.graph.populate(graph);
+  if (!graph.faces_vertices || graph.faces_vertices.length < 2) {
+    throw new Error("dense samples require non-degenerate populated faces");
+  }
+}
+
+function checkRealisticStructure(fold: FOLDFormat, minScore: number): void {
+  const designTree = fold.design_tree;
+  const layout = fold.layout_metadata;
+  const molecules = fold.molecule_metadata;
+  const realism = fold.realism_metadata;
+  if (!designTree) throw new Error("design_tree is required");
+  if (!layout) throw new Error("layout_metadata is required");
+  if (!molecules) throw new Error("molecule_metadata is required");
+  if (!realism) throw new Error("realism_metadata is required");
+  if (designTree.nodes.length < 4 || designTree.edges.length < 3) {
+    throw new Error("realistic BP samples require a non-trivial design tree");
+  }
+  if (layout.bodyRegions.length < 1 || layout.flapTerminals.length < 3) {
+    throw new Error("realistic BP samples require body regions and flap terminals");
+  }
+  if (Object.values(molecules.molecules).filter((count) => count > 0).length < 4) {
+    throw new Error("realistic BP samples require multiple molecule types");
+  }
+  if (realism.score < minScore) {
+    throw new Error(`realism score ${realism.score.toFixed(3)} < ${minScore}`);
+  }
+  if (!realism.gates.hasMacroRegions || !realism.gates.hasDensityVariation || !realism.gates.notUniformLattice) {
+    throw new Error("realism gates indicate a uniform or under-structured pattern");
+  }
+}
+
+function checkBoxPleatStructure(fold: FOLDFormat, mode: "simple" | "dense"): void {
   const roles = fold.edges_bpRole;
   const metadata = fold.bp_metadata;
   if (!roles || roles.length !== fold.edges_vertices.length) {
@@ -193,13 +250,19 @@ function checkBoxPleatStructure(fold: FOLDFormat): void {
       continue;
     }
     if (role === "ridge") {
-      if (assignment !== "M") throw new Error(`ridge edge ${edgeIndex} must be mountain assigned`);
+      if (mode === "simple" && assignment !== "M") throw new Error(`ridge edge ${edgeIndex} must be mountain assigned`);
+      if (mode === "dense" && assignment !== "M" && assignment !== "V") {
+        throw new Error(`ridge edge ${edgeIndex} must be mountain or valley assigned`);
+      }
       if (!isDiagonal45(p1, p2)) throw new Error(`ridge edge ${edgeIndex} is not a 45-degree crease`);
       diagonalRidges += 1;
       fullDiagonalLines.add(diagonalSignature(p1, p2));
       continue;
     }
-    if (assignment !== "V") throw new Error(`${role} edge ${edgeIndex} must be valley assigned`);
+    if (mode === "simple" && assignment !== "V") throw new Error(`${role} edge ${edgeIndex} must be valley assigned`);
+    if (mode === "dense" && assignment !== "M" && assignment !== "V") {
+      throw new Error(`${role} edge ${edgeIndex} must be mountain or valley assigned`);
+    }
     if (!isAxisAligned(p1, p2)) throw new Error(`${role} edge ${edgeIndex} is not axis-aligned`);
     updateAxisLineCoverage(fullAxisLines, p1, p2);
   }
@@ -208,9 +271,11 @@ function checkBoxPleatStructure(fold: FOLDFormat): void {
   if (diagonalRidges / interiorEdges < 0.08) {
     throw new Error("diagonal ridge ratio is too low for box pleating");
   }
-  const fullAxisLineCount = [...fullAxisLines.values()].filter(({ min, max }) => min < 1e-8 && max > 1 - 1e-8).length;
-  if (fullAxisLineCount > Math.max(6, fullDiagonalLines.size * 3 + 2)) {
-    throw new Error("too many full-sheet axis-aligned lines relative to ridge structure");
+  if (mode === "simple") {
+    const fullAxisLineCount = [...fullAxisLines.values()].filter(({ min, max }) => min < 1e-8 && max > 1 - 1e-8).length;
+    if (fullAxisLineCount > Math.max(6, fullDiagonalLines.size * 3 + 2)) {
+      throw new Error("too many full-sheet axis-aligned lines relative to ridge structure");
+    }
   }
   checkConnected(fold);
 }
@@ -226,10 +291,12 @@ function checkLocalFlatFoldability(fold: FOLDFormat): void {
   }
 }
 
-function checkRabbitEarSolver(fold: FOLDFormat): void {
+function checkRabbitEarSolver(fold: FOLDFormat): NonNullable<ValidationResult["metrics"]> {
   const graph = normalizeFold(fold);
   ear.graph.populate(graph);
+  const start = Date.now();
   const solverResult = ear.layer.solver(graph);
+  const solverMs = Date.now() - start;
   if (!solverResult) {
     throw new Error("Rabbit Ear layer solver found no globally consistent layer ordering");
   }
@@ -240,6 +307,7 @@ function checkRabbitEarSolver(fold: FOLDFormat): void {
   if (folded.some((coord) => !Array.isArray(coord) || coord.some((value) => !Number.isFinite(value)))) {
     throw new Error("Rabbit Ear folded coordinates contain non-finite values");
   }
+  return { solverMs, faces: graph.faces_vertices?.length ?? 0 };
 }
 
 async function checkFoldCli(fold: FOLDFormat, config: ValidationConfig): Promise<{ ok: boolean; errors: string[] }> {
@@ -288,16 +356,16 @@ function segmentsIntersect(
 
 function orientation(a: [number, number], b: [number, number], c: [number, number]): number {
   const value = (b[1] - a[1]) * (c[0] - b[0]) - (b[0] - a[0]) * (c[1] - b[1]);
-  if (Math.abs(value) < 1e-10) return 0;
+  if (Math.abs(value) < GEOMETRY_EPSILON) return 0;
   return value > 0 ? 1 : 2;
 }
 
 function onSegment(a: [number, number], b: [number, number], c: [number, number]): boolean {
   return (
-    b[0] <= Math.max(a[0], c[0]) + 1e-10 &&
-    b[0] >= Math.min(a[0], c[0]) - 1e-10 &&
-    b[1] <= Math.max(a[1], c[1]) + 1e-10 &&
-    b[1] >= Math.min(a[1], c[1]) - 1e-10
+    b[0] <= Math.max(a[0], c[0]) + GEOMETRY_EPSILON &&
+    b[0] >= Math.min(a[0], c[0]) - GEOMETRY_EPSILON &&
+    b[1] <= Math.max(a[1], c[1]) + GEOMETRY_EPSILON &&
+    b[1] >= Math.min(a[1], c[1]) - GEOMETRY_EPSILON
   );
 }
 

@@ -146,6 +146,14 @@ class GroundTruthGenerator:
         # seg classes: BG=0, M=1, V=2, B=3, U=4
         assignment_to_class = {0: 1, 1: 2, 2: 3, 3: 4}
 
+        if self.use_antialiasing and cv2 is None:
+            return self._generate_segmentation_pillow_antialias(
+                vertices,
+                edges,
+                assignments,
+                assignment_to_class,
+            )
+
         if self.use_antialiasing:
             # Create per-class confidence buffers for soft segmentation
             # Class 0 (background) starts with full confidence
@@ -190,6 +198,48 @@ class GroundTruthGenerator:
 
         return seg
 
+    def _generate_segmentation_pillow_antialias(
+        self,
+        vertices: np.ndarray,
+        edges: np.ndarray,
+        assignments: np.ndarray,
+        assignment_to_class: Dict[int, int],
+    ) -> np.ndarray:
+        """Batch Pillow fallback so dense samples do not rescale once per edge."""
+        from PIL import Image, ImageDraw
+
+        scale = 3
+        scaled_size = self.image_size * scale
+        class_images = [
+            Image.new("L", (scaled_size, scaled_size), 0)
+            for _ in range(5)
+        ]
+        drawers = [ImageDraw.Draw(image) for image in class_images]
+        line_width = max(1, self.line_width * scale)
+
+        for edge_idx, (v1_idx, v2_idx) in enumerate(edges):
+            seg_class = assignment_to_class[int(assignments[edge_idx])]
+            v1 = vertices[v1_idx]
+            v2 = vertices[v2_idx]
+            p1 = (int(round(v1[0] * scale)), int(round(v1[1] * scale)))
+            p2 = (int(round(v2[0] * scale)), int(round(v2[1] * scale)))
+            drawers[seg_class].line([p1, p2], fill=255, width=line_width)
+
+        class_buffers = [np.ones((self.image_size, self.image_size), dtype=np.float32)]
+        crease_union = np.zeros((self.image_size, self.image_size), dtype=np.float32)
+        for seg_class in range(1, 5):
+            resized = class_images[seg_class].resize(
+                (self.image_size, self.image_size),
+                Image.Resampling.LANCZOS,
+            )
+            buffer = np.asarray(resized, dtype=np.float32) / 255.0
+            class_buffers.append(buffer)
+            crease_union = np.maximum(crease_union, buffer)
+
+        class_buffers[0] = 1.0 - crease_union
+        stacked = np.stack(class_buffers, axis=0)
+        return np.argmax(stacked, axis=0).astype(np.int64)
+
     def _generate_orientation(
         self,
         vertices: np.ndarray,
@@ -232,6 +282,10 @@ class GroundTruthGenerator:
         sin_theta: float,
     ) -> None:
         """Draw orientation values along a line segment with optional anti-aliasing."""
+        if cv2 is None:
+            self._draw_orientation_line_numpy(orientation, v1, v2, cos_theta, sin_theta)
+            return
+
         # Create a mask for the line
         mask = np.zeros((self.image_size, self.image_size), dtype=np.uint8)
         self._draw_line(mask, v1, v2, 255)
@@ -255,6 +309,40 @@ class GroundTruthGenerator:
             mask_bool = mask > 0
             orientation[mask_bool, 0] = cos_theta
             orientation[mask_bool, 1] = sin_theta
+
+    def _draw_orientation_line_numpy(
+        self,
+        orientation: np.ndarray,
+        v1: np.ndarray,
+        v2: np.ndarray,
+        cos_theta: float,
+        sin_theta: float,
+    ) -> None:
+        """Fast no-OpenCV orientation rasterization for dense synthetic graphs."""
+        x1, y1 = float(v1[0]), float(v1[1])
+        x2, y2 = float(v2[0]), float(v2[1])
+        steps = int(max(abs(x2 - x1), abs(y2 - y1))) + 1
+        if steps <= 0:
+            return
+
+        xs = np.rint(np.linspace(x1, x2, steps)).astype(np.int32)
+        ys = np.rint(np.linspace(y1, y2, steps)).astype(np.int32)
+        radius = max(0, self.line_width // 2)
+
+        for dy in range(-radius, radius + 1):
+            for dx in range(-radius, radius + 1):
+                px = xs + dx
+                py = ys + dy
+                valid = (
+                    (px >= 0)
+                    & (px < self.image_size)
+                    & (py >= 0)
+                    & (py < self.image_size)
+                )
+                if not np.any(valid):
+                    continue
+                orientation[py[valid], px[valid], 0] = cos_theta
+                orientation[py[valid], px[valid], 1] = sin_theta
 
     def _generate_junctions(
         self,
@@ -370,18 +458,13 @@ class GroundTruthGenerator:
 
         from PIL import Image, ImageDraw
 
-        scale = 3 if self.use_antialiasing else 1
         canvas = Image.fromarray(image)
-        if scale > 1:
-            canvas = canvas.resize((self.image_size * scale, self.image_size * scale), Image.Resampling.NEAREST)
         draw = ImageDraw.Draw(canvas)
         draw.line(
-            [(p1[0] * scale, p1[1] * scale), (p2[0] * scale, p2[1] * scale)],
+            [p1, p2],
             fill=int(value),
-            width=max(1, self.line_width * scale),
+            width=max(1, self.line_width),
         )
-        if scale > 1:
-            canvas = canvas.resize((self.image_size, self.image_size), Image.Resampling.LANCZOS)
         image[:, :] = np.asarray(canvas, dtype=image.dtype)
 
     def _generate_junction_offsets(

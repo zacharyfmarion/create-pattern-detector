@@ -1,5 +1,6 @@
 import { roleCounts } from "./fold-utils.ts";
 import { arrangeSegments } from "./line-arrangement.ts";
+import { generateDenseBoxPleatFold } from "./dense-box-pleat.ts";
 import { SeededRandom } from "./random.ts";
 import type { BPSubfamily, BPRole, EdgeAssignment, FOLDFormat, GenerationConfig } from "./types.ts";
 
@@ -31,6 +32,7 @@ const DIAGONAL_DIRECTIONS: Point[] = [
 ];
 
 export function generateBoxPleatFold(config: GenerationConfig): FOLDFormat {
+  if (config.dense) return generateDenseBoxPleatFold(config);
   const rng = new SeededRandom(config.seed);
   let lastError = "unknown error";
   for (let attempt = 0; attempt < 80; attempt++) {

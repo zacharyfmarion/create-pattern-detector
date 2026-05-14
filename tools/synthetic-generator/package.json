@@ -6,6 +6,7 @@
   "scripts": {
     "generate": "bun run src/index.ts",
     "folded-preview": "bun run src/folded-preview.ts",
+    "bp-realism-report": "bun run src/bp-realism-report.ts",
     "test": "bun test",
     "typecheck": "tsc --noEmit"
   },
