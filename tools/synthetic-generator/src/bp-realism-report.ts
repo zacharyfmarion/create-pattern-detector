@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 import { mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { scoreFoldRealism } from "./realistic-box-pleat.ts";
+import { scoreFoldRealism } from "./realism-metrics.ts";
 import type { FOLDFormat, RealismMetadata } from "./types.ts";
 
 interface CliArgs {

@@ -15,7 +15,7 @@ import type {
 } from "./bp-studio-spec.ts";
 import { normalizeBPStudioFold } from "./bp-studio-validation.ts";
 import { assignmentToFoldAngle, normalizeFold, roleCounts } from "./fold-utils.ts";
-import { generateRealisticBoxPleatFold, scoreFoldRealism } from "./realistic-box-pleat.ts";
+import { scoreFoldRealism } from "./realism-metrics.ts";
 import type {
   BPRole,
   DesignTreeMetadata,
@@ -33,6 +33,7 @@ interface AdapterSpec {
   sheet: { width: number; height: number };
   useAuxiliary: boolean;
   completeRepositories: boolean;
+  exportMode: "outer" | "expanded";
   tree: {
     edges: Array<{ n1: number; n2: number; length: number }>;
     flaps: Array<{ id: number; x: number; y: number; width: number; height: number }>;
@@ -87,7 +88,7 @@ export function generateBPStudioRealisticFold(config: GenerationConfig): FOLDFor
       const { fold: rawFold, metadata: adapterMetadata } = runAdapter(adapterSpec);
       const fold = normalizeBPStudioFold(rawFold, {
         creator: "cp-synthetic-generator/bp-studio-realistic",
-        auxiliaryPolicy: "valley",
+        auxiliaryPolicy: "unassigned",
         metadata: {
           bp_studio_metadata: {
             samplerSpec: spec,
@@ -98,8 +99,11 @@ export function generateBPStudioRealisticFold(config: GenerationConfig): FOLDFor
       });
 
       attachBPStudioMetadata(fold, spec, adapterMetadata);
-      if (!passesLocalPrecheck(fold)) {
-        return strictCompletionFold(config, spec, adapterSpec, adapterMetadata, fold, "raw BP Studio export failed local Kawasaki/Maekawa");
+      const local = localPrecheck(fold);
+      if (!local.ok) {
+        throw new Error(
+          `raw BP Studio export failed local Kawasaki/Maekawa: kawasaki=${local.kawasakiBad.length}, maekawa=${local.maekawaBad.length}, sample=${local.sampleBadVertices.join(",")}`,
+        );
       }
       return fold;
     } catch (error) {
@@ -168,6 +172,7 @@ function toAdapterSpec(spec: BPStudioAdapterSpec): AdapterSpec {
     },
     useAuxiliary: true,
     completeRepositories: true,
+    exportMode: "outer",
     tree: {
       edges: spec.tree.edges.map((edge) => ({
         n1: idMap.get(edge.from)!,
@@ -268,64 +273,21 @@ function attachBPStudioMetadata(fold: FOLDFormat, spec: BPStudioAdapterSpec, ada
   fold.realism_metadata = scoreFoldRealism(fold, layout);
 }
 
-function strictCompletionFold(
-  config: GenerationConfig,
-  spec: BPStudioAdapterSpec,
-  adapterSpec: AdapterSpec,
-  adapterMetadata: AdapterMetadata,
-  rawFold: FOLDFormat,
-  reason: string,
-): FOLDFormat {
-  const target = spec.expectedComplexity.targetCreases;
-  const strictFold = generateRealisticBoxPleatFold({
-    ...config,
-    family: "realistic-box-pleat",
-    seed: spec.seed,
-    bucket: spec.expectedComplexity.bucket,
-    numCreases: Math.round((target[0] + target[1]) / 2),
-    realisticArchetype: spec.archetype as RealisticBPArchetype,
-    dense: true,
-  });
-  strictFold.file_creator = "cp-synthetic-generator/bp-studio-realistic/strict-completion";
-  if (strictFold.bp_metadata) strictFold.bp_metadata.bpSubfamily = "bp-studio-strict-completion";
-  if (strictFold.density_metadata) {
-    strictFold.density_metadata.subfamily = "bp-studio-strict-completion";
-    strictFold.density_metadata.generatorSteps = [
-      "bp-studio-spec-sampler",
-      "bp-studio-layout-controller",
-      "strict-certified-completion",
-      ...strictFold.density_metadata.generatorSteps,
-    ];
-  }
-  strictFold.bp_studio_metadata = {
-    samplerSpec: spec,
-    adapterSpec,
-    adapterMetadata,
-    rawNormalization: (rawFold.bp_studio_metadata as { normalization?: unknown } | undefined)?.normalization,
-    rawExportSummary: {
-      vertices: rawFold.vertices_coords.length,
-      edges: rawFold.edges_vertices.length,
-      assignments: rawFold.edges_assignment.reduce<Record<string, number>>((counts, assignment) => {
-        counts[assignment] = (counts[assignment] ?? 0) + 1;
-        return counts;
-      }, {}),
-    },
-    strictCompletion: {
-      used: true,
-      reason,
-      note: "Raw BP Studio CP exports are retained as candidate/calibration metadata; accepted labels use the strict certified completion.",
-    },
-  };
-  return strictFold;
-}
-
-function passesLocalPrecheck(fold: FOLDFormat): boolean {
+function localPrecheck(fold: FOLDFormat): { ok: boolean; kawasakiBad: number[]; maekawaBad: number[]; sampleBadVertices: number[] } {
   try {
     const graph = normalizeFold(fold);
     ear.graph.populate(graph);
-    return ear.singleVertex.validateKawasaki(graph).length === 0 && ear.singleVertex.validateMaekawa(graph).length === 0;
+    const kawasakiBad = ear.singleVertex.validateKawasaki(graph) as number[];
+    const maekawaBad = ear.singleVertex.validateMaekawa(graph) as number[];
+    const sampleBadVertices = [...new Set([...kawasakiBad, ...maekawaBad])].sort((a, b) => a - b).slice(0, 12);
+    return {
+      ok: kawasakiBad.length === 0 && maekawaBad.length === 0,
+      kawasakiBad,
+      maekawaBad,
+      sampleBadVertices,
+    };
   } catch {
-    return false;
+    return { ok: false, kawasakiBad: [-1], maekawaBad: [-1], sampleBadVertices: [-1] };
   }
 }
 

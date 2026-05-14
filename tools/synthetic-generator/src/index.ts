@@ -50,7 +50,7 @@ async function main(): Promise<void> {
     const family = rng.weightedChoice(recipe.families as Record<GeneratorFamily, number>);
     const bucket = chooseBucket(rng, recipe.complexityBuckets);
     const sampleSeed = recipe.seed + attempts * 1009;
-    const id = stableId(recipe.name, recipe.seed, rows.length);
+    const id = stableId(recipe.name, recipe.seed, attempts - 1);
     const config: GenerationConfig = {
       id,
       family,
@@ -170,7 +170,7 @@ async function main(): Promise<void> {
 function parseArgs(argv: string[]): CliArgs {
   const args: CliArgs = {
     count: 32,
-    out: "data/generated/synthetic/clean_cp_v1",
+    out: "data/generated/synthetic/bp_studio_realistic_v1",
   };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];

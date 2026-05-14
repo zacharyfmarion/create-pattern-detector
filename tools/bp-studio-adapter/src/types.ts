@@ -4,6 +4,7 @@ export interface BpStudioAdapterSpec {
   sheet: SheetSpec;
   useAuxiliary?: boolean;
   completeRepositories?: boolean;
+  exportMode?: "outer" | "expanded";
   tree?: TreeSpec;
   edges?: EdgeSpec[];
   flaps?: FlapSpec[];
@@ -60,6 +61,7 @@ export interface AdapterMetadata {
     sheet: SheetSpec;
     useAuxiliary: boolean;
     completeRepositories: boolean;
+    exportMode: "outer" | "expanded";
     edgeCount: number;
     flapCount: number;
   };

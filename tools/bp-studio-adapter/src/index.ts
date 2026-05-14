@@ -6,12 +6,14 @@ import { dirname, resolve } from "node:path";
 import { LayoutController } from "core/controller/layoutController";
 import { Tree } from "core/design/context/tree";
 import { heightTask } from "core/design/tasks/height";
+import { Clip } from "core/math/sweepLine/clip/clip";
 import { Processor } from "core/service/processor";
 import { State, fullReset } from "core/service/state";
 import { CreaseType } from "shared/types/cp";
 
 import type { CPLine } from "shared/types/cp";
 import type { JEdge, JFlap, NodeId } from "shared/json";
+import type { ILine, Path, Polygon } from "shared/types/geometry";
 import type {
   AdapterMetadata,
   Assignment,
@@ -50,13 +52,17 @@ export function generate(specInput: unknown): GenerationResult {
   const { edges, flaps } = getTreeParts(spec);
   const useAuxiliary = spec.useAuxiliary ?? false;
   const completeRepositories = spec.completeRepositories ?? true;
+  const exportMode = spec.exportMode ?? "outer";
 
   createBpStudioTree(edges, flaps);
   if(completeRepositories) completeAllStretches();
 
-  const cpLines = LayoutController.getCP(sheetBorder(spec.sheet), useAuxiliary);
+  const border = sheetBorder(spec.sheet);
+  const cpLines = exportMode === "expanded"
+    ? getExpandedCP(border, useAuxiliary)
+    : LayoutController.getCP(border, useAuxiliary);
   const fold = toFold(cpLines, spec);
-  const metadata = collectMetadata(spec, fold, cpLines, edges, flaps, useAuxiliary, completeRepositories);
+  const metadata = collectMetadata(spec, fold, cpLines, edges, flaps, useAuxiliary, completeRepositories, exportMode);
   return { fold, metadata };
 }
 
@@ -105,6 +111,40 @@ function completeAllStretches(): void {
   }
 }
 
+function getExpandedCP(borders: Path, useAuxiliary: boolean): CPLine[] {
+  const hingeType = useAuxiliary ? CreaseType.Auxiliary : CreaseType.Valley;
+  const lines: CPLine[] = [];
+  addPolygon(lines, [borders], CreaseType.Border);
+
+  for(const node of State.m.$tree.$nodes) {
+    if(!node || !node.$parent) continue;
+    for(const contour of node.$graphics.$contours) {
+      addPolygon(lines, [contour.outer], hingeType);
+      if(contour.inner) addPolygon(lines, contour.inner, hingeType);
+    }
+    addPolygon(lines, node.$graphics.$patternContours, hingeType);
+    addPolygon(lines, node.$graphics.$traceContours, hingeType);
+    addPolygon(lines, node.$graphics.$roughContours, hingeType);
+    addLines(lines, node.$graphics.$ridges, CreaseType.Mountain);
+  }
+
+  for(const stretch of State.$stretches.values()) {
+    const pattern = stretch.$repo.$pattern;
+    if(!pattern) continue;
+    for(const device of pattern.$devices) {
+      addLines(lines, device.$drawRidges, CreaseType.Mountain);
+      addLines(lines, device.$traceRidges.map(ridge => ridge.$toILine()), CreaseType.Mountain);
+      addLines(lines, device.$axisParallels, CreaseType.Valley);
+      for(const contour of device.$contour) {
+        addPolygon(lines, [contour.outer], hingeType);
+        if(contour.inner) addPolygon(lines, contour.inner, hingeType);
+      }
+    }
+  }
+
+  return new Clip().$get(lines);
+}
+
 function toFold(lines: CPLine[], spec: BpStudioAdapterSpec): FoldDocument {
   const vertices = new VertexSet();
   const edgeData = lines.map(line => {
@@ -135,7 +175,8 @@ function collectMetadata(
   edges: EdgeSpec[],
   flaps: FlapSpec[],
   useAuxiliary: boolean,
-  completeRepositories: boolean
+  completeRepositories: boolean,
+  exportMode: "outer" | "expanded"
 ): AdapterMetadata {
   return {
     adapter: {
@@ -151,6 +192,7 @@ function collectMetadata(
       sheet: spec.sheet,
       useAuxiliary,
       completeRepositories,
+      exportMode,
       edgeCount: edges.length,
       flapCount: flaps.length
     },
@@ -209,6 +251,23 @@ function sheetBorder(sheet: SheetSpec): IPoint[] {
     { x: sheet.width, y: sheet.height },
     { x: 0, y: sheet.height }
   ];
+}
+
+function addPolygon(set: CPLine[], polygon: Polygon, type: CreaseType): void {
+  for(const path of polygon) {
+    const l = path.length;
+    for(let i = 0; i < l; i++) {
+      const p1 = path[i], p2 = path[i + 1] || path[0];
+      set.push({ type, p1, p2 });
+    }
+  }
+}
+
+function addLines(set: CPLine[], lines: readonly ILine[], type: CreaseType): void {
+  for(const line of lines) {
+    const [p1, p2] = line;
+    set.push({ type, p1, p2 });
+  }
 }
 
 function getTreeParts(spec: BpStudioAdapterSpec): { edges: EdgeSpec[]; flaps: FlapSpec[] } {

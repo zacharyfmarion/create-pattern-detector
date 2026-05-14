@@ -173,12 +173,14 @@ Current checkpoint:
 
 - BP Studio is pinned as `third_party/bp-studio` and wrapped by `tools/bp-studio-adapter/`.
 - `bp-studio-realistic` exists as a main generator family with `recipes/synthetic/bp_studio_realistic_v1.yaml`.
-- The generator samples BP Studio-style tree/layout specs, runs the BP Studio adapter, normalizes raw exports, records raw export metadata, and then uses a strict certified completion for accepted labels when the raw export fails local constraints.
-- A 4-sample smoke can generate, render, create folded previews, produce QA JSON, and load every manifest row through `SyntheticManifestDataset`.
+- The old hand-written generator families, old recipes, and strict-completion fallback have been removed from the production synthetic path.
+- The generator now samples BP Studio-style tree/layout specs, runs the BP Studio adapter, normalizes raw exports, and fails unless the raw BP Studio-derived graph passes local precheck and the normal strict validator.
+- Raw-only generation is currently blocked: `0/2` accepted after 40 attempts in `/tmp/bp_studio_raw_only`.
 
 Important blocker discovered during implementation:
 
-- Raw BP Studio CP exports are useful candidates/calibration artifacts, but they can fail local Kawasaki/Maekawa after arrangement. They must not be treated as production labels until Phase 5 grows a certified BP Studio repair/completion layer. The current strict-completion fallback keeps the pipeline end-to-end valid, but it is not the final production distribution.
+- Raw BP Studio CP exports are useful candidates/calibration artifacts, but they can fail local Kawasaki/Maekawa after arrangement. They must not be treated as production labels until Phase 5 grows a certified BP Studio repair/completion layer.
+- See `implementations-plans/bp-studio-raw-export-rca.md` for the current RCA.
 
 ## Parallel Workstreams
 
