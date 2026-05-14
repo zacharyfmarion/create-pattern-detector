@@ -64,6 +64,38 @@ Outputs:
 
 Success means not just a visually plausible line drawing. It means a FOLD graph that downstream origami tooling can consume.
 
+## Eventual Browser Target
+
+The eventual user-facing target should be a browser-only app:
+
+```text
+upload image
+  -> browser-side rectification and preprocessing
+  -> CPLineNet exported to ONNX and run with WebGPU/WASM
+  -> PlanarGraphBuilder in TypeScript or Rust/WASM
+  -> EdgeAssignmentClassifier in browser
+  -> OrigamiConstraintRepair in browser
+  -> FOLDWriter
+  -> download .fold + view validation/debug overlays
+```
+
+This should not be the first implementation target. The Python/CLI pipeline comes first because it is faster to debug, easier to profile, and better for model/geometry iteration.
+
+Browser constraints to plan for:
+
+- No image data should leave the user's machine.
+- Model weights can be downloaded as static app assets, then cached by a PWA for offline use.
+- Inference should prefer ONNX Runtime Web with WebGPU and fall back to WASM.
+- Geometry code must avoid Python dependencies; keep the production algorithms portable to TypeScript or Rust/WASM.
+- Debug overlays should be a first-class browser feature, not just a CLI artifact.
+
+Browser success criteria:
+
+- User can upload a CP image and download a `.fold` file without API calls.
+- The app works offline after first load if model weights are cached.
+- The browser output matches CLI output within fixed graph tolerances on regression fixtures.
+- If local compute is too slow or unsupported, the UI reports that clearly instead of silently degrading quality.
+
 ## Exact Architecture
 
 ### 1. SquareRectifier
@@ -345,6 +377,26 @@ Exit criteria:
 - Graph model improves final FOLD validity or edge F1 on held-out data.
 - If it does not beat deterministic repair, keep it out of production.
 
+### Phase 8: Browser-Only App
+
+Goal: package the stable inference pipeline into a local-first browser experience.
+
+Tasks:
+
+- Export CPLineNet to ONNX and validate numerical parity against PyTorch.
+- Build a static web app with upload, preview, rectification controls, debug overlays, and `.fold` download.
+- Port `PlanarGraphBuilder`, `OrigamiConstraintRepair`, and `FOLDWriter` to TypeScript or Rust/WASM.
+- Run inference with ONNX Runtime Web using WebGPU, with WASM fallback.
+- Add PWA caching for model weights and app assets.
+- Add a browser regression suite that compares CLI and browser outputs on fixed fixtures.
+
+Exit criteria:
+
+- No API calls are required for inference.
+- Uploaded images stay local to the browser.
+- Browser output matches CLI output within agreed tolerances.
+- Offline PWA mode works after first load.
+
 ## RunPod Budget Policy
 
 Do not use paid GPU until Phases 0 through 2 pass locally.
@@ -367,8 +419,8 @@ Budget guardrails:
 The project is production-ready when:
 
 - A user can run one command on a CP image and receive a FOLD file.
+- A user can also upload an image in the browser and receive a FOLD file without API calls.
 - The report states whether the graph is valid, repaired, ambiguous, or failed.
 - Debug overlays make failures actionable.
 - The system has fixed synthetic and real regression suites.
 - Downstream origami-base computation succeeds on the intended benchmark set.
-
