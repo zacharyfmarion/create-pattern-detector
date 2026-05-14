@@ -1,0 +1,24 @@
+import { describe, expect, test } from "bun:test";
+import { readFile } from "node:fs/promises";
+
+import { generate } from "../src/index";
+
+import type { Assignment } from "../src/types";
+
+describe("BP Studio adapter", () => {
+  test("generates a non-empty FOLD document from the two-flap fixture", async () => {
+    const fixture = JSON.parse(await readFile(new URL("../fixtures/two-flap.json", import.meta.url), "utf8"));
+    const { fold, metadata } = generate(fixture);
+    const assignments = new Set<Assignment>(fold.edges_assignment);
+
+    expect(fold.vertices_coords.length).toBeGreaterThan(0);
+    expect(fold.edges_vertices.length).toBeGreaterThan(0);
+    expect(assignments.has("B")).toBe(true);
+    expect(assignments.has("M")).toBe(true);
+    expect(assignments.has("V")).toBe(true);
+    expect(metadata.stretches.length).toBeGreaterThan(0);
+    expect(metadata.cp.assignmentCounts.B).toBeGreaterThan(0);
+    expect(metadata.cp.assignmentCounts.M).toBeGreaterThan(0);
+    expect(metadata.cp.assignmentCounts.V).toBeGreaterThan(0);
+  });
+});

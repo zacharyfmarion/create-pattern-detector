@@ -1,0 +1,11 @@
+{
+  "name": "@cp-detector/bp-studio-adapter",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Headless BP Studio adapter for generating box-pleat crease-pattern FOLD JSON.",
+  "scripts": {
+    "generate": "bun src/index.ts",
+    "test": "bun test tests"
+  }
+}

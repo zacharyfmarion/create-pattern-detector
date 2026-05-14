@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "baseUrl": "../../third_party/bp-studio/src",
+    "module": "Preserve",
+    "moduleResolution": "Bundler",
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "target": "ES2022",
+    "lib": ["ESNext"],
+    "paths": {
+      "client/*": ["client/*"],
+      "core/*": ["core/*"],
+      "lib/*": ["../lib/*"],
+      "shared/*": ["shared/*"]
+    }
+  },
+  "include": [
+    "src/**/*.ts",
+    "tests/**/*.ts",
+    "../../third_party/bp-studio/src/shared/types/**/*.d.ts"
+  ]
+}

@@ -1,0 +1,117 @@
+name: bp_studio_realistic_v1
+seed: 9170
+imageSize: 768
+padding: 42
+
+splits:
+  train: 0.85
+  val: 0.10
+  test: 0.05
+
+families:
+  bp-studio-realistic: 1.0
+
+complexityBuckets:
+  - name: small
+    minCreases: 80
+    maxCreases: 300
+    weight: 0.20
+  - name: medium
+    minCreases: 300
+    maxCreases: 900
+    weight: 0.40
+  - name: dense
+    minCreases: 900
+    maxCreases: 2500
+    weight: 0.30
+  - name: superdense
+    minCreases: 2500
+    maxCreases: 6000
+    weight: 0.10
+
+bpStudioSampler:
+  schemaVersion: bp-studio-adapter-spec/v1
+  samplerVersion: bp-studio-sampler/v1
+  archetypeWeights:
+    insect: 0.28
+    quadruped: 0.22
+    bird: 0.22
+    object: 0.14
+    abstract: 0.14
+  complexityBuckets:
+    small:
+      targetFlaps: [6, 10]
+      expectedGridSize: [28, 36]
+      targetCreases: [80, 300]
+    medium:
+      targetFlaps: [10, 18]
+      expectedGridSize: [36, 52]
+      targetCreases: [300, 900]
+    dense:
+      targetFlaps: [18, 32]
+      expectedGridSize: [52, 76]
+      targetCreases: [900, 2500]
+    superdense:
+      targetFlaps: [32, 52]
+      expectedGridSize: [76, 112]
+      targetCreases: [2500, 6000]
+  symmetryWeights:
+    insect:
+      bilateral-x: 0.62
+      asymmetric: 0.25
+      rotational-2: 0.08
+      radial-4: 0.03
+      bilateral-y: 0.02
+    quadruped:
+      asymmetric: 0.50
+      bilateral-x: 0.35
+      bilateral-y: 0.08
+      rotational-2: 0.05
+      radial-4: 0.02
+    bird:
+      bilateral-x: 0.52
+      asymmetric: 0.38
+      rotational-2: 0.05
+      bilateral-y: 0.03
+      radial-4: 0.02
+    object:
+      asymmetric: 0.24
+      bilateral-x: 0.22
+      bilateral-y: 0.22
+      rotational-2: 0.22
+      radial-4: 0.10
+    abstract:
+      asymmetric: 0.27
+      rotational-2: 0.25
+      radial-4: 0.18
+      bilateral-x: 0.18
+      bilateral-y: 0.12
+  layoutIntent:
+    boundaryBiasedTerminals: true
+    bodyCenteredLayouts: true
+    nonuniformTerminalPositions: true
+    includeWideAndElevationFlaps: true
+    deriveRiversFromTreeEdges: true
+
+validation:
+  strictGlobal: true
+  globalBackend: rabbit-ear-solver
+  minVertexDistance: 0.00001
+  maxVertices: 12000
+  maxEdges: 12000
+  requireBoxPleat: true
+  boxPleatMode: dense
+  requireDense: true
+  requireRealistic: true
+  minRealismScore: 0.45
+
+renderVariants:
+  - name: bp_assignment_clean
+    assignmentVisibility: visible
+    count: 1
+  - name: monochrome_ink
+    assignmentVisibility: hidden
+    count: 1
+  - name: faint_blueprint
+    assignmentVisibility: hidden
+    count: 1

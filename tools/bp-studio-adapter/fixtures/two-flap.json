@@ -1,0 +1,39 @@
+{
+  "title": "Two-flap BP Studio smoke fixture",
+  "description": "Matches BP Studio CP export tests: a two-leaf tree with point flaps.",
+  "sheet": {
+    "width": 16,
+    "height": 16
+  },
+  "useAuxiliary": false,
+  "tree": {
+    "edges": [
+      {
+        "n1": 0,
+        "n2": 1,
+        "length": 7
+      },
+      {
+        "n1": 0,
+        "n2": 2,
+        "length": 4
+      }
+    ],
+    "flaps": [
+      {
+        "id": 1,
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      {
+        "id": 2,
+        "x": 8,
+        "y": 9,
+        "width": 0,
+        "height": 0
+      }
+    ]
+  }
+}
