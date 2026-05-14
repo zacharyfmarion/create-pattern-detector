@@ -22,6 +22,13 @@ Expanded export experiment:
 - Average local failures stayed very high (`~514` Kawasaki, `~682` Maekawa on local-failure attempts), and adapter failures increased for hard sampled layouts.
 - Conclusion: simply exporting more visible/internal contours is not enough. The missing piece is a real assignment/geometry completion step, not just more lines.
 
+Optimizer experiment:
+
+- Added an adapter path that calls BP Studio's WASM optimizer bridge before CP export (`TreeController.getHierarchy(...)` + `Bridge.solve(...)`).
+- A 5-attempt smoke still produced `0/1` accepted.
+- Successful optimized exports still failed locally with very large counts (`~1150-1350` Kawasaki, `~1577-1848` Maekawa in representative attempts), and several sampled trees still crashed inside BP Studio layout/geometry code.
+- Conclusion: optimizer-backed coordinates are necessary for production realism, but they do not turn BP Studio's exported design CP into a strict FOLD label. The hard missing layer remains CP completion/assignment repair.
+
 ## Root Cause
 
 BP Studio's `LayoutController.getCP(...)` export is a designer/display CP export, not a certified flat-foldable FOLD-label export. The adapter is mostly using BP Studio's own headless test path correctly:

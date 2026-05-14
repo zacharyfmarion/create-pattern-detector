@@ -34,6 +34,10 @@ interface AdapterSpec {
   useAuxiliary: boolean;
   completeRepositories: boolean;
   exportMode: "outer" | "expanded";
+  optimizeLayout: boolean;
+  optimizerLayout: "view" | "random";
+  optimizerSeed: number;
+  optimizerUseDimension: boolean;
   tree: {
     edges: Array<{ n1: number; n2: number; length: number }>;
     flaps: Array<{ id: number; x: number; y: number; width: number; height: number }>;
@@ -173,6 +177,10 @@ function toAdapterSpec(spec: BPStudioAdapterSpec): AdapterSpec {
     useAuxiliary: true,
     completeRepositories: true,
     exportMode: "outer",
+    optimizeLayout: true,
+    optimizerLayout: "view",
+    optimizerSeed: spec.seed,
+    optimizerUseDimension: true,
     tree: {
       edges: spec.tree.edges.map((edge) => ({
         n1: idMap.get(edge.from)!,

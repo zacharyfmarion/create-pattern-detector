@@ -3,14 +3,19 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 
+import { Bridge } from "client/plugins/optimizer/bridge";
 import { LayoutController } from "core/controller/layoutController";
+import { TreeController } from "core/controller/treeController";
 import { Tree } from "core/design/context/tree";
 import { heightTask } from "core/design/tasks/height";
 import { Clip } from "core/math/sweepLine/clip/clip";
 import { Processor } from "core/service/processor";
 import { State, fullReset } from "core/service/state";
+import optimizer from "lib/optimizer/debug/optimizer.js";
+import { GridType } from "shared/json";
 import { CreaseType } from "shared/types/cp";
 
+import type { OptimizerRequest } from "client/plugins/optimizer/types";
 import type { CPLine } from "shared/types/cp";
 import type { JEdge, JFlap, NodeId } from "shared/json";
 import type { ILine, Path, Polygon } from "shared/types/geometry";
@@ -47,22 +52,34 @@ const FOLD_ANGLE_BY_ASSIGNMENT: Record<Assignment, number> = {
   U: 0
 };
 
-export function generate(specInput: unknown): GenerationResult {
+export async function generate(specInput: unknown): Promise<GenerationResult> {
   const spec = normalizeSpec(specInput);
-  const { edges, flaps } = getTreeParts(spec);
+  const { edges } = getTreeParts(spec);
+  let { flaps } = getTreeParts(spec);
+  let sheet = spec.sheet;
   const useAuxiliary = spec.useAuxiliary ?? false;
   const completeRepositories = spec.completeRepositories ?? true;
   const exportMode = spec.exportMode ?? "outer";
+  const optimizeLayout = spec.optimizeLayout ?? false;
+  const optimizerLayout = spec.optimizerLayout ?? "view";
+  const optimizerSeed = spec.optimizerSeed ?? null;
 
   createBpStudioTree(edges, flaps);
+  if(optimizeLayout) {
+    const optimized = await optimizeTreeLayout(spec, flaps);
+    sheet = optimized.sheet;
+    flaps = optimized.flaps;
+    spec.sheet = sheet;
+    createBpStudioTree(edges, flaps);
+  }
   if(completeRepositories) completeAllStretches();
 
-  const border = sheetBorder(spec.sheet);
+  const border = sheetBorder(sheet);
   const cpLines = exportMode === "expanded"
     ? getExpandedCP(border, useAuxiliary)
     : LayoutController.getCP(border, useAuxiliary);
   const fold = toFold(cpLines, spec);
-  const metadata = collectMetadata(spec, fold, cpLines, edges, flaps, useAuxiliary, completeRepositories, exportMode);
+  const metadata = collectMetadata(spec, fold, cpLines, edges, flaps, useAuxiliary, completeRepositories, exportMode, optimizeLayout, optimizerLayout, optimizerSeed);
   return { fold, metadata };
 }
 
@@ -79,7 +96,7 @@ async function main(): Promise<void> {
 
   const specPath = resolve(args.spec);
   const spec = JSON.parse(await readFile(specPath, "utf8")) as unknown;
-  const { fold, metadata } = generate(spec);
+  const { fold, metadata } = await generate(spec);
 
   await writeJson(args.out, fold);
   if(args.metadata) await writeJson(args.metadata, metadata);
@@ -109,6 +126,54 @@ function completeAllStretches(): void {
   for(const stretch of State.$stretches.values()) {
     stretch.$repo.$complete();
   }
+}
+
+async function optimizeTreeLayout(
+  spec: BpStudioAdapterSpec,
+  flaps: FlapSpec[],
+): Promise<{ sheet: SheetSpec; flaps: FlapSpec[] }> {
+  const flapMap = new Map(flaps.map(flap => [flap.id, flap]));
+  const hierarchies = TreeController.getHierarchy(spec.optimizerLayout === "random", spec.optimizerUseDimension ?? true);
+  const orderedLeafIds = hierarchies[hierarchies.length - 1].leaves;
+  const orderedFlaps = orderedLeafIds.map(id => {
+    const flap = flapMap.get(id);
+    return flap ?? { id, x: spec.sheet.width / 2, y: spec.sheet.height / 2, width: 0, height: 0 };
+  });
+  const request: OptimizerRequest = {
+    command: "start",
+    useBH: false,
+    layout: spec.optimizerLayout ?? "view",
+    random: 5,
+    problem: {
+      type: GridType.rectangular,
+      flaps: orderedFlaps.map(flap => ({
+        id: flap.id as NodeId,
+        width: flap.width ?? 0,
+        height: flap.height ?? 0,
+      })),
+      hierarchies,
+    },
+    vec: (spec.optimizerLayout ?? "view") === "view"
+      ? orderedFlaps.map(flap => ({ x: flap.x / spec.sheet.width, y: flap.y / spec.sheet.height }))
+      : null,
+  };
+  const instance = await optimizer({
+    print: () => undefined,
+    checkInterrupt: () => false,
+  });
+  const bridge = new Bridge(instance);
+  const result = await bridge.solve(request, spec.optimizerSeed);
+  const sizeById = new Map(flaps.map(flap => [flap.id, { width: flap.width ?? 0, height: flap.height ?? 0 }]));
+  return {
+    sheet: { width: result.width, height: result.height },
+    flaps: result.flaps.map(flap => ({
+      id: flap.id,
+      x: flap.x,
+      y: flap.y,
+      width: sizeById.get(flap.id)?.width ?? 0,
+      height: sizeById.get(flap.id)?.height ?? 0,
+    })),
+  };
 }
 
 function getExpandedCP(borders: Path, useAuxiliary: boolean): CPLine[] {
@@ -176,7 +241,10 @@ function collectMetadata(
   flaps: FlapSpec[],
   useAuxiliary: boolean,
   completeRepositories: boolean,
-  exportMode: "outer" | "expanded"
+  exportMode: "outer" | "expanded",
+  optimizeLayout: boolean,
+  optimizerLayout: "view" | "random",
+  optimizerSeed: number | null
 ): AdapterMetadata {
   return {
     adapter: {
@@ -193,6 +261,9 @@ function collectMetadata(
       useAuxiliary,
       completeRepositories,
       exportMode,
+      optimizeLayout,
+      optimizerLayout,
+      optimizerSeed,
       edgeCount: edges.length,
       flapCount: flaps.length
     },

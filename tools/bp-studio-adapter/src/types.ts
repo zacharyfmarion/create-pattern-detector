@@ -5,6 +5,10 @@ export interface BpStudioAdapterSpec {
   useAuxiliary?: boolean;
   completeRepositories?: boolean;
   exportMode?: "outer" | "expanded";
+  optimizeLayout?: boolean;
+  optimizerLayout?: "view" | "random";
+  optimizerSeed?: number;
+  optimizerUseDimension?: boolean;
   tree?: TreeSpec;
   edges?: EdgeSpec[];
   flaps?: FlapSpec[];
@@ -62,6 +66,9 @@ export interface AdapterMetadata {
     useAuxiliary: boolean;
     completeRepositories: boolean;
     exportMode: "outer" | "expanded";
+    optimizeLayout: boolean;
+    optimizerLayout: "view" | "random";
+    optimizerSeed: number | null;
     edgeCount: number;
     flapCount: number;
   };

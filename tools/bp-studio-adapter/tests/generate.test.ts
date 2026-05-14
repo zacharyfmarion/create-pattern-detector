@@ -8,7 +8,7 @@ import type { Assignment } from "../src/types";
 describe("BP Studio adapter", () => {
   test("generates a non-empty FOLD document from the two-flap fixture", async () => {
     const fixture = JSON.parse(await readFile(new URL("../fixtures/two-flap.json", import.meta.url), "utf8"));
-    const { fold, metadata } = generate(fixture);
+    const { fold, metadata } = await generate(fixture);
     const assignments = new Set<Assignment>(fold.edges_assignment);
 
     expect(fold.vertices_coords.length).toBeGreaterThan(0);
