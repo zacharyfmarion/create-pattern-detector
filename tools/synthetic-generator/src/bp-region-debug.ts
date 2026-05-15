@@ -423,14 +423,10 @@ function packingPanel(spec: BPStudioAdapterSpec, adapterMetadata: AdapterMetadat
   const scale = sheetScale(sheet.width, sheet.height, size);
   const terminalLengths = terminalLengthByAdapterId(spec);
   const edges = packedTreeOverlay(spec, layout, toPanel);
-  const nodes = (layout?.nodes ?? [])
-    .filter((node) => !node.isLeaf)
-    .map((node) => adapterNodeBoundsMark(node, toPanel, String(node.id)));
   const flaps = (layout?.flaps ?? []).map((flap) => adapterFlapMark(flap, toPanel, scale, terminalLengths.get(flap.id), "#4ade80", "#16a34a", true));
   return panelFrame(size, [
-    sheetGrid(size, 16),
+    sheetGridForSheet(sheet.width, sheet.height, size),
     ...edges,
-    ...nodes,
     ...flaps,
   ], true, "bp-packing-clip");
 }
@@ -446,16 +442,18 @@ function candidateOverlayPanel(
   const toPanel = sheetProjector(sheet.width, sheet.height, size);
   const scale = sheetScale(sheet.width, sheet.height, size);
   const terminalLengths = terminalLengthByAdapterId(spec);
-  const optimizedNodes = (layout?.nodes ?? [])
-    .filter((node) => !node.isLeaf)
-    .map((node) => adapterNodeBoundsMark(node, toPanel, String(node.id)));
   const optimizedFlaps = (layout?.flaps ?? []).map((flap) => adapterFlapMark(flap, toPanel, scale, terminalLengths.get(flap.id), "#22c55e", "#15803d", false));
-  const candidateSvg = stripRegionDebugLegend(regionCandidateToSvg(candidate, size))
+  const candidateSvg = regionCandidateToSvg(candidate, size, {
+    showGrid: false,
+    showLegend: false,
+    showFlapTargets: false,
+    showFlapBoundaries: false,
+  })
     .replace(/<svg[^>]*>/, `<g>`)
     .replace(/<\/svg>\s*$/, `</g>`);
   return panelFrame(size, [
+    sheetGridForSheet(sheet.width, sheet.height, size),
     candidateSvg,
-    `<g opacity="0.56">${optimizedNodes.join("\n")}</g>`,
     `<g opacity="0.72">${optimizedFlaps.join("\n")}</g>`,
   ], false, "bp-candidate-overlay-clip");
 }
@@ -469,10 +467,6 @@ function panelFrame(size: number, body: string[], includeBorder = true, clipId?:
     clipId ? `</g>` : "",
     includeBorder ? `<rect x="0" y="0" width="${size}" height="${size}" fill="none" stroke="#0f172a" stroke-width="2"/>` : "",
   ].join("\n");
-}
-
-function stripRegionDebugLegend(svg: string): string {
-  return svg.replace(/<g data-debug-legend="bp-region">[\s\S]*?<\/g>/, "");
 }
 
 function packedTreeOverlay(
@@ -560,17 +554,36 @@ function formatSheetSize(sheet: { width?: number; height?: number } | undefined)
   return `${round2(sheet.width)} x ${round2(sheet.height)}`;
 }
 
-function sheetGrid(size: number, divisions: number): string {
-  return Array.from({ length: divisions + 1 }, (_, index) => {
-    const v = index * size / divisions;
-    const major = index % 4 === 0;
-    const stroke = major ? "#94a3b8" : "#cbd5e1";
-    const opacity = major ? 0.22 : 0.10;
-    return [
-      `<line x1="${v}" y1="0" x2="${v}" y2="${size}" stroke="${stroke}" stroke-opacity="${opacity}" stroke-width="${major ? 0.8 : 0.45}"/>`,
-      `<line x1="0" y1="${v}" x2="${size}" y2="${v}" stroke="${stroke}" stroke-opacity="${opacity}" stroke-width="${major ? 0.8 : 0.45}"/>`,
-    ].join("\n");
-  }).join("\n");
+function sheetGridForSheet(width: number, height: number, size: number): string {
+  const project = sheetProjector(width, height, size);
+  const xStep = gridDisplayStep(width);
+  const yStep = gridDisplayStep(height);
+  const vertical: string[] = [];
+  const horizontal: string[] = [];
+  for (let x = 0; x <= width + 1e-9; x += xStep) {
+    const p1 = project({ x, y: 0 });
+    const p2 = project({ x, y: height });
+    const major = isMultiple(x, Math.max(1, xStep * 4));
+    vertical.push(`<line x1="${p1.x}" y1="${p1.y}" x2="${p2.x}" y2="${p2.y}" stroke="${major ? "#64748b" : "#94a3b8"}" stroke-opacity="${major ? 0.30 : 0.24}" stroke-width="${major ? 0.95 : 0.7}"/>`);
+  }
+  for (let y = 0; y <= height + 1e-9; y += yStep) {
+    const p1 = project({ x: 0, y });
+    const p2 = project({ x: width, y });
+    const major = isMultiple(y, Math.max(1, yStep * 4));
+    horizontal.push(`<line x1="${p1.x}" y1="${p1.y}" x2="${p2.x}" y2="${p2.y}" stroke="${major ? "#64748b" : "#94a3b8"}" stroke-opacity="${major ? 0.30 : 0.24}" stroke-width="${major ? 0.95 : 0.7}"/>`);
+  }
+  return [...vertical, ...horizontal].join("\n");
+}
+
+function gridDisplayStep(span: number): number {
+  if (span <= 32) return 1;
+  if (span <= 64) return 2;
+  if (span <= 128) return 4;
+  return Math.max(8, Math.ceil(span / 32));
+}
+
+function isMultiple(value: number, step: number): boolean {
+  return Math.abs(value / step - Math.round(value / step)) < 1e-8;
 }
 
 function treeLayout(spec: BPStudioAdapterSpec, size: number): Map<string, { x: number; y: number }> {
@@ -694,24 +707,6 @@ function adapterFlapMark(
   ].join("\n");
 }
 
-function adapterNodeBoundsMark(
-  node: { id: number; bounds: { top: number; right: number; bottom: number; left: number } },
-  project: (point: { x: number; y: number }) => { x: number; y: number },
-  label: string,
-): string {
-  const p1 = project({ x: node.bounds.left, y: node.bounds.bottom });
-  const p2 = project({ x: node.bounds.right, y: node.bounds.top });
-  const x = Math.min(p1.x, p2.x);
-  const y = Math.min(p1.y, p2.y);
-  const width = Math.max(0, Math.abs(p2.x - p1.x));
-  const height = Math.max(0, Math.abs(p2.y - p1.y));
-  if (width < 2 || height < 2) return "";
-  return [
-    `<rect x="${x}" y="${y}" width="${width}" height="${height}" fill="#60a5fa" fill-opacity="0.10" stroke="#2563eb" stroke-width="1.4" stroke-dasharray="8 5"/>`,
-    `<text x="${x + 5}" y="${Math.max(13, y + 14)}" font-family="Inter, Arial, sans-serif" font-size="10.5" fill="#1d4ed8">node ${escapeXml(label)} bounds</text>`,
-  ].join("\n");
-}
-
 function treeLegendOutside(size: number): string {
   const y = 34;
   return [
@@ -730,9 +725,8 @@ function packingLegendOutside(size: number): string {
     legendBand(size, "Packing legend"),
     `<circle cx="20" cy="${y1}" r="4.2" fill="#4ade80" fill-opacity="0.9" stroke="#16a34a" stroke-width="1.6"/><line x1="12" y1="${y1}" x2="28" y2="${y1}" stroke="#16a34a" stroke-width="1.4"/><line x1="20" y1="${y1 - 8}" x2="20" y2="${y1 + 8}" stroke="#16a34a" stroke-width="1.4"/><text x="42" y="${y1 + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">zero-size optimized flap point</text>`,
     `<circle cx="274" cy="${y1}" r="17" fill="none" stroke="#16a34a" stroke-width="1.6"/><text x="302" y="${y1 + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">flap length circle</text>`,
-    `<rect x="468" y="${y1 - 10}" width="24" height="18" fill="#4ade80" fill-opacity="0.22" stroke="#16a34a" stroke-dasharray="5 4"/><text x="502" y="${y1 + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">nonzero flap target</text>`,
-    `<rect x="18" y="${y2 - 8}" width="24" height="16" fill="#60a5fa" fill-opacity="0.10" stroke="#2563eb" stroke-dasharray="8 5"/><text x="52" y="${y2 + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">BP Studio node bounds</text>`,
-    `<line x1="252" y1="${y2}" x2="280" y2="${y2}" stroke="#64748b" stroke-width="1.8"/><text x="292" y="${y2 + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">inferred tree edge</text>`,
+    `<line x1="468" y1="${y1}" x2="496" y2="${y1}" stroke="#64748b" stroke-width="1.8"/><text x="508" y="${y1 + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">inferred tree edge</text>`,
+    `<text x="18" y="${y2 + 4}" font-family="Inter, Arial, sans-serif" font-size="11" fill="#64748b">No area boxes are rendered for point flaps.</text>`,
   ].join("\n");
 }
 
@@ -743,8 +737,7 @@ function compilerLegendOutside(size: number): string {
     legendBand(size, "Compiler overlay legend"),
     `<rect x="16" y="${y1 - 9}" width="22" height="18" fill="#ffdf4d" fill-opacity="0.72" stroke="#ca8a04" stroke-width="0.8"/><text x="48" y="${y1 + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">pleat corridor</text>`,
     `<rect x="170" y="${y1 - 9}" width="22" height="18" fill="#bfdbfe" fill-opacity="0.76" stroke="#2563eb" stroke-width="0.8"/><text x="202" y="${y1 + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">body panel</text>`,
-    `<rect x="318" y="${y1 - 9}" width="22" height="18" fill="#bbf7d0" fill-opacity="0.76" stroke="#16a34a" stroke-width="0.8"/><text x="350" y="${y1 + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">compiler flap target</text>`,
-    `<line x1="506" y1="${y1}" x2="538" y2="${y1}" stroke="#ff1f1f" stroke-width="3" stroke-linecap="round"/><text x="548" y="${y1 + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">mountain</text>`,
+    `<line x1="342" y1="${y1}" x2="374" y2="${y1}" stroke="#ff1f1f" stroke-width="3" stroke-linecap="round"/><text x="384" y="${y1 + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">mountain</text>`,
     `<line x1="16" y1="${y2}" x2="48" y2="${y2}" stroke="#0057ff" stroke-width="3" stroke-linecap="round"/><text x="58" y="${y2 + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">valley</text>`,
     `<line x1="170" y1="${y2}" x2="202" y2="${y2}" stroke="#0057ff" stroke-width="2" stroke-dasharray="5 4" stroke-linecap="round"/><text x="212" y="${y2 + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">debug boundary</text>`,
     `<text x="350" y="${y2 + 4}" font-family="Inter, Arial, sans-serif" font-size="11" fill="#64748b">Fills are scaffold/debug only</text>`,

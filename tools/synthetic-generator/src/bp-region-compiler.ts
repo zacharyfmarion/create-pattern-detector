@@ -96,7 +96,18 @@ export function compileRegionCandidate(layout: RegionLayout): RegionCompletionCa
   };
 }
 
-export function regionCandidateToSvg(candidate: RegionCompletionCandidate, size = 900): string {
+export interface RegionSvgOptions {
+  showGrid?: boolean;
+  showLegend?: boolean;
+  showFlapTargets?: boolean;
+  showFlapBoundaries?: boolean;
+}
+
+export function regionCandidateToSvg(candidate: RegionCompletionCandidate, size = 900, options: RegionSvgOptions = {}): string {
+  const showGrid = options.showGrid ?? true;
+  const showLegend = options.showLegend ?? true;
+  const showFlapTargets = options.showFlapTargets ?? true;
+  const showFlapBoundaries = options.showFlapBoundaries ?? true;
   const strokeScale = size / 900;
   const toPx = ([x, y]: Point): Point => [round(x * size), round((1 - y) * size)];
   const colors = {
@@ -140,12 +151,12 @@ export function regionCandidateToSvg(candidate: RegionCompletionCandidate, size 
   return [
     `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" shape-rendering="geometricPrecision">`,
     `<rect width="${size}" height="${size}" fill="white"/>`,
-    ...gridLines,
+    ...(showGrid ? gridLines : []),
     ...candidate.layout.pleatStrips.map((strip) => rect(strip, colors.pleatStrip, 0.34)),
     ...candidate.layout.bodies.map((body) => rect(body, colors.body, 0.32)),
-    ...candidate.layout.flaps.map((flap) => rect(flap, colors.flap, 0.34)),
-    ...candidate.segments.map(line),
-    legendSvg(size, colors),
+    ...(showFlapTargets ? candidate.layout.flaps.map((flap) => rect(flap, colors.flap, 0.34)) : []),
+    ...candidate.segments.filter((segment) => showFlapBoundaries || segment.kind !== "flap-boundary").map(line),
+    showLegend ? legendSvg(size, colors) : "",
     `</svg>`,
   ].join("\n");
 }
