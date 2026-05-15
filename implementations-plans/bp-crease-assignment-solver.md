@@ -145,10 +145,12 @@ Current certified primitive checkpoints:
 
 - `sheet pleat primitive`: a sheet-spanning accordion field with alternating M/V parallel lines. It is strict-flat-foldable and useful as a reference for long pleat runs, but it is not a finished BP layout because the strips terminate only on the sheet border.
 - `diagonal staircase cap primitive`: a 45-degree ridge with alternating axis/hinge partner creases at every pleat endpoint. All four sheet-corner orientations pass local Kawasaki/Maekawa, Rabbit Ear global solving, and folded-coordinate preview.
+- `staircase bridge primitive`: two diagonal caps are composed as geometry first, then a deterministic Maekawa assignment solve chooses final M/V labels for the completed molecule. This passes local Kawasaki/Maekawa, Rabbit Ear global solving, and folded-coordinate preview for the certified small bridge.
 
 Important composition finding:
 
-- A staircase cap is not freely composable with another cap. Naively overlaying two cap orientations creates locally invalid interior grid intersections. Cap-to-cap and cap-to-corridor joins therefore require an explicit connector/hub/stretch molecule or a solver rejection. Do not combine cap primitives by geometric union and assume final flat-foldability.
+- A staircase cap is not freely composable with another cap. Naively overlaying two cap orientations with fixed template colors creates locally invalid interior grid intersections. Cap-to-cap and cap-to-corridor joins therefore require an explicit connector/hub/stretch molecule, a molecule-local final assignment solve, or a solver rejection. Do not combine cap primitives by geometric union and assume final flat-foldability.
+- Molecule templates may contain provisional color preferences when they are being composed. Final training labels must come from a certified molecule state or fixture-level assignment solve, not from arbitrary post-hoc repair. In practice this means the solver can assign M/V after arranging a bounded molecule composition, but the resulting assignment becomes part of the certified molecule/state before production generation can use it.
 
 When implementing, keep the solver deterministic by seed:
 

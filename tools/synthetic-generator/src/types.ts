@@ -22,7 +22,8 @@ export type BPSubfamily =
   | "realistic-tree-base"
   | "bp-studio-export"
   | "bp-studio-completed-uniaxial"
-  | "diagonal-staircase-cap-primitive";
+  | "diagonal-staircase-cap-primitive"
+  | "staircase-bridge-primitive";
 export type DenseNonBPSubfamily = "recursive-axiom" | "expanded-classic" | "radial-multi-vertex" | "tessellation-like";
 export type RealisticBPArchetype = "insect" | "quadruped" | "bird" | "object" | "abstract";
 export type BoxPleatMode = "simple" | "dense";
