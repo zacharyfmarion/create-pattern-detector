@@ -248,6 +248,15 @@ export interface BoundaryPort {
   width: number;
 }
 
+export interface PleatStripPortConstraint {
+  id: string;
+  aStripId: string;
+  aSide: "start" | "end";
+  bStripId: string;
+  bSide: "start" | "end";
+  sequenceOrder?: "same" | "reversed";
+}
+
 export interface StairBoundary {
   id: string;
   stripId: string;
@@ -277,6 +286,7 @@ export interface RegionLayout {
   flaps: FlapRegion[];
   pleatStrips: PleatStripRegion[];
   boundaryPorts: BoundaryPort[];
+  portConstraints?: PleatStripPortConstraint[];
 }
 
 export interface RegionCandidateSegment {

@@ -1,4 +1,13 @@
 import { fixtureCompletionLayout } from "./bp-completion.ts";
+import {
+  alternatingSequence,
+  port as solverPort,
+  solvePortAssignmentProblem,
+  type PortAssignment,
+  type PortSolverProblem,
+  type PortSolverResult,
+  type RegionState,
+} from "./bp-port-assignment-solver.ts";
 import type {
   BodyPanelRegion,
   BoundaryPort,
@@ -22,6 +31,17 @@ type Point = [number, number];
 const DEFAULT_CORRIDOR_WIDTH = 0.25;
 
 export type RegionFixtureName = "two-flap-stretch" | "three-flap-relay" | "five-flap-uniaxial" | "insect-lite";
+
+export interface CompileRegionCandidateOptions {
+  solvePortPhases?: boolean;
+}
+
+export interface RegionPhaseSolveResult {
+  ok: boolean;
+  layout: RegionLayout;
+  solver?: PortSolverResult;
+  errors: string[];
+}
 
 export function fixtureRegionLayout(name: RegionFixtureName): RegionLayout {
   return regionLayoutFromCompletionLayout(fixtureCompletionLayout(name));
@@ -51,18 +71,21 @@ export function regionLayoutFromCompletionLayout(layout: CompletionLayout): Regi
     flaps,
     pleatStrips,
     boundaryPorts: pleatStrips.flatMap((strip) => boundaryPortsForStrip(strip)),
+    portConstraints: [],
   };
 }
 
-export function compileRegionCandidate(layout: RegionLayout): RegionCompletionCandidate {
+export function compileRegionCandidate(layout: RegionLayout, options: CompileRegionCandidateOptions = {}): RegionCompletionCandidate {
+  const phaseSolve = options.solvePortPhases === false ? undefined : solveRegionPleatStripPhases(layout);
+  const workingLayout = phaseSolve?.ok ? phaseSolve.layout : layout;
   const segments: RegionCandidateSegment[] = [
     ...sheetBorderSegments(),
-    ...layout.bodies.flatMap((body) => rectBoundarySegments(`body-${body.id}`, body.id, "body-boundary", body.rect, "V")),
-    ...layout.flaps.flatMap((flap) => rectBoundarySegments(`flap-${flap.id}`, flap.id, "flap-boundary", flap.rect, "V")),
+    ...workingLayout.bodies.flatMap((body) => rectBoundarySegments(`body-${body.id}`, body.id, "body-boundary", body.rect, "V")),
+    ...workingLayout.flaps.flatMap((flap) => rectBoundarySegments(`flap-${flap.id}`, flap.id, "flap-boundary", flap.rect, "V")),
   ];
   const stairBoundaries: StairBoundary[] = [];
 
-  for (const strip of layout.pleatStrips) {
+  for (const strip of workingLayout.pleatStrips) {
     segments.push(...rectBoundarySegments(`strip-${strip.id}`, strip.id, "body-boundary", strip.rect, "V"));
     segments.push(...pleatSegments(strip));
     const boundaries = stairBoundariesForStrip(strip);
@@ -82,17 +105,57 @@ export function compileRegionCandidate(layout: RegionLayout): RegionCompletionCa
 
   const arrangedSegments = dedupeSegments(segments);
   const rejectionReasons = [
+    ...(phaseSolve && !phaseSolve.ok ? phaseSolve.errors : []),
     ...offGridRejections(arrangedSegments, layout.gridSize),
-    ...overlapRejections(layout),
+    ...overlapRejections(workingLayout),
   ];
 
   return {
-    id: `${layout.id}-candidate`,
-    layout,
+    id: `${workingLayout.id}-candidate`,
+    layout: workingLayout,
     validity: rejectionReasons.length ? "rejected" : "candidate-complete",
     segments: arrangedSegments,
     stairBoundaries,
     rejectionReasons,
+  };
+}
+
+export function solveRegionPleatStripPhases(layout: RegionLayout): RegionPhaseSolveResult {
+  if (!layout.portConstraints?.length) return { ok: true, layout, errors: [] };
+  const problem = regionPhaseProblem(layout);
+  const solver = solvePortAssignmentProblem(problem);
+  if (!solver.ok) {
+    return {
+      ok: false,
+      layout,
+      solver,
+      errors: solver.errors.map((error) => `port-phase:${error}`),
+    };
+  }
+  return {
+    ok: true,
+    layout: applyRegionPhaseSolution(layout, solver),
+    solver,
+    errors: [],
+  };
+}
+
+export function regionPhaseProblem(layout: RegionLayout): PortSolverProblem {
+  return {
+    id: `${layout.id}-port-phase-problem`,
+    regions: layout.pleatStrips.map((strip, index) => ({
+      id: strip.id,
+      rank: index,
+      states: pleatStripStates(strip),
+    })),
+    constraints: (layout.portConstraints ?? []).map((constraint) => ({
+      id: constraint.id,
+      aRegion: constraint.aStripId,
+      aPort: constraint.aSide,
+      bRegion: constraint.bStripId,
+      bPort: constraint.bSide,
+      sequenceOrder: constraint.sequenceOrder,
+    })),
   };
 }
 
@@ -204,6 +267,76 @@ function legendSvg(
     `<text x="${x + swatch}" y="${firstY + row * 6.35}" font-family="Inter, Arial, sans-serif" font-size="${Math.max(9, round(size * 0.0115))}" fill="${colors.legendMuted}">Fills are scaffold/debug only</text>`,
     `</g>`,
   ].join("\n");
+}
+
+function applyRegionPhaseSolution(layout: RegionLayout, solver: PortSolverResult): RegionLayout {
+  const stateByRegion = new Map(solver.states.map((state) => [state.regionId, state]));
+  return {
+    ...layout,
+    pleatStrips: layout.pleatStrips.map((strip) => {
+      const state = stateByRegion.get(strip.id);
+      if (!state) return strip;
+      const sequence = state.ports[0]?.sequence ?? pleatSequence(strip, strip.startAssignment);
+      return {
+        ...strip,
+        phase: state.phase ?? strip.phase,
+        startAssignment: sequence[0] ?? strip.startAssignment,
+      };
+    }),
+  };
+}
+
+function pleatStripStates(strip: PleatStripRegion): RegionState[] {
+  const laneCount = pleatLaneCount(strip);
+  const phase0 = strip.startAssignment;
+  const phase1 = flip(strip.startAssignment);
+  return [
+    pleatStripState(strip, phase0, 0, laneCount),
+    pleatStripState(strip, phase1, 1, laneCount),
+  ];
+}
+
+function pleatStripState(
+  strip: PleatStripRegion,
+  startAssignment: PortAssignment,
+  phase: number,
+  laneCount: number,
+): RegionState {
+  const sequence = alternatingSequence(startAssignment, laneCount);
+  return {
+    id: `${strip.id}:phase-${phase}`,
+    regionId: strip.id,
+    phase,
+    cost: phase,
+    ports: [
+      solverPort("start", sequence, {
+        orientation: strip.orientation === "vertical" ? "vertical" : "horizontal",
+        side: strip.orientation === "vertical" ? "left" : "bottom",
+        width: laneCount,
+        parity: strip.phase % 2 === 0 ? "integer" : "half",
+      }),
+      solverPort("end", sequence, {
+        orientation: strip.orientation === "vertical" ? "vertical" : "horizontal",
+        side: strip.orientation === "vertical" ? "right" : "top",
+        width: laneCount,
+        parity: strip.phase % 2 === 0 ? "integer" : "half",
+      }),
+    ],
+  };
+}
+
+function pleatSequence(strip: PleatStripRegion, startAssignment: PortAssignment): PortAssignment[] {
+  return alternatingSequence(startAssignment, pleatLaneCount(strip));
+}
+
+function pleatLaneCount(strip: PleatStripRegion): number {
+  const min = strip.orientation === "vertical" ? strip.rect.x1 : strip.rect.y1;
+  const max = strip.orientation === "vertical" ? strip.rect.x2 : strip.rect.y2;
+  let count = 0;
+  for (let coordinate = nextGridInside(min, strip.pitch); coordinate < max - 1e-9; coordinate += strip.pitch) {
+    count += 1;
+  }
+  return Math.max(1, count);
 }
 
 function corridorPleatStripRegions(

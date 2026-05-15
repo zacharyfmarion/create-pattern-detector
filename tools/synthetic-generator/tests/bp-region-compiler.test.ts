@@ -4,7 +4,10 @@ import {
   fixtureRegionLayout,
   regionLayoutFromCompletionLayout,
   regionCandidateToSvg,
+  regionPhaseProblem,
+  solveRegionPleatStripPhases,
 } from "../src/bp-region-compiler.ts";
+import { sequenceToString } from "../src/bp-port-assignment-solver.ts";
 import type { CompletionLayout, RegionLayout } from "../src/bp-completion-contracts.ts";
 
 test("region compiler builds fixture layouts with local pleat-strip regions", () => {
@@ -150,6 +153,93 @@ test("region compiler rejects accidental pleat-strip overlaps outside body regio
   expect(candidate.validity).toBe("rejected");
   expect(candidate.rejectionReasons.some((reason) => reason.startsWith("pleat-strip-overlap"))).toBe(true);
 });
+
+test("region compiler solves constrained pleat-strip phases before emitting creases", () => {
+  const layout = constrainedPhaseLayout();
+  const raw = compileRegionCandidate(layout, { solvePortPhases: false });
+  const solved = compileRegionCandidate(layout);
+
+  expect(firstPleat(raw, "strip-b")?.assignment).toBe("M");
+  expect(solved.validity).toBe("candidate-complete");
+  expect(solved.layout.pleatStrips.find((strip) => strip.id === "strip-b")?.phase).toBe(1);
+  expect(solved.layout.pleatStrips.find((strip) => strip.id === "strip-b")?.startAssignment).toBe("V");
+  expect(firstPleat(solved, "strip-b")?.assignment).toBe("V");
+});
+
+test("region phase problem exposes real strip port sequences", () => {
+  const problem = regionPhaseProblem(constrainedPhaseLayout());
+  const stripA = problem.regions.find((region) => region.id === "strip-a");
+  const stripB = problem.regions.find((region) => region.id === "strip-b");
+  expect(stripA?.states.map((state) => sequenceToString(state.ports[0].sequence))).toEqual(["VMVMV", "MVMVM"]);
+  expect(stripB?.states.map((state) => sequenceToString(state.ports[0].sequence))).toEqual(["MVMVM", "VMVMV"]);
+  expect(problem.constraints).toHaveLength(1);
+});
+
+test("region compiler rejects unsatisfied strip port constraints", () => {
+  const layout = constrainedPhaseLayout({
+    stripB: {
+      rect: { x1: 9 / 16, y1: 5 / 16, x2: 13 / 16, y2: 13 / 16 },
+    },
+  });
+  const phase = solveRegionPleatStripPhases(layout);
+  expect(phase.ok).toBe(false);
+  expect(phase.errors).toContain("port-phase:port-solver-unsat");
+  const candidate = compileRegionCandidate(layout);
+  expect(candidate.validity).toBe("rejected");
+  expect(candidate.rejectionReasons).toContain("port-phase:port-solver-unsat");
+});
+
+function firstPleat(candidate: ReturnType<typeof compileRegionCandidate>, regionId: string) {
+  return candidate.segments
+    .filter((segment) => segment.kind === "strip-pleat" && segment.regionId === regionId)
+    .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }))[0];
+}
+
+function constrainedPhaseLayout(overrides: Partial<{ stripB: Partial<RegionLayout["pleatStrips"][number]> }> = {}): RegionLayout {
+  return {
+    id: "constrained-phase-layout",
+    sourceLayoutId: "constrained-phase-layout",
+    gridSize: 16,
+    axis: "horizontal",
+    bodies: [{
+      id: "body",
+      rect: { x1: 0.4375, y1: 0.375, x2: 0.5625, y2: 0.625 },
+      center: { x: 0.5, y: 0.5 },
+    }],
+    flaps: [],
+    boundaryPorts: [],
+    pleatStrips: [
+      {
+        id: "strip-a",
+        from: "flap-a",
+        to: "body",
+        rect: { x1: 2 / 16, y1: 5 / 16, x2: 8 / 16, y2: 13 / 16 },
+        orientation: "vertical",
+        pitch: 1 / 16,
+        phase: 0,
+        startAssignment: "V",
+      },
+      {
+        id: "strip-b",
+        from: "body",
+        to: "flap-b",
+        rect: { x1: 8 / 16, y1: 5 / 16, x2: 14 / 16, y2: 13 / 16 },
+        orientation: "vertical",
+        pitch: 1 / 16,
+        phase: 0,
+        startAssignment: "M",
+        ...overrides.stripB,
+      },
+    ],
+    portConstraints: [{
+      id: "body-port-phase",
+      aStripId: "strip-a",
+      aSide: "end",
+      bStripId: "strip-b",
+      bSide: "start",
+    }],
+  };
+}
 
 function isOnGrid(value: number, gridSize: number): boolean {
   return isOnStep(value, 1 / Math.min(gridSize, 32));
