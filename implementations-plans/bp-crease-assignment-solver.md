@@ -94,6 +94,8 @@ Current implementation detail:
 - Pairwise circle overlap is a hard error because it means the BP Studio-style flap territories collide.
 - Circle overflow beyond the sheet boundary is reported as a warning for now, not a production hard gate, because BP Studio can place zero-area terminal points on the sheet boundary while showing the relevant in-sheet arc. If we later confirm that full-circle containment is required for the specific production scaffold, promote this warning to a hard rejection and update this document.
 - The compiler lattice for optimized layouts is derived from BP Studio's optimized sheet dimensions. A `7 x 7` optimized sheet uses a `28` compiler grid by default, which preserves BP Studio integer coordinates and gives four compiler lanes per BP Studio cell. Do not fall back to a standalone `32/128` lattice for optimized BP Studio layouts, because that makes circles, corridors, and debug grids visually and geometrically disagree.
+- BP Studio final contour bounds are scaffold/region metadata, not optimized internal-node coordinates. Do not use the center of a contour bounding box as a body/hub point. The debug packing panel must show only optimized terminal points and tree-length allocation circles as BP Studio source truth; inferred internal points may be used only as candidate-construction internals and must be gated by circle/region overlap checks.
+- Candidate body panels and corridor strips must not overlap the interior of any flap allocation circle. Touching a circle boundary is allowed; invading the circle interior is a structured rejection because it steals paper allocated to that flap.
 
 ## Backtracking Strategy
 

@@ -154,6 +154,77 @@ test("region compiler rejects accidental pleat-strip overlaps outside body regio
   expect(candidate.rejectionReasons.some((reason) => reason.startsWith("pleat-strip-overlap"))).toBe(true);
 });
 
+test("region compiler rejects candidate regions that invade flap allocation circles", () => {
+  const layout: RegionLayout = {
+    id: "flap-allocation-overlap-fixture",
+    sourceLayoutId: "flap-allocation-overlap-fixture",
+    gridSize: 28,
+    axis: "horizontal",
+    bodies: [{
+      id: "hub",
+      rect: { x1: 0.32, y1: 0.45, x2: 0.39, y2: 0.52 },
+      center: { x: 0.355, y: 0.485 },
+    }],
+    flaps: [{
+      id: "flap-head",
+      terminalId: "head",
+      nodeId: "2",
+      side: "top",
+      center: { x: 4 / 7, y: 6 / 7 },
+      allocationRadius: 1 / 7,
+      rect: { x1: 4 / 7, y1: 6 / 7, x2: 4 / 7, y2: 6 / 7 },
+    }],
+    boundaryPorts: [],
+    pleatStrips: [{
+      id: "strip-through-head-circle",
+      from: "hub",
+      to: "head",
+      rect: { x1: 0.5, y1: 0.75, x2: 0.65, y2: 0.82 },
+      orientation: "vertical",
+      pitch: 1 / 28,
+      phase: 0,
+      startAssignment: "M",
+    }],
+  };
+
+  const candidate = compileRegionCandidate(layout);
+  expect(candidate.validity).toBe("rejected");
+  expect(candidate.rejectionReasons).toContain("flap-allocation-overlap:strip-through-head-circle:head");
+});
+
+test("region compiler allows candidate regions to touch a flap allocation circle boundary", () => {
+  const layout: RegionLayout = {
+    id: "flap-allocation-tangent-fixture",
+    sourceLayoutId: "flap-allocation-tangent-fixture",
+    gridSize: 28,
+    axis: "horizontal",
+    bodies: [],
+    flaps: [{
+      id: "flap-head",
+      terminalId: "head",
+      nodeId: "2",
+      side: "top",
+      center: { x: 4 / 7, y: 6 / 7 },
+      allocationRadius: 1 / 7,
+      rect: { x1: 4 / 7, y1: 6 / 7, x2: 4 / 7, y2: 6 / 7 },
+    }],
+    boundaryPorts: [],
+    pleatStrips: [{
+      id: "strip-touching-head-circle",
+      from: "hub",
+      to: "head",
+      rect: { x1: 4 / 7 - 1 / 28, y1: 5 / 7, x2: 4 / 7 + 1 / 28, y2: 5 / 7 },
+      orientation: "vertical",
+      pitch: 1 / 28,
+      phase: 0,
+      startAssignment: "M",
+    }],
+  };
+
+  const candidate = compileRegionCandidate(layout);
+  expect(candidate.rejectionReasons).not.toContain("flap-allocation-overlap:strip-touching-head-circle:head");
+});
+
 test("region compiler solves constrained pleat-strip phases before emitting creases", () => {
   const layout = constrainedPhaseLayout();
   const raw = compileRegionCandidate(layout, { solvePortPhases: false });

@@ -110,6 +110,13 @@ export interface AdapterNodeLayout {
     bottom: number;
     left: number;
   };
+  finalContourBounds?: {
+    top: number;
+    right: number;
+    bottom: number;
+    left: number;
+  };
+  finalContourCount?: number;
 }
 
 type Point = [number, number];

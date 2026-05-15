@@ -51,6 +51,13 @@ export interface NodeLayoutSpec {
     bottom: number;
     left: number;
   };
+  finalContourBounds?: {
+    top: number;
+    right: number;
+    bottom: number;
+    left: number;
+  };
+  finalContourCount?: number;
 }
 
 export interface FoldDocument {

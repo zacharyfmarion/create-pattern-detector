@@ -34,6 +34,7 @@ interface CorridorEndpoint {
   id: string;
   center: CompletionPoint;
   kind: "flap" | "body";
+  allocationRadius?: number;
   rect?: RegionRect;
 }
 
@@ -352,7 +353,15 @@ function corridorPleatStripRegions(
   bodies: BodyPanelRegion[],
 ): PleatStripRegion[] {
   const endpoints = new Map<string, CorridorEndpoint>();
-  for (const flap of flaps) endpoints.set(flap.terminalId, { id: flap.terminalId, center: flap.center, kind: "flap", rect: flap.rect });
+  for (const flap of flaps) {
+    endpoints.set(flap.terminalId, {
+      id: flap.terminalId,
+      center: flap.center,
+      kind: "flap",
+      allocationRadius: flap.allocationRadius,
+      rect: flap.rect,
+    });
+  }
   for (const body of bodies) endpoints.set(body.id, { id: body.id, center: body.center, kind: "body", rect: body.rect });
   if (!endpoints.has("body") && bodies[0]) endpoints.set("body", { id: "body", center: bodies[0].center, kind: "body", rect: bodies[0].rect });
 
@@ -378,8 +387,8 @@ function corridorPleatStripRegion(
   let rect: RegionRect;
   if (corridor.orientation === "horizontal") {
     const y = snapToStep(corridor.coordinate, pitch);
-    const x1 = endpointBoundaryCoordinate(from, to.center, "horizontal");
-    const x2 = endpointBoundaryCoordinate(to, from.center, "horizontal");
+    const x1 = endpointBoundaryCoordinate(from, to.center, "horizontal", y);
+    const x2 = endpointBoundaryCoordinate(to, from.center, "horizontal", y);
     rect = normalizeRect({
       x1: snapToStep(x1, pitch),
       y1: snapToStep(y - half, pitch),
@@ -388,8 +397,8 @@ function corridorPleatStripRegion(
     });
   } else {
     const x = snapToStep(corridor.coordinate, pitch);
-    const y1 = endpointBoundaryCoordinate(from, to.center, "vertical");
-    const y2 = endpointBoundaryCoordinate(to, from.center, "vertical");
+    const y1 = endpointBoundaryCoordinate(from, to.center, "vertical", x);
+    const y2 = endpointBoundaryCoordinate(to, from.center, "vertical", x);
     rect = normalizeRect({
       x1: snapToStep(x - half, pitch),
       y1: snapToStep(y1, pitch),
@@ -414,8 +423,23 @@ function endpointBoundaryCoordinate(
   endpoint: CorridorEndpoint,
   toward: CompletionPoint,
   corridorOrientation: CompletionCorridor["orientation"],
+  laneCoordinate: number,
 ): number {
-  if (endpoint.kind === "flap") return corridorOrientation === "horizontal" ? endpoint.center.x : endpoint.center.y;
+  if (endpoint.kind === "flap") {
+    if (!endpoint.allocationRadius) return corridorOrientation === "horizontal" ? endpoint.center.x : endpoint.center.y;
+    const perpendicularDelta = corridorOrientation === "horizontal"
+      ? laneCoordinate - endpoint.center.y
+      : laneCoordinate - endpoint.center.x;
+    const alongRadius = Math.sqrt(Math.max(0, endpoint.allocationRadius ** 2 - perpendicularDelta ** 2));
+    if (corridorOrientation === "horizontal") {
+      return toward.x >= endpoint.center.x
+        ? endpoint.center.x + alongRadius
+        : endpoint.center.x - alongRadius;
+    }
+    return toward.y >= endpoint.center.y
+      ? endpoint.center.y + alongRadius
+      : endpoint.center.y - alongRadius;
+  }
   if (!endpoint.rect) return corridorOrientation === "horizontal" ? endpoint.center.x : endpoint.center.y;
   if (corridorOrientation === "horizontal") {
     return toward.x >= endpoint.center.x ? endpoint.rect.x2 : endpoint.rect.x1;
@@ -434,6 +458,7 @@ function flapRegion(terminal: CompletionTerminal, gridSize: number): FlapRegion 
     nodeId: terminal.nodeId,
     side: terminal.side,
     center,
+    allocationRadius: terminal.allocationRadius,
     rect: snapRectToStep(rectAround(center, width, height), pitch),
   };
 }
@@ -636,7 +661,42 @@ function overlapRejections(layout: RegionLayout): string[] {
       result.push(`pleat-strip-overlap:${a.id}:${b.id}`);
     }
   }
+  result.push(...flapAllocationOverlapRejections(layout));
   return result;
+}
+
+function flapAllocationOverlapRejections(layout: RegionLayout): string[] {
+  const result: string[] = [];
+  const pitch = Math.min(...layout.pleatStrips.map((strip) => strip.pitch), 1 / Math.max(1, layout.gridSize));
+  const tolerance = pitch / 4;
+  const flaps = layout.flaps.filter((flap) => flap.allocationRadius && flap.allocationRadius > tolerance);
+  for (const flap of flaps) {
+    const radius = flap.allocationRadius!;
+    for (const body of layout.bodies) {
+      if (rectCircleInteriorOverlap(body.rect, flap.center, radius, tolerance)) {
+        result.push(`flap-allocation-overlap:body-${body.id}:${flap.terminalId}`);
+      }
+    }
+    for (const strip of layout.pleatStrips) {
+      if (rectCircleInteriorOverlap(strip.rect, flap.center, radius, tolerance)) {
+        result.push(`flap-allocation-overlap:${strip.id}:${flap.terminalId}`);
+      }
+    }
+  }
+  return result;
+}
+
+function rectCircleInteriorOverlap(
+  rect: RegionRect,
+  center: CompletionPoint,
+  radius: number,
+  tolerance: number,
+): boolean {
+  if (rectArea(rect) < 1e-12) return false;
+  const closestX = clamp(center.x, rect.x1, rect.x2);
+  const closestY = clamp(center.y, rect.y1, rect.y2);
+  const distanceToRect = Math.hypot(center.x - closestX, center.y - closestY);
+  return distanceToRect < radius - tolerance;
 }
 
 function rectIntersection(a: RegionRect, b: RegionRect): RegionRect | undefined {

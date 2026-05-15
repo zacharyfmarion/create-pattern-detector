@@ -165,6 +165,7 @@ export function regularizeBPStudioLayout(
     const sourceTerminal = terminalByNodeId.get(node.nodeId);
     const x = snap(clamp(node.normalized.x, 0, 1), gridSize);
     const y = snap(clamp(node.normalized.y, 0, 1), gridSize);
+    const radius = terminalAllocationRadius(spec, sourceTerminal?.nodeId ?? node.nodeId, sheetWidth, sheetHeight);
     return {
       id: sourceTerminal?.nodeId ?? `flap-${node.adapterId}`,
       nodeId: String(node.adapterId),
@@ -173,6 +174,7 @@ export function regularizeBPStudioLayout(
       side: sourceTerminal?.side ?? sideForPoint({ x, y }),
       width: snap(Math.max(1 / (gridSize * 2), (sourceTerminal?.width ?? 0) / sheetWidth), gridSize),
       height: snap(Math.max(1 / (gridSize * 2), (sourceTerminal?.height ?? 0) / sheetHeight), gridSize),
+      allocationRadius: radius ? snap(radius, gridSize) : undefined,
       priority: sourceTerminal?.priority ?? index,
     };
   });
@@ -184,11 +186,12 @@ export function regularizeBPStudioLayout(
   const bodies = bodyNodeIds.flatMap((nodeId): CompletionRegion[] => {
     const graphNode = graphNodeById.get(nodeId);
     const sourceBody = spec.layout.bodies.find((body) => body.nodeId === nodeId);
-    const center = graphNode?.normalized ?? (sourceBody ? {
+    const rawCenter = graphNode?.normalized ?? (sourceBody ? {
       x: sourceBody.center.x / spec.sheet.width,
       y: sourceBody.center.y / spec.sheet.height,
     } : undefined);
-    if (!center) return [];
+    if (!rawCenter) return [];
+    const center = keepPointOutsideTerminalAllocations(rawCenter, terminals, gridSize, bodyHalfSize);
     return [{
       id: nodeId,
       kind: "body",
@@ -212,14 +215,16 @@ export function regularizeBPStudioLayout(
     length: river.width,
   }));
   const corridors: CompletionCorridor[] = graphEdges.map((edge) => {
-    const orientation = orientationForPoints(layoutPoints.get(edge.from), layoutPoints.get(edge.to), axis);
+    const width = snap(Math.max(2 / gridSize, 0.5 / Math.max(sheetWidth, sheetHeight)), gridSize);
+    const preferredOrientation = orientationForPoints(layoutPoints.get(edge.from), layoutPoints.get(edge.to), axis);
+    const route = corridorRouteAvoidingAllocations(edge.from, edge.to, layoutPoints, preferredOrientation, terminalIds, terminals, gridSize, width);
     return {
       id: edge.id,
       from: edge.from,
       to: edge.to,
-      orientation,
-      coordinate: snap(corridorCoordinate(edge.from, edge.to, layoutPoints, orientation, terminalIds), gridSize),
-      width: snap(Math.max(2 / gridSize, 0.5 / Math.max(sheetWidth, sheetHeight)), gridSize),
+      orientation: route.orientation,
+      coordinate: route.coordinate,
+      width,
     };
   });
 
@@ -882,6 +887,68 @@ function completionPointMap(bodies: CompletionRegion[], terminals: CompletionTer
   return points;
 }
 
+function keepPointOutsideTerminalAllocations(
+  center: CompletionPoint,
+  terminals: CompletionTerminal[],
+  gridSize: number,
+  clearance: number,
+): CompletionPoint {
+  let x = clamp(center.x, clearance, 1 - clearance);
+  let y = clamp(center.y, clearance, 1 - clearance);
+  const obstacles = terminals.filter((terminal) => terminal.allocationRadius && terminal.allocationRadius > 0);
+  for (let iteration = 0; iteration < 24; iteration += 1) {
+    let moved = false;
+    for (const terminal of obstacles) {
+      const radius = terminal.allocationRadius!;
+      const minimumDistance = radius + clearance;
+      let dx = x - terminal.x;
+      let dy = y - terminal.y;
+      let distance = Math.hypot(dx, dy);
+      if (distance >= minimumDistance - 1e-9) continue;
+      if (distance < 1e-9) {
+        const fallback = fallbackDirectionAwayFromTerminal(terminal);
+        dx = fallback.x;
+        dy = fallback.y;
+        distance = Math.hypot(dx, dy);
+      }
+      x = terminal.x + (dx / distance) * minimumDistance;
+      y = terminal.y + (dy / distance) * minimumDistance;
+      x = clamp(x, clearance, 1 - clearance);
+      y = clamp(y, clearance, 1 - clearance);
+      moved = true;
+    }
+    if (!moved) break;
+  }
+  return {
+    x: snap(clamp(x, clearance, 1 - clearance), gridSize),
+    y: snap(clamp(y, clearance, 1 - clearance), gridSize),
+  };
+}
+
+function fallbackDirectionAwayFromTerminal(terminal: CompletionTerminal): CompletionPoint {
+  if (terminal.side === "left") return { x: 1, y: 0 };
+  if (terminal.side === "right") return { x: -1, y: 0 };
+  if (terminal.side === "top") return { x: 0, y: -1 };
+  if (terminal.side === "bottom") return { x: 0, y: 1 };
+  return {
+    x: terminal.x >= 0.5 ? -1 : 1,
+    y: terminal.y >= 0.5 ? -1 : 1,
+  };
+}
+
+function terminalAllocationRadius(
+  spec: BPStudioAdapterSpec,
+  nodeId: string,
+  sheetWidth: number,
+  sheetHeight: number,
+): number | undefined {
+  const edge = spec.tree.edges.find((candidate) => candidate.to === nodeId && candidate.from !== spec.tree.rootId) ??
+    spec.tree.edges.find((candidate) => candidate.from === nodeId && candidate.to !== spec.tree.rootId);
+  const radius = edge?.length ?? spec.layout.flaps.find((flap) => flap.nodeId === nodeId)?.terminalRadius;
+  if (!radius || radius <= 0) return undefined;
+  return radius / Math.max(sheetWidth, sheetHeight);
+}
+
 function orientationForPoints(a: CompletionPoint | undefined, b: CompletionPoint | undefined, fallback: CompletionAxis): CompletionAxis {
   if (!a || !b) return fallback;
   return Math.abs(a.x - b.x) >= Math.abs(a.y - b.y) ? "horizontal" : "vertical";
@@ -900,6 +967,133 @@ function corridorCoordinate(
   if (terminalIds.has(from)) return axis === "horizontal" ? a.y : a.x;
   if (terminalIds.has(to)) return axis === "horizontal" ? b.y : b.x;
   return axis === "horizontal" ? (a.y + b.y) / 2 : (a.x + b.x) / 2;
+}
+
+function corridorRouteAvoidingAllocations(
+  from: string,
+  to: string,
+  points: Map<string, CompletionPoint>,
+  preferredAxis: CompletionAxis,
+  terminalIds: Set<string>,
+  terminals: CompletionTerminal[],
+  gridSize: number,
+  width: number,
+): { orientation: CompletionAxis; coordinate: number } {
+  const preferred = corridorCoordinateAvoidingAllocations(from, to, points, preferredAxis, terminalIds, terminals, gridSize, width);
+  if (preferred.ok) return { orientation: preferredAxis, coordinate: preferred.coordinate };
+  const alternateAxis = preferredAxis === "horizontal" ? "vertical" : "horizontal";
+  const alternate = corridorCoordinateAvoidingAllocations(from, to, points, alternateAxis, terminalIds, terminals, gridSize, width);
+  if (alternate.ok) return { orientation: alternateAxis, coordinate: alternate.coordinate };
+  return { orientation: preferredAxis, coordinate: preferred.coordinate };
+}
+
+function corridorCoordinateAvoidingAllocations(
+  from: string,
+  to: string,
+  points: Map<string, CompletionPoint>,
+  axis: CompletionAxis,
+  terminalIds: Set<string>,
+  terminals: CompletionTerminal[],
+  gridSize: number,
+  width: number,
+): { coordinate: number; ok: boolean } {
+  const base = snap(corridorCoordinate(from, to, points, axis, terminalIds), gridSize);
+  const a = points.get(from);
+  const b = points.get(to);
+  if (!a || !b) return { coordinate: base, ok: false };
+  const step = 1 / gridSize;
+  const candidates = Array.from({ length: gridSize + 1 }, (_, index) => round(index * step))
+    .sort((left, right) => Math.abs(left - base) - Math.abs(right - base) || left - right);
+  const fromTerminal = terminals.find((terminal) => terminal.id === from || terminal.nodeId === from);
+  const toTerminal = terminals.find((terminal) => terminal.id === to || terminal.nodeId === to);
+  const endpointTerminals = [fromTerminal, toTerminal].filter((terminal): terminal is CompletionTerminal => Boolean(terminal));
+  const viable = candidates.filter((coordinate) => endpointTerminals.every((terminal) => terminalCanMeetLane(terminal, coordinate, axis, width)));
+  for (const candidate of viable.length ? viable : candidates) {
+    const rect = corridorRectForCoordinate(a, b, fromTerminal, toTerminal, axis, candidate, width);
+    if (!rect) continue;
+    if (!terminals.some((terminal) => terminal.allocationRadius && rectOverlapsTerminalAllocation(rect, terminal, step / 4))) {
+      return { coordinate: snap(candidate, gridSize), ok: true };
+    }
+  }
+  return { coordinate: base, ok: false };
+}
+
+function terminalCanMeetLane(
+  terminal: CompletionTerminal,
+  coordinate: number,
+  axis: CompletionAxis,
+  width: number,
+): boolean {
+  if (!terminal.allocationRadius) return true;
+  const delta = axis === "horizontal" ? coordinate - terminal.y : coordinate - terminal.x;
+  return Math.abs(delta) <= Math.max(0, terminal.allocationRadius - width / 2) + 1e-9;
+}
+
+function corridorRectForCoordinate(
+  from: CompletionPoint,
+  to: CompletionPoint,
+  fromTerminal: CompletionTerminal | undefined,
+  toTerminal: CompletionTerminal | undefined,
+  axis: CompletionAxis,
+  coordinate: number,
+  width: number,
+): { x1: number; y1: number; x2: number; y2: number } | undefined {
+  const half = width / 2;
+  if (axis === "horizontal") {
+    const x1 = endpointCoordinateForAllocation(from, to, fromTerminal, axis, coordinate);
+    const x2 = endpointCoordinateForAllocation(to, from, toTerminal, axis, coordinate);
+    return normalizeRect({
+      x1,
+      x2,
+      y1: coordinate - half,
+      y2: coordinate + half,
+    });
+  }
+  const y1 = endpointCoordinateForAllocation(from, to, fromTerminal, axis, coordinate);
+  const y2 = endpointCoordinateForAllocation(to, from, toTerminal, axis, coordinate);
+  return normalizeRect({
+    x1: coordinate - half,
+    x2: coordinate + half,
+    y1,
+    y2,
+  });
+}
+
+function endpointCoordinateForAllocation(
+  endpoint: CompletionPoint,
+  toward: CompletionPoint,
+  terminal: CompletionTerminal | undefined,
+  axis: CompletionAxis,
+  laneCoordinate: number,
+): number {
+  if (!terminal?.allocationRadius) return axis === "horizontal" ? endpoint.x : endpoint.y;
+  const perpendicularDelta = axis === "horizontal" ? laneCoordinate - terminal.y : laneCoordinate - terminal.x;
+  const alongRadius = Math.sqrt(Math.max(0, terminal.allocationRadius ** 2 - perpendicularDelta ** 2));
+  if (axis === "horizontal") {
+    return toward.x >= terminal.x ? terminal.x + alongRadius : terminal.x - alongRadius;
+  }
+  return toward.y >= terminal.y ? terminal.y + alongRadius : terminal.y - alongRadius;
+}
+
+function rectOverlapsTerminalAllocation(
+  rect: { x1: number; y1: number; x2: number; y2: number },
+  terminal: CompletionTerminal,
+  tolerance: number,
+): boolean {
+  if (!terminal.allocationRadius) return false;
+  const closestX = clamp(terminal.x, rect.x1, rect.x2);
+  const closestY = clamp(terminal.y, rect.y1, rect.y2);
+  const distanceToRect = Math.hypot(terminal.x - closestX, terminal.y - closestY);
+  return distanceToRect < terminal.allocationRadius - tolerance;
+}
+
+function normalizeRect(rect: { x1: number; y1: number; x2: number; y2: number }): { x1: number; y1: number; x2: number; y2: number } {
+  return {
+    x1: Math.min(rect.x1, rect.x2),
+    y1: Math.min(rect.y1, rect.y2),
+    x2: Math.max(rect.x1, rect.x2),
+    y2: Math.max(rect.y1, rect.y2),
+  };
 }
 
 function toLayoutMetadata(layout: CompletionLayout): LayoutMetadata {

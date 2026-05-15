@@ -44,11 +44,13 @@ export function buildBPStudioLayoutGraph(
   const nodeById = new Map(spec.tree.nodes.map((node) => [node.id, node]));
   const terminalNodeIds = new Set(spec.layout.flaps.map((flap) => flap.nodeId));
   const known = new Map<number, { x: number; y: number }>();
+  const knownSource = new Map<number, BPStudioLayoutGraphNode["source"]>();
   for (const flap of layout.flaps ?? []) {
     known.set(flap.id, {
       x: flap.x + (flap.width ?? 0) / 2,
       y: flap.y + (flap.height ?? 0) / 2,
     });
+    knownSource.set(flap.id, "bp-studio-optimized-flap");
   }
 
   const edgeSpecs = layout.edges ?? [];
@@ -76,7 +78,7 @@ export function buildBPStudioLayoutGraph(
         y: point.y / sheet.height,
       },
       kind: terminal ? "terminal" : "hub",
-      source: known.has(adapterId) ? "bp-studio-optimized-flap" : "bp-studio-inferred-internal",
+      source: knownSource.get(adapterId) ?? "bp-studio-inferred-internal",
     }];
   });
 

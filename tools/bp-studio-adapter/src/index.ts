@@ -584,16 +584,32 @@ function collectNodeLayout(): NodeLayoutSpec[] {
   for(const node of tree.$nodes) {
     if(!node) continue;
     const [top, right, bottom, left] = node.$AABB.$toValues();
+    const finalContourBounds = boundsForPaths(node.$graphics.$contours.map(contour => contour.outer));
     result.push({
       id: node.id,
       parentId: node.$parent?.id,
       length: node.$length,
       dist: node.$dist,
       isLeaf: node.$isLeaf,
-      bounds: { top, right, bottom, left }
+      bounds: { top, right, bottom, left },
+      ...(finalContourBounds ? {
+        finalContourBounds,
+        finalContourCount: node.$graphics.$contours.length
+      } : {})
     });
   }
   return result.sort((a, b) => a.id - b.id);
+}
+
+function boundsForPaths(paths: Path[]): { top: number; right: number; bottom: number; left: number } | undefined {
+  const points = paths.flat();
+  if(points.length === 0) return undefined;
+  return {
+    top: Math.max(...points.map(point => point.y)),
+    right: Math.max(...points.map(point => point.x)),
+    bottom: Math.min(...points.map(point => point.y)),
+    left: Math.min(...points.map(point => point.x))
+  };
 }
 
 function cloneLayout(sheet: SheetSpec, edges: EdgeSpec[], flaps: FlapSpec[]): { sheet: SheetSpec; edges: EdgeSpec[]; flaps: FlapSpec[] } {

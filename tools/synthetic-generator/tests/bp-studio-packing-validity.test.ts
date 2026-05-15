@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { compilerGridSizeForSheet, regularizeBPStudioLayout } from "../src/bp-completion.ts";
+import { compileRegionCandidate, regionLayoutFromCompletionLayout } from "../src/bp-region-compiler.ts";
 import { buildBPStudioLayoutGraph } from "../src/bp-studio-layout-graph.ts";
 import { runBPStudioAdapter, toAdapterSpec } from "../src/bp-studio-realistic.ts";
 import { simpleQuadrupedBPStudioSpec } from "../src/bp-studio-fixtures.ts";
@@ -50,6 +51,23 @@ test("regularized compiler grid is a multiple of BP Studio optimized sheet units
     y: 0,
   });
   expect(layout.regions.find((body) => body.id === "front-hub")?.x1).not.toBe(15 / 32);
+});
+
+test("regularized simple quadruped corridors avoid flap allocation interiors", () => {
+  const spec = simpleQuadrupedBPStudioSpec(7);
+  const adapterSpec = toAdapterSpec(spec);
+  adapterSpec.optimizeLayout = true;
+  adapterSpec.optimizerLayout = "view";
+  adapterSpec.optimizerSeed = 7;
+  adapterSpec.optimizerUseBH = true;
+
+  const { metadata } = runBPStudioAdapter(adapterSpec);
+  const completionLayout = regularizeBPStudioLayout(spec, { adapterSpec, adapterMetadata: metadata });
+  const candidate = compileRegionCandidate(regionLayoutFromCompletionLayout(completionLayout));
+
+  expect(candidate.validity).toBe("candidate-complete");
+  expect(candidate.rejectionReasons.filter((reason) => reason.startsWith("flap-allocation-overlap"))).toHaveLength(0);
+  expect(candidate.layout.pleatStrips).toHaveLength(7);
 });
 
 test("BP Studio layout graph derives internal hubs from optimized BP graph only", () => {

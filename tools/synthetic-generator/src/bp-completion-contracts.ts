@@ -35,6 +35,7 @@ export interface CompletionTerminal {
   side: "top" | "right" | "bottom" | "left" | "interior";
   width: number;
   height: number;
+  allocationRadius?: number;
   priority: number;
 }
 
@@ -219,6 +220,7 @@ export interface FlapRegion {
   side: CompletionTerminal["side"];
   rect: RegionRect;
   center: CompletionPoint;
+  allocationRadius?: number;
 }
 
 export interface BodyPanelRegion {

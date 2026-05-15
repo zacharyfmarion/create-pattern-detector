@@ -19,10 +19,6 @@ import {
 } from "./bp-studio-spec.ts";
 import { simpleQuadrupedBPStudioSpec } from "./bp-studio-fixtures.ts";
 import {
-  buildBPStudioLayoutGraph,
-  type BPStudioLayoutGraph,
-} from "./bp-studio-layout-graph.ts";
-import {
   validateBPStudioPacking,
   type BPStudioPackingValidation,
 } from "./bp-studio-packing-validity.ts";
@@ -329,17 +325,14 @@ function sourceTreePanel(spec: BPStudioAdapterSpec, size: number): string {
 }
 
 function packingPanel(spec: BPStudioAdapterSpec, adapterMetadata: AdapterMetadata, size: number): string {
-  const graph = buildBPStudioLayoutGraph(spec, { adapterMetadata });
   const layout = chosenLayout(adapterMetadata) ?? adapterMetadata.inputLayout;
-  const sheet = graph?.sheet ?? layout?.sheet ?? { width: spec.sheet.width, height: spec.sheet.height };
+  const sheet = layout?.sheet ?? { width: spec.sheet.width, height: spec.sheet.height };
   const toPanel = sheetProjector(sheet.width, sheet.height, size);
   const scale = sheetScale(sheet.width, sheet.height, size);
   const terminalLengths = terminalLengthByAdapterId(spec);
-  const edges = graph ? bpStudioGraphOverlay(graph, toPanel, true) : packedTreeOverlay(spec, layout, toPanel);
   const flaps = (layout?.flaps ?? []).map((flap) => adapterFlapMark(flap, toPanel, scale, terminalLengths.get(flap.id), "#4ade80", "#16a34a", true));
   return panelFrame(size, [
     sheetGridForSheet(sheet.width, sheet.height, size),
-    ...edges,
     ...flaps,
   ], true, "bp-packing-clip");
 }
@@ -350,14 +343,12 @@ function candidateOverlayPanel(
   candidate: RegionCompletionCandidate,
   size: number,
 ): string {
-  const graph = buildBPStudioLayoutGraph(spec, { adapterMetadata });
   const layout = chosenLayout(adapterMetadata) ?? adapterMetadata.inputLayout;
-  const sheet = graph?.sheet ?? layout?.sheet ?? { width: spec.sheet.width, height: spec.sheet.height };
+  const sheet = layout?.sheet ?? { width: spec.sheet.width, height: spec.sheet.height };
   const toPanel = sheetProjector(sheet.width, sheet.height, size);
   const scale = sheetScale(sheet.width, sheet.height, size);
   const terminalLengths = terminalLengthByAdapterId(spec);
   const optimizedFlaps = (layout?.flaps ?? []).map((flap) => adapterFlapMark(flap, toPanel, scale, terminalLengths.get(flap.id), "#22c55e", "#15803d", false));
-  const graphOverlay = graph ? bpStudioGraphOverlay(graph, toPanel, false).join("\n") : "";
   const candidateSvg = regionCandidateToSvg(candidate, size, {
     showGrid: false,
     showLegend: false,
@@ -369,7 +360,6 @@ function candidateOverlayPanel(
   return panelFrame(size, [
     sheetGridForSheet(sheet.width, sheet.height, size),
     candidateSvg,
-    graphOverlay,
     `<g opacity="0.72">${optimizedFlaps.join("\n")}</g>`,
   ], false, "bp-candidate-overlay-clip");
 }
@@ -383,87 +373,6 @@ function panelFrame(size: number, body: string[], includeBorder = true, clipId?:
     clipId ? `</g>` : "",
     includeBorder ? `<rect x="0" y="0" width="${size}" height="${size}" fill="none" stroke="#0f172a" stroke-width="2"/>` : "",
   ].join("\n");
-}
-
-function packedTreeOverlay(
-  spec: BPStudioAdapterSpec,
-  layout: AdapterMetadata["layout"] | AdapterMetadata["optimizedLayout"] | AdapterMetadata["inputLayout"] | undefined,
-  project: (point: { x: number; y: number }) => { x: number; y: number },
-): string[] {
-  if (!layout) return [];
-  const adapterIds = adapterNodeIds(spec);
-  const nodeByAdapterId = new Map([...adapterIds.entries()].map(([nodeId, adapterId]) => [adapterId, nodeId]));
-  const points = new Map<string, { x: number; y: number }>();
-  for (const flap of layout.flaps ?? []) {
-    const nodeId = nodeByAdapterId.get(flap.id);
-    if (nodeId) points.set(nodeId, centerOfAdapterFlap(flap));
-  }
-  const edges = spec.tree.edges.filter((edge) => edge.from !== spec.tree.rootId && edge.to !== spec.tree.rootId);
-  for (let pass = 0; pass < spec.tree.nodes.length; pass += 1) {
-    let changed = false;
-    for (const node of spec.tree.nodes) {
-      if (points.has(node.id) || node.id === spec.tree.rootId) continue;
-      const neighbors = edges
-        .flatMap((edge) => edge.from === node.id ? [edge.to] : edge.to === node.id ? [edge.from] : [])
-        .map((neighborId) => points.get(neighborId))
-        .filter((point): point is { x: number; y: number } => Boolean(point));
-      if (!neighbors.length) continue;
-      points.set(node.id, {
-        x: mean(neighbors.map((point) => point.x)),
-        y: mean(neighbors.map((point) => point.y)),
-      });
-      changed = true;
-    }
-    if (!changed) break;
-  }
-  return edges.map((edge) => {
-    const a = points.get(edge.from);
-    const b = points.get(edge.to);
-    if (!a || !b) return "";
-    const pa = project(a);
-    const pb = project(b);
-    const mid = { x: (pa.x + pb.x) / 2, y: (pa.y + pb.y) / 2 };
-    return [
-      `<line x1="${pa.x}" y1="${pa.y}" x2="${pb.x}" y2="${pb.y}" stroke="#64748b" stroke-width="1.8" stroke-linecap="round" stroke-opacity="0.72"/>`,
-      `<g transform="translate(${mid.x},${mid.y})">`,
-      `<rect x="-14" y="-11" width="28" height="16" rx="4" fill="#ffffff" fill-opacity="0.90" stroke="#cbd5e1" stroke-width="0.7"/>`,
-      `<text x="0" y="1" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="10" font-weight="700" fill="#334155">L ${edge.length}</text>`,
-      `</g>`,
-    ].join("\n");
-  });
-}
-
-function bpStudioGraphOverlay(
-  graph: BPStudioLayoutGraph,
-  project: (point: { x: number; y: number }) => { x: number; y: number },
-  showLabels: boolean,
-): string[] {
-  const nodeById = new Map(graph.nodes.map((node) => [node.nodeId, node]));
-  const edgeItems = graph.edges.map((edge) => {
-    const a = nodeById.get(edge.from);
-    const b = nodeById.get(edge.to);
-    if (!a || !b) return "";
-    const pa = project(a.point);
-    const pb = project(b.point);
-    const mid = { x: (pa.x + pb.x) / 2, y: (pa.y + pb.y) / 2 };
-    return [
-      `<line x1="${pa.x}" y1="${pa.y}" x2="${pb.x}" y2="${pb.y}" stroke="#475569" stroke-width="2.1" stroke-linecap="round" stroke-opacity="0.72"/>`,
-      showLabels ? [
-        `<g transform="translate(${mid.x},${mid.y})">`,
-        `<rect x="-14" y="-11" width="28" height="16" rx="4" fill="#ffffff" fill-opacity="0.90" stroke="#cbd5e1" stroke-width="0.7"/>`,
-        `<text x="0" y="1" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="10" font-weight="700" fill="#334155">L ${edge.length}</text>`,
-        `</g>`,
-      ].join("\n") : "",
-    ].join("\n");
-  });
-  const hubItems = graph.nodes.filter((node) => node.kind === "hub").map((node) => {
-    const p = project(node.point);
-    return [
-      `<circle cx="${p.x}" cy="${p.y}" r="5.5" fill="#f59e0b" fill-opacity="0.92" stroke="#92400e" stroke-width="1.5"/>`,
-      showLabels ? `<text x="${p.x + 7}" y="${p.y - 7}" font-family="Inter, Arial, sans-serif" font-size="10.5" fill="#78350f">${escapeXml(node.label)}</text>` : "",
-    ].join("\n");
-  });
-  return [...edgeItems, ...hubItems];
 }
 
 function adapterNodeIds(spec: BPStudioAdapterSpec): Map<string, number> {
@@ -636,28 +545,15 @@ function adapterFlapMark(
   stroke: string,
   showLabel: boolean,
 ): string {
-  const p1 = project({ x: flap.x, y: flap.y });
-  const p2 = project({ x: flap.x + (flap.width ?? 0), y: flap.y + (flap.height ?? 0) });
-  const x = Math.min(p1.x, p2.x);
-  const y = Math.min(p1.y, p2.y);
-  const rawWidth = Math.abs(p2.x - p1.x);
-  const rawHeight = Math.abs(p2.y - p1.y);
-  const hasArea = (flap.width ?? 0) > 1e-9 || (flap.height ?? 0) > 1e-9;
-  const width = Math.max(10, rawWidth);
-  const height = Math.max(10, rawHeight);
   const center = project(centerOfAdapterFlap(flap));
   const lengthRadius = Math.max(0, (flapLength ?? 0) * scale);
   const pointRadius = 4.2;
   const pointArm = 8;
   return [
     lengthRadius > 0 ? `<circle cx="${center.x}" cy="${center.y}" r="${lengthRadius}" fill="none" stroke="${stroke}" stroke-width="1.6" stroke-opacity="0.78"/>` : "",
-    hasArea
-      ? `<rect x="${x}" y="${y}" width="${width}" height="${height}" fill="${fill}" fill-opacity="0.22" stroke="${stroke}" stroke-width="1.8" stroke-dasharray="5 4"/>`
-      : [
-        `<circle cx="${center.x}" cy="${center.y}" r="${pointRadius}" fill="${fill}" fill-opacity="0.9" stroke="${stroke}" stroke-width="1.6"/>`,
-        `<line x1="${center.x - pointArm}" y1="${center.y}" x2="${center.x + pointArm}" y2="${center.y}" stroke="${stroke}" stroke-width="1.4" stroke-linecap="round"/>`,
-        `<line x1="${center.x}" y1="${center.y - pointArm}" x2="${center.x}" y2="${center.y + pointArm}" stroke="${stroke}" stroke-width="1.4" stroke-linecap="round"/>`,
-      ].join("\n"),
+    `<circle cx="${center.x}" cy="${center.y}" r="${pointRadius}" fill="${fill}" fill-opacity="0.9" stroke="${stroke}" stroke-width="1.6"/>`,
+    `<line x1="${center.x - pointArm}" y1="${center.y}" x2="${center.x + pointArm}" y2="${center.y}" stroke="${stroke}" stroke-width="1.4" stroke-linecap="round"/>`,
+    `<line x1="${center.x}" y1="${center.y - pointArm}" x2="${center.x}" y2="${center.y + pointArm}" stroke="${stroke}" stroke-width="1.4" stroke-linecap="round"/>`,
     lengthRadius > 0 && showLabel ? `<text x="${center.x + lengthRadius + 4}" y="${center.y + 4}" font-family="Inter, Arial, sans-serif" font-size="10.5" fill="#064e3b">L ${flapLength}</text>` : "",
     showLabel ? `<text x="${center.x + 6}" y="${center.y - 6}" font-family="Inter, Arial, sans-serif" font-size="11" fill="#064e3b">id ${flap.id}</text>` : "",
   ].join("\n");
@@ -679,11 +575,9 @@ function packingLegendOutside(size: number): string {
   const y2 = 72;
   return [
     legendBand(size, "Packing legend"),
-    `<circle cx="20" cy="${y1}" r="4.2" fill="#4ade80" fill-opacity="0.9" stroke="#16a34a" stroke-width="1.6"/><line x1="12" y1="${y1}" x2="28" y2="${y1}" stroke="#16a34a" stroke-width="1.4"/><line x1="20" y1="${y1 - 8}" x2="20" y2="${y1 + 8}" stroke="#16a34a" stroke-width="1.4"/><text x="42" y="${y1 + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">zero-size optimized flap point</text>`,
+    `<circle cx="20" cy="${y1}" r="4.2" fill="#4ade80" fill-opacity="0.9" stroke="#16a34a" stroke-width="1.6"/><line x1="12" y1="${y1}" x2="28" y2="${y1}" stroke="#16a34a" stroke-width="1.4"/><line x1="20" y1="${y1 - 8}" x2="20" y2="${y1 + 8}" stroke="#16a34a" stroke-width="1.4"/><text x="42" y="${y1 + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">optimized flap terminal point</text>`,
     `<circle cx="274" cy="${y1}" r="17" fill="none" stroke="#16a34a" stroke-width="1.6"/><text x="302" y="${y1 + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">flap length circle</text>`,
-    `<line x1="468" y1="${y1}" x2="496" y2="${y1}" stroke="#475569" stroke-width="2.1"/><text x="508" y="${y1 + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">BP Studio tree edge</text>`,
-    `<circle cx="20" cy="${y2}" r="5.5" fill="#f59e0b" stroke="#92400e" stroke-width="1.5"/><text x="42" y="${y2 + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">inferred internal hub from BP graph</text>`,
-    `<text x="18" y="${y2 + 32}" font-family="Inter, Arial, sans-serif" font-size="11" fill="#64748b">Flap circles/edges come from BP Studio optimized layout.</text>`,
+    `<text x="18" y="${y2 + 4}" font-family="Inter, Arial, sans-serif" font-size="11" fill="#64748b">Panel shows only BP Studio optimized flap packing, not inferred hub points.</text>`,
   ].join("\n");
 }
 
@@ -710,11 +604,6 @@ function legendBand(size: number, title: string): string {
 
 function round2(value: number): string {
   return Number.isInteger(value) ? String(value) : value.toFixed(2);
-}
-
-function mean(values: number[]): number {
-  if (!values.length) return 0;
-  return values.reduce((sum, value) => sum + value, 0) / values.length;
 }
 
 function escapeXml(value: string): string {
