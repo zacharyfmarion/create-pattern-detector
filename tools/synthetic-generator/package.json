@@ -8,6 +8,7 @@
     "folded-preview": "bun run src/folded-preview.ts",
     "bp-strict-repair-lab": "bun run src/bp-strict-repair-lab.ts",
     "bp-local-diagnostics": "bun run src/bp-local-diagnostics.ts",
+    "bp-region-debug": "bun run src/bp-region-debug.ts",
     "bp-realism-report": "bun run src/bp-realism-report.ts",
     "test": "bun test",
     "typecheck": "tsc --noEmit"

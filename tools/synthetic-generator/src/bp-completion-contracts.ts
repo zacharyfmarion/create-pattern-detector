@@ -202,3 +202,98 @@ export interface CompletionResult {
   portJoins: PortJoin[];
   rejected: CompletionRejection[];
 }
+
+export interface RegionRect {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+}
+
+export type PleatStripOrientation = "vertical" | "horizontal";
+
+export interface FlapRegion {
+  id: string;
+  terminalId: string;
+  nodeId: string;
+  side: CompletionTerminal["side"];
+  rect: RegionRect;
+  center: CompletionPoint;
+}
+
+export interface BodyPanelRegion {
+  id: string;
+  rect: RegionRect;
+  center: CompletionPoint;
+}
+
+export interface PleatStripRegion {
+  id: string;
+  from: string;
+  to: string;
+  rect: RegionRect;
+  orientation: PleatStripOrientation;
+  pitch: number;
+  phase: number;
+  startAssignment: Extract<EdgeAssignment, "M" | "V">;
+  treeEdgeId?: string;
+}
+
+export interface BoundaryPort {
+  id: string;
+  regionId: string;
+  side: "top" | "right" | "bottom" | "left";
+  orientation: PleatStripOrientation | "diagonal-positive" | "diagonal-negative";
+  position: CompletionPoint;
+  width: number;
+}
+
+export interface StairBoundary {
+  id: string;
+  stripId: string;
+  side: "start" | "end";
+  lines: Array<{
+    p1: [number, number];
+    p2: [number, number];
+    assignment: Extract<EdgeAssignment, "M" | "V">;
+    role: Exclude<BPRole, "border">;
+  }>;
+}
+
+export type CompletionCandidateValidity =
+  | "layout-valid"
+  | "candidate-complete"
+  | "locally-valid"
+  | "globally-valid"
+  | "training-eligible"
+  | "rejected";
+
+export interface RegionLayout {
+  id: string;
+  sourceLayoutId: string;
+  gridSize: number;
+  axis: CompletionAxis;
+  bodies: BodyPanelRegion[];
+  flaps: FlapRegion[];
+  pleatStrips: PleatStripRegion[];
+  boundaryPorts: BoundaryPort[];
+}
+
+export interface RegionCandidateSegment {
+  id: string;
+  regionId: string;
+  kind: "border" | "body-boundary" | "flap-boundary" | "strip-pleat" | "stair-boundary";
+  p1: [number, number];
+  p2: [number, number];
+  assignment: Extract<EdgeAssignment, "M" | "V" | "B">;
+  role: BPRole;
+}
+
+export interface RegionCompletionCandidate {
+  id: string;
+  layout: RegionLayout;
+  validity: CompletionCandidateValidity;
+  segments: RegionCandidateSegment[];
+  stairBoundaries: StairBoundary[];
+  rejectionReasons: string[];
+}
