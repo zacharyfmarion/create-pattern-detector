@@ -2,6 +2,7 @@ data/**/*.fold
 data/**/*.png
 data/**/*.json
 data/**/*.txt
+data/output/scraped
 data/output/scraped/**
 data/ts-generation/node_modules
 .venv/
