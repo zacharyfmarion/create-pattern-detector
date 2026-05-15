@@ -187,14 +187,18 @@ export function regularizeBPStudioLayout(
     clamp(mean(bodies.map((body) => axis === "horizontal" ? (body.y1 + body.y2) / 2 : (body.x1 + body.x2) / 2), 0.5), 0.1875, 0.8125),
     gridSize,
   );
-  const corridors: CompletionCorridor[] = spec.layout.rivers.map((river, index) => ({
-    id: river.edgeId,
-    from: river.from,
-    to: river.to,
-    orientation: river.preferredAxis === "vertical" ? "vertical" : river.preferredAxis === "horizontal" ? "horizontal" : axis,
-    coordinate: snap(corridorCoordinate(river.from, river.to, spec, axis), gridSize),
-    width: snap(Math.max(1 / gridSize, river.width / spec.sheet.gridSize), gridSize),
-  }));
+  const layoutPoints = completionPointMap(bodies, terminals);
+  const corridors: CompletionCorridor[] = spec.layout.rivers.map((river) => {
+    const orientation = river.preferredAxis === "vertical" ? "vertical" : river.preferredAxis === "horizontal" ? "horizontal" : axis;
+    return {
+      id: river.edgeId,
+      from: river.from,
+      to: river.to,
+      orientation,
+      coordinate: snap(corridorCoordinate(river.from, river.to, layoutPoints, orientation), gridSize),
+      width: snap(Math.max(1 / gridSize, river.width / spec.sheet.gridSize), gridSize),
+    };
+  });
 
   return {
     id: options.layoutId ?? spec.id,
@@ -840,10 +844,22 @@ function chooseAxis(spec: BPStudioAdapterSpec, terminals: CompletionTerminal[]):
   return xSpread >= ySpread ? "horizontal" : "vertical";
 }
 
-function corridorCoordinate(from: string, to: string, spec: BPStudioAdapterSpec, axis: CompletionAxis): number {
+function completionPointMap(bodies: CompletionRegion[], terminals: CompletionTerminal[]): Map<string, CompletionPoint> {
   const points = new Map<string, CompletionPoint>();
-  for (const body of spec.layout.bodies) points.set(body.nodeId, { x: body.center.x / spec.sheet.width, y: body.center.y / spec.sheet.height });
-  for (const flap of spec.layout.flaps) points.set(flap.nodeId, { x: flap.terminal.x / spec.sheet.width, y: flap.terminal.y / spec.sheet.height });
+  for (const body of bodies) {
+    points.set(body.id, {
+      x: (body.x1 + body.x2) / 2,
+      y: (body.y1 + body.y2) / 2,
+    });
+  }
+  for (const terminal of terminals) {
+    points.set(terminal.id, { x: terminal.x, y: terminal.y });
+    points.set(terminal.nodeId, { x: terminal.x, y: terminal.y });
+  }
+  return points;
+}
+
+function corridorCoordinate(from: string, to: string, points: Map<string, CompletionPoint>, axis: CompletionAxis): number {
   const a = points.get(from);
   const b = points.get(to);
   if (!a || !b) return 0.5;

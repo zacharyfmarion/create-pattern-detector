@@ -28,8 +28,9 @@ export function fixtureRegionLayout(name: RegionFixtureName): RegionLayout {
 }
 
 export function regionLayoutFromCompletionLayout(layout: CompletionLayout): RegionLayout {
+  const pitch = pleatPitchForGrid(layout.gridSize);
   const bodies = layout.regions.filter((region) => region.kind === "body").map((region): BodyPanelRegion => {
-    const rect = normalizeRect({ x1: region.x1, y1: region.y1, x2: region.x2, y2: region.y2 });
+    const rect = snapRectToStep({ x1: region.x1, y1: region.y1, x2: region.x2, y2: region.y2 }, pitch);
     return { id: region.id, rect, center: rectCenter(rect) };
   });
   const primaryBody = bodies[0] ?? {
@@ -37,7 +38,7 @@ export function regionLayoutFromCompletionLayout(layout: CompletionLayout): Regi
     rect: { x1: 0.375, y1: 0.375, x2: 0.625, y2: 0.625 },
     center: { x: 0.5, y: 0.5 },
   };
-  const flaps = layout.terminals.slice(0, 8).map((terminal) => flapRegion(terminal, layout.gridSize));
+  const flaps = layout.terminals.map((terminal) => flapRegion(terminal, layout.gridSize));
   const pleatStrips = layout.corridors.length
     ? corridorPleatStripRegions(layout, flaps, bodies.length ? bodies : [primaryBody])
     : flaps.map((flap, index) => pleatStripRegion(flap, primaryBody, layout, index));
@@ -101,34 +102,38 @@ export function regionCandidateToSvg(candidate: RegionCompletionCandidate, size 
   const line = (segment: RegionCandidateSegment): string => {
     const [x1, y1] = toPx(segment.p1);
     const [x2, y2] = toPx(segment.p2);
-    const color = segment.assignment === "M" ? "#ef4444" : segment.assignment === "V" ? "#2563eb" : "#111827";
-    const width = segment.kind === "border" ? 3.2 : segment.kind === "strip-pleat" ? 3.0 : segment.kind === "stair-boundary" ? 3.0 : 1.5;
+    const color = segment.assignment === "M" ? "#ff2a2a" : segment.assignment === "V" ? "#005cff" : "#111827";
+    const width = segment.kind === "border" ? 3.4 : segment.kind === "strip-pleat" ? 3.6 : segment.kind === "stair-boundary" ? 3.5 : 1.8;
     const dash = segment.kind === "body-boundary" || segment.kind === "flap-boundary" ? " stroke-dasharray=\"5 4\"" : "";
-    return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${color}" stroke-width="${round(width * strokeScale)}" stroke-linecap="round" stroke-opacity="0.96"${dash}/>`;
+    return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${color}" stroke-width="${round(width * strokeScale)}" stroke-linecap="round" stroke-opacity="0.98"${dash}/>`;
   };
   const rect = (item: { rect: RegionRect }, color: string, opacity: number): string => {
     const [x1, y1] = toPx([item.rect.x1, item.rect.y2]);
     const [x2, y2] = toPx([item.rect.x2, item.rect.y1]);
     return `<rect x="${x1}" y="${y1}" width="${round(x2 - x1)}" height="${round(y2 - y1)}" fill="${color}" opacity="${opacity}"/>`;
   };
-  const gridSize = Math.min(Math.max(4, candidate.layout.gridSize), 32);
-  const gridLines = Array.from({ length: gridSize + 1 }, (_, index) => index / gridSize).flatMap((v, index) => {
+  const latticeSize = Math.min(Math.max(8, Math.round(1 / pleatPitchForGrid(candidate.layout.gridSize))), 32);
+  const majorEvery = Math.max(1, Math.round(latticeSize / 16));
+  const mediumEvery = Math.max(1, Math.round(latticeSize / 64));
+  const gridLines = Array.from({ length: latticeSize + 1 }, (_, index) => index / latticeSize).flatMap((v, index) => {
     const [x, y] = toPx([v, v]);
-    const major = index % 4 === 0;
-    const color = major ? "#e5e7eb" : "#f3f4f6";
-    const width = major ? 0.75 : 0.45;
+    const major = index % majorEvery === 0;
+    const medium = index % mediumEvery === 0;
+    const color = major ? "#94a3b8" : medium ? "#cbd5e1" : "#e2e8f0";
+    const width = major ? 0.7 : medium ? 0.42 : 0.24;
+    const opacity = major ? 0.22 : medium ? 0.10 : 0.045;
     return [
-      `<line x1="${x}" y1="0" x2="${x}" y2="${size}" stroke="${color}" stroke-width="${width}"/>`,
-      `<line x1="0" y1="${y}" x2="${size}" y2="${y}" stroke="${color}" stroke-width="${width}"/>`,
+      `<line x1="${x}" y1="0" x2="${x}" y2="${size}" stroke="${color}" stroke-width="${width}" stroke-opacity="${opacity}"/>`,
+      `<line x1="0" y1="${y}" x2="${size}" y2="${y}" stroke="${color}" stroke-width="${width}" stroke-opacity="${opacity}"/>`,
     ];
   });
   return [
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">`,
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" shape-rendering="geometricPrecision">`,
     `<rect width="${size}" height="${size}" fill="white"/>`,
     ...gridLines,
-    ...candidate.layout.pleatStrips.map((strip) => rect(strip, "#fde68a", 0.22)),
-    ...candidate.layout.bodies.map((body) => rect(body, "#c7d2fe", 0.28)),
-    ...candidate.layout.flaps.map((flap) => rect(flap, "#bbf7d0", 0.25)),
+    ...candidate.layout.pleatStrips.map((strip) => rect(strip, "#fde68a", 0.14)),
+    ...candidate.layout.bodies.map((body) => rect(body, "#c7d2fe", 0.20)),
+    ...candidate.layout.flaps.map((flap) => rect(flap, "#bbf7d0", 0.18)),
     ...candidate.segments.map(line),
     `</svg>`,
   ].join("\n");
@@ -161,24 +166,24 @@ function corridorPleatStripRegion(
 ): PleatStripRegion {
   const unit = 1 / gridSize;
   const pitch = pleatPitchForGrid(gridSize);
-  const width = Math.max(snapDistance(corridor.width, gridSize), unit * 2);
+  const width = Math.max(snapEvenDistanceToStep(corridor.width, pitch), pitch * 2, unit * 2);
   const half = width / 2;
   let rect: RegionRect;
   if (corridor.orientation === "horizontal") {
-    const y = snapToGrid(corridor.coordinate, gridSize);
+    const y = snapToStep(corridor.coordinate, pitch);
     rect = normalizeRect({
-      x1: snapToGrid(from.x, gridSize),
-      y1: snapToGrid(y - half, gridSize),
-      x2: snapToGrid(to.x, gridSize),
-      y2: snapToGrid(y + half, gridSize),
+      x1: snapToStep(from.x, pitch),
+      y1: snapToStep(y - half, pitch),
+      x2: snapToStep(to.x, pitch),
+      y2: snapToStep(y + half, pitch),
     });
   } else {
-    const x = snapToGrid(corridor.coordinate, gridSize);
+    const x = snapToStep(corridor.coordinate, pitch);
     rect = normalizeRect({
-      x1: snapToGrid(x - half, gridSize),
-      y1: snapToGrid(from.y, gridSize),
-      x2: snapToGrid(x + half, gridSize),
-      y2: snapToGrid(to.y, gridSize),
+      x1: snapToStep(x - half, pitch),
+      y1: snapToStep(from.y, pitch),
+      x2: snapToStep(x + half, pitch),
+      y2: snapToStep(to.y, pitch),
     });
   }
   return {
@@ -195,16 +200,17 @@ function corridorPleatStripRegion(
 }
 
 function flapRegion(terminal: CompletionTerminal, gridSize: number): FlapRegion {
-  const center = point(terminal.x, terminal.y);
-  const width = snapEvenDistance(clamp(Math.max(terminal.width, 1 / 16), 1 / 16, 3 / 16), gridSize);
-  const height = snapEvenDistance(clamp(Math.max(terminal.height, 1 / 16), 1 / 16, 3 / 16), gridSize);
+  const pitch = pleatPitchForGrid(gridSize);
+  const center = point(snapToStep(terminal.x, pitch), snapToStep(terminal.y, pitch));
+  const width = snapEvenDistanceToStep(clamp(Math.max(terminal.width, 1 / 16), 1 / 16, 3 / 16), pitch);
+  const height = snapEvenDistanceToStep(clamp(Math.max(terminal.height, 1 / 16), 1 / 16, 3 / 16), pitch);
   return {
     id: `flap-${terminal.id}`,
     terminalId: terminal.id,
     nodeId: terminal.nodeId,
     side: terminal.side,
     center,
-    rect: rectAround(center, width, height),
+    rect: snapRectToStep(rectAround(center, width, height), pitch),
   };
 }
 
@@ -218,25 +224,25 @@ function pleatStripRegion(
     (flap.side === "interior" && Math.abs(flap.center.x - body.center.x) >= Math.abs(flap.center.y - body.center.y));
   const unit = 1 / layout.gridSize;
   const pitch = pleatPitchForGrid(layout.gridSize);
-  const half = Math.max(snapDistance(DEFAULT_CORRIDOR_WIDTH, layout.gridSize), unit * 2) / 2;
+  const half = Math.max(snapEvenDistanceToStep(DEFAULT_CORRIDOR_WIDTH, pitch), unit * 2) / 2;
   let rect: RegionRect;
   if (horizontal) {
-    const y = snapToGrid(flap.center.y, layout.gridSize);
+    const y = snapToStep(flap.center.y, pitch);
     const bodyEdge = flap.center.x < body.center.x ? body.rect.x1 : body.rect.x2;
     rect = normalizeRect({
-      x1: flap.center.x,
-      y1: y - half,
-      x2: bodyEdge,
-      y2: y + half,
+      x1: snapToStep(flap.center.x, pitch),
+      y1: snapToStep(y - half, pitch),
+      x2: snapToStep(bodyEdge, pitch),
+      y2: snapToStep(y + half, pitch),
     });
   } else {
-    const x = snapToGrid(flap.center.x, layout.gridSize);
+    const x = snapToStep(flap.center.x, pitch);
     const bodyEdge = flap.center.y < body.center.y ? body.rect.y1 : body.rect.y2;
     rect = normalizeRect({
-      x1: x - half,
-      y1: flap.center.y,
-      x2: x + half,
-      y2: bodyEdge,
+      x1: snapToStep(x - half, pitch),
+      y1: snapToStep(flap.center.y, pitch),
+      x2: snapToStep(x + half, pitch),
+      y2: snapToStep(bodyEdge, pitch),
     });
   }
   return {
@@ -282,24 +288,38 @@ function stairBoundariesForStrip(strip: PleatStripRegion): StairBoundary[] {
 
 function stairBoundaryForStripSide(strip: PleatStripRegion, side: "start" | "end"): StairBoundary {
   const rect = strip.rect;
-  const assignment = side === "start" ? "M" : "V";
-  let lines: StairBoundary["lines"];
+  const firstAssignment = side === "start" ? "M" : "V";
+  const lines: StairBoundary["lines"] = [];
   if (strip.orientation === "vertical") {
     const x = side === "start" ? rect.x1 : rect.x2;
-    const dx = side === "start" ? (rect.y2 - rect.y1) / 2 : -(rect.y2 - rect.y1) / 2;
-    const midY = (rect.y1 + rect.y2) / 2;
-    lines = [
-      { p1: roundPoint([x, rect.y1]), p2: roundPoint([x + dx, midY]), assignment, role: "ridge" },
-      { p1: roundPoint([x, rect.y2]), p2: roundPoint([x + dx, midY]), assignment: flip(assignment), role: "ridge" },
-    ];
+    const dx = side === "start" ? strip.pitch : -strip.pitch;
+    const stepCount = Math.max(1, Math.round((rect.y2 - rect.y1) / strip.pitch));
+    for (let index = 0; index < stepCount; index += 1) {
+      const y0 = round(rect.y1 + index * strip.pitch);
+      const y1 = round(Math.min(rect.y2, y0 + strip.pitch));
+      const rising = index % 2 === 0;
+      lines.push({
+        p1: roundPoint([x, rising ? y0 : y1]),
+        p2: roundPoint([x + dx, rising ? y1 : y0]),
+        assignment: alternate(firstAssignment, index),
+        role: "ridge",
+      });
+    }
   } else {
     const y = side === "start" ? rect.y1 : rect.y2;
-    const dy = side === "start" ? (rect.x2 - rect.x1) / 2 : -(rect.x2 - rect.x1) / 2;
-    const midX = (rect.x1 + rect.x2) / 2;
-    lines = [
-      { p1: roundPoint([rect.x1, y]), p2: roundPoint([midX, y + dy]), assignment, role: "ridge" },
-      { p1: roundPoint([rect.x2, y]), p2: roundPoint([midX, y + dy]), assignment: flip(assignment), role: "ridge" },
-    ];
+    const dy = side === "start" ? strip.pitch : -strip.pitch;
+    const stepCount = Math.max(1, Math.round((rect.x2 - rect.x1) / strip.pitch));
+    for (let index = 0; index < stepCount; index += 1) {
+      const x0 = round(rect.x1 + index * strip.pitch);
+      const x1 = round(Math.min(rect.x2, x0 + strip.pitch));
+      const rising = index % 2 === 0;
+      lines.push({
+        p1: roundPoint([rising ? x0 : x1, y]),
+        p2: roundPoint([rising ? x1 : x0, y + dy]),
+        assignment: alternate(firstAssignment, index),
+        role: "ridge",
+      });
+    }
   }
   return { id: `${strip.id}-${side}-stair`, stripId: strip.id, side, lines };
 }
@@ -433,6 +453,18 @@ function rectAround(center: CompletionPoint, width: number, height: number): Reg
   });
 }
 
+function snapRectToStep(rect: RegionRect, step: number): RegionRect {
+  const normalized = normalizeRect(rect);
+  const center = rectCenter(normalized);
+  const width = Math.max(step * 2, snapEvenDistanceToStep(normalized.x2 - normalized.x1, step));
+  const height = Math.max(step * 2, snapEvenDistanceToStep(normalized.y2 - normalized.y1, step));
+  return rectAround(
+    point(snapToStep(center.x, step), snapToStep(center.y, step)),
+    width,
+    height,
+  );
+}
+
 function normalizeRect(rect: RegionRect): RegionRect {
   return {
     x1: Math.min(rect.x1, rect.x2),
@@ -468,6 +500,19 @@ function snapDistance(value: number, gridSize: number): number {
   return round(Math.max(1, Math.round(value * gridSize)) / gridSize);
 }
 
+function snapDistanceToStep(value: number, step: number): number {
+  return round(Math.max(1, Math.round(value / step)) * step);
+}
+
+function snapEvenDistanceToStep(value: number, step: number): number {
+  const steps = Math.max(2, Math.round(value / step));
+  return round((steps % 2 === 0 ? steps : steps + 1) * step);
+}
+
+function snapToStep(value: number, step: number): number {
+  return round(Math.round(value / step) * step);
+}
+
 function snapEvenDistance(value: number, gridSize: number): number {
   const lattice = 1 / (gridSize * 2);
   const steps = Math.max(2, Math.round(value / lattice));
@@ -483,7 +528,8 @@ function nextGridInside(value: number, pitch: number): number {
 }
 
 function isOnGrid(value: number, gridSize: number): boolean {
-  return Math.abs(value * gridSize * 2 - Math.round(value * gridSize * 2)) < 1e-9;
+  const pitch = pleatPitchForGrid(gridSize);
+  return Math.abs(value / pitch - Math.round(value / pitch)) < 1e-9;
 }
 
 function roundPoint(point: Point): Point {

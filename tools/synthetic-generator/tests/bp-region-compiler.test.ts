@@ -2,9 +2,10 @@ import { expect, test } from "bun:test";
 import {
   compileRegionCandidate,
   fixtureRegionLayout,
+  regionLayoutFromCompletionLayout,
   regionCandidateToSvg,
 } from "../src/bp-region-compiler.ts";
-import type { RegionLayout } from "../src/bp-completion-contracts.ts";
+import type { CompletionLayout, RegionLayout } from "../src/bp-completion-contracts.ts";
 
 test("region compiler builds fixture layouts with local pleat-strip regions", () => {
   const layout = fixtureRegionLayout("insect-lite");
@@ -43,12 +44,65 @@ test("region compiler emits alternating M/V pleat strips on the compiler grid", 
   }
 });
 
+test("region compiler snaps optimized scaffold rectangles to visible pleat grid", () => {
+  const layout: CompletionLayout = {
+    id: "optimized-half-grid-fixture",
+    source: "bp-studio-optimized-layout",
+    gridSize: 128,
+    axis: "horizontal",
+    spineCoordinate: 0.5,
+    regions: [{
+      id: "body",
+      kind: "body",
+      x1: 57 / 128,
+      y1: 55 / 128,
+      x2: 80 / 128,
+      y2: 165 / 256,
+    }],
+    terminals: [{
+      id: "leg",
+      nodeId: "leg",
+      x: 90 / 256,
+      y: 67 / 256,
+      side: "left",
+      width: 8 / 128,
+      height: 31 / 256,
+      priority: 1,
+    }],
+    corridors: [{
+      id: "leg-body",
+      from: "leg",
+      to: "body",
+      orientation: "horizontal",
+      coordinate: 91 / 256,
+      width: 2 / 64,
+    }],
+    scaffoldSummary: {
+      adapterLineCount: 0,
+      adapterVertexCount: 0,
+      adapterEdgeCount: 0,
+      optimizedFlapCount: 1,
+      optimizedTreeEdgeCount: 1,
+    },
+  };
+
+  const candidate = compileRegionCandidate(regionLayoutFromCompletionLayout(layout));
+  expect(candidate.validity).toBe("candidate-complete");
+  expect(candidate.rejectionReasons).toHaveLength(0);
+  const pitch = 1 / 32;
+  for (const segment of candidate.segments) {
+    expect([...segment.p1, ...segment.p2].every((value) => isOnStep(value, pitch))).toBe(true);
+  }
+});
+
+
 test("region debug SVG exposes BP steering layers", () => {
   const candidate = compileRegionCandidate(fixtureRegionLayout("two-flap-stretch"));
+  expect(candidate.stairBoundaries.every((boundary) => boundary.lines.length > 1)).toBe(true);
   const svg = regionCandidateToSvg(candidate, 320);
   expect(svg).toContain("<svg");
-  expect(svg).toContain("#ef4444");
-  expect(svg).toContain("#2563eb");
+  expect(svg).toContain("#ff2a2a");
+  expect(svg).toContain("#005cff");
   expect(svg).toContain("stroke-dasharray");
 });
 
@@ -95,5 +149,9 @@ test("region compiler rejects accidental pleat-strip overlaps outside body regio
 });
 
 function isOnGrid(value: number, gridSize: number): boolean {
-  return Math.abs(value * gridSize - Math.round(value * gridSize)) < 1e-9;
+  return isOnStep(value, 1 / Math.min(gridSize, 32));
+}
+
+function isOnStep(value: number, step: number): boolean {
+  return Math.abs(value / step - Math.round(value / step)) < 1e-9;
 }
