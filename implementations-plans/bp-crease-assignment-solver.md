@@ -141,6 +141,15 @@ The final arranged graph must pass:
 
 The current code already has early concepts such as `Port`, `BoundaryPort`, `phase`, and `startAssignment`, but the current compiler mostly emits deterministic alternating strips. The next implementation step is to introduce an explicit region-variable solver over molecule states and port phases.
 
+Current certified primitive checkpoints:
+
+- `sheet pleat primitive`: a sheet-spanning accordion field with alternating M/V parallel lines. It is strict-flat-foldable and useful as a reference for long pleat runs, but it is not a finished BP layout because the strips terminate only on the sheet border.
+- `diagonal staircase cap primitive`: a 45-degree ridge with alternating axis/hinge partner creases at every pleat endpoint. All four sheet-corner orientations pass local Kawasaki/Maekawa, Rabbit Ear global solving, and folded-coordinate preview.
+
+Important composition finding:
+
+- A staircase cap is not freely composable with another cap. Naively overlaying two cap orientations creates locally invalid interior grid intersections. Cap-to-cap and cap-to-corridor joins therefore require an explicit connector/hub/stretch molecule or a solver rejection. Do not combine cap primitives by geometric union and assume final flat-foldability.
+
 When implementing, keep the solver deterministic by seed:
 
 - stable region ordering;
