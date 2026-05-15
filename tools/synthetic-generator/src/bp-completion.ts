@@ -39,7 +39,7 @@ export interface BoxPleatCompletionOptions {
   maxFoldLines?: number;
 }
 
-const ENGINE_VERSION = "strict-bp-completion/v0.5.0";
+const ENGINE_VERSION = "strict-bp-completion/v0.6.0";
 const DEFAULT_GRID_SIZE = 128;
 const PATCH_LIBRARY = moleculePatchLibrary();
 
@@ -312,13 +312,13 @@ function instantiateMolecules(layout: CompletionLayout): {
   }
 
   for (const [index, terminal] of terminalCenters.entries()) {
+    const target = nearestPoint(terminal.center, bodyCenters);
     const fan = instanceFor(patches, `fan-${terminal.terminal.id}`, "corner-fan", terminal.center);
     instances.push(fan);
-    segments.push(...starSegments(fan.id, fan.kind, terminal.center));
+    segments.push(...terminalFanSegments(fan.id, fan.kind, terminal.center, target));
     segments.push(...diamondSegments(`flap-contour-${terminal.terminal.id}`, "flap-contour", terminal.center, 1 / 16));
     instances.push(templateOnlyInstance(`flap-contour-${terminal.terminal.id}`, "flap-contour", terminal.center));
 
-    const target = nearestPoint(terminal.center, bodyCenters);
     const route = corridorRoute(terminal.center, target, layout.gridSize);
     for (const [routeIndex, routeCenter] of route.turns.entries()) {
       const turn = instanceFor(patches, `turn-${terminal.terminal.id}-${routeIndex}`, "diagonal-staircase", routeCenter);
@@ -348,24 +348,6 @@ function instantiateMolecules(layout: CompletionLayout): {
     });
   }
 
-  const pleatStripLayer = auxiliaryPleatStripLayer(layout);
-  if (pleatStripLayer !== undefined) {
-    for (const [index, center] of cornerLayerCenters(pleatStripLayer).entries()) {
-      const stripCell = instanceFor(patches, `pleat-strip-${index}`, "diagonal-staircase", center);
-      instances.push(stripCell);
-      segments.push(...starSegments(stripCell.id, "diagonal-staircase", center));
-      joins.push({
-        from: `${stripCell.id}:west`,
-        to: "body-0:west",
-        orientation: "diagonal-positive",
-        width: 1 / 16,
-        accepted: true,
-        fromPosition: center,
-        toPosition: bodyCenters[0] ?? point(0.5, 0.5),
-      });
-    }
-  }
-
   for (const [index, center] of relayHubCenters(layout).entries()) {
     const relayHub = instanceFor(patches, `relay-hub-${index}`, "body-panel", center);
     instances.push(relayHub);
@@ -377,22 +359,6 @@ function instantiateMolecules(layout: CompletionLayout): {
       width: 1 / 16,
       accepted: true,
       fromPosition: center,
-      toPosition: bodyCenters[0] ?? point(0.5, 0.5),
-    });
-  }
-
-  const boundedCorridorCenter = boundedCorridorDiamondCenter(layout, terminalCenters, bodyCenters);
-  if (boundedCorridorCenter) {
-    const bounded = templateOnlyInstance("bounded-corridor-diamond-0", "diamond-connector", boundedCorridorCenter);
-    instances.push(bounded);
-    segments.push(...diamondSegments(bounded.id, bounded.kind, boundedCorridorCenter, 1 / 32));
-    joins.push({
-      from: `${bounded.id}:west`,
-      to: "body-0:west",
-      orientation: "diagonal-positive",
-      width: 1 / 32,
-      accepted: true,
-      fromPosition: boundedCorridorCenter,
       toPosition: bodyCenters[0] ?? point(0.5, 0.5),
     });
   }
@@ -575,44 +541,11 @@ function terminalLayer(layout: CompletionLayout): number {
   return layers[Math.abs(hashString(layout.id) + layout.terminals.length) % layers.length];
 }
 
-function auxiliaryPleatStripLayer(layout: CompletionLayout): number | undefined {
-  if (layout.terminals.length === 3) return undefined;
-  const layer = terminalLayer(layout);
-  return layer < 0.1875 ? 0.3125 : 0.375;
-}
-
-function cornerLayerCenters(layer: number): CompletionPoint[] {
-  return [
-    point(layer, layer),
-    point(1 - layer, 1 - layer),
-    point(layer, 1 - layer),
-    point(1 - layer, layer),
-  ];
-}
-
 function relayHubCenters(layout: CompletionLayout): CompletionPoint[] {
   if (layout.terminals.length !== 3) return [];
   return layout.axis === "horizontal"
     ? [point(0.5, 0.25), point(0.5, 0.75)]
     : [point(0.25, 0.5), point(0.75, 0.5)];
-}
-
-function boundedCorridorDiamondCenter(
-  layout: CompletionLayout,
-  terminalCenters: Array<{ terminal: CompletionTerminal; center: CompletionPoint }>,
-  bodyCenters: CompletionPoint[],
-): CompletionPoint | undefined {
-  if (layout.terminals.length < 5) return undefined;
-  const body = bodyCenters[0] ?? point(0.5, 0.5);
-  const certifiedAnchors = new Set(["0.375000", "0.625000"]);
-  const candidates = uniquePointsByKey(
-    terminalCenters.map(({ center }) => midpoint(center, body)).filter((center) =>
-      certifiedAnchors.has(center.x.toFixed(6)) &&
-      certifiedAnchors.has(center.y.toFixed(6))
-    ),
-  );
-  if (candidates.length === 0) return undefined;
-  return candidates[Math.abs(hashString(`${layout.id}:bounded-corridor-diamond`)) % candidates.length];
 }
 
 function hashString(value: string): number {
@@ -697,6 +630,35 @@ function diamondSegments(
   }));
 }
 
+function terminalFanSegments(
+  moleculeId: string,
+  moleculeKind: MoleculeKind,
+  center: CompletionPoint,
+  target: CompletionPoint,
+): CompletionSegment[] {
+  const c: Point = [center.x, center.y];
+  const horizontalDirection = center.x <= target.x ? -1 : 1;
+  const verticalDirection = center.y <= target.y ? -1 : 1;
+  const borderX = horizontalDirection < 0 ? 0 : 1;
+  const borderY = verticalDirection < 0 ? 0 : 1;
+  const spokes: Array<{ id: string; p2: Point; direction: Point }> = [
+    { id: "west", p2: [0, center.y], direction: [-1, 0] },
+    { id: "east", p2: [1, center.y], direction: [1, 0] },
+    { id: "south", p2: [center.x, 0], direction: [0, -1] },
+    { id: "north", p2: [center.x, 1], direction: [0, 1] },
+    { id: "corner-ridge", p2: [borderX, borderY], direction: [horizontalDirection, verticalDirection] },
+  ];
+  return spokes.map((spoke): CompletionSegment => ({
+    id: `${moleculeId}:${spoke.id}`,
+    moleculeId,
+    moleculeKind,
+    p1: c,
+    p2: roundPoint(spoke.p2),
+    assignment: roleForDirection(spoke.direction) === "ridge" ? "M" : "V",
+    role: roleForDirection(spoke.direction),
+  }));
+}
+
 function corridorRoute(
   from: CompletionPoint,
   to: CompletionPoint,
@@ -775,18 +737,6 @@ function midpoint(a: CompletionPoint, b: CompletionPoint): CompletionPoint {
 function diamondRadius(center: CompletionPoint): number {
   const margin = Math.min(center.x, center.y, 1 - center.x, 1 - center.y);
   return margin >= 0.1875 ? 0.125 : 0.0625;
-}
-
-function uniquePointsByKey(points: CompletionPoint[]): CompletionPoint[] {
-  const seen = new Set<string>();
-  const result: CompletionPoint[] = [];
-  for (const item of points) {
-    const key = pointKey2(item);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    result.push(item);
-  }
-  return result;
 }
 
 function point(x: number, y: number): CompletionPoint {

@@ -10,7 +10,7 @@ test("completion QA separates strict label readiness from production distributio
   expect(report.strictLabelReady).toBe(true);
   expect(report.productionDistributionReady).toBe(false);
   expect(report.errors).toEqual([]);
-  expect(report.warnings).toContain("restricted-pleat-strip-compiler-not-production-distribution");
+  expect(report.warnings).toContain("restricted-clipped-terminal-fan-compiler-not-production-distribution");
   expect(report.metrics.globalLineGroupRatio).toBeLessThan(0.55);
 });
 

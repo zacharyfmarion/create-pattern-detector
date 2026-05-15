@@ -57,6 +57,9 @@ export function runBPCompletionQA(fold: FOLDFormat): BPCompletionQAReport {
   ) {
     warnings.push("restricted-pleat-strip-compiler-not-production-distribution");
   }
+  if (fold.completion_metadata?.version.endsWith("/v0.6.0")) {
+    warnings.push("restricted-clipped-terminal-fan-compiler-not-production-distribution");
+  }
 
   return {
     strictLabelReady: errors.length === 0,
