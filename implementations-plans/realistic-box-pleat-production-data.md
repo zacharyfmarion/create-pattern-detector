@@ -6,6 +6,8 @@ The current synthetic BP generator is not production-grade. It creates strict, s
 
 This plan replaces the fake BP generator with a BP Studio-centered production data pipeline. BP Studio is MIT-licensed, actively maintained, and already implements the design abstractions we need: tree structures, flap/gadget layout, GOPS/Kamiya-style stretch math, layout optimization, and CP/FOLD export. We should use that code as the primary geometry teacher and keep Rabbit Ear strict validation as the final training-label gate.
 
+Important correction: the compiler should not require every intermediate molecule addition to be flat-foldable in isolation. Real BP design is region-first: designers establish flap/body/river regions, fill corridors with alternating pleat strips, then resolve boundaries, turns, stretches, and assignments as a whole. Intermediate candidate graphs may be incomplete or locally invalid while they are being completed. The production invariant is stricter and simpler: only final completed FOLDs that pass local Kawasaki/Maekawa, Rabbit Ear global solving, and folded-coordinate QA can enter training.
+
 The work is intentionally decomposed into parallel streams so multiple agents can work independently with narrow ownership.
 
 ## Grounding And Source Audit
@@ -133,18 +135,16 @@ Use a staged hybrid:
    - run BP Studio's optimizer and stretch/GOPS metadata paths;
    - export scaffold CP/FOLD lines for debug/reference overlays only;
    - emit internal metadata for optimized flaps, tree edges, rivers, stretches, devices, gadgets, contours, and pattern choices.
-3. Regularize the BP Studio tree/layout proposal into the restricted compiler contract:
+3. Regularize the BP Studio tree/layout proposal into a region contract:
    - one horizontal or vertical uniaxial spine in V1;
-   - integer or half-grid flap/body/river regions;
-   - explicit corridors, ports, parity, and rejection reasons.
-4. Compile final training labels with our own certified molecule/fold-program compiler:
-   - flap contours;
-   - river and hinge corridors;
-   - corner fans;
-   - diagonal staircases;
-   - diamond/chevron connectors;
-   - GOPS/Elias-like stretch gadgets;
-   - body panels.
+   - integer or half-grid flap/body/river polygons;
+   - rectangular and staircase corridor regions;
+   - explicit strip directions, widths, parity, boundary ports, and rejection reasons.
+4. Compile final training labels with a region-first pleat-strip compiler:
+   - fill river/body corridors with long alternating M/V parallel pleat strips;
+   - terminate strips on contour boundaries, diagonal stair walls, fan boundaries, or stretch gadgets;
+   - add flap contours, body panels, nested fans, diagonal staircase boundaries, diamond/chevron connectors, and GOPS/Elias-like stretches as boundary completion elements;
+   - solve assignments and parity at the region/composition level, not one tiny molecule at a time.
 5. Normalize the compiler output into this repo's canonical FOLD graph.
 6. Run Rabbit Ear strict validation:
    - local Kawasaki/Maekawa;
@@ -166,6 +166,12 @@ This gives us BP Studio's tree-aware layout realism first, with strict labels ge
 - `tools/synthetic-generator/`
   - Diagnostic family: `bp-studio-realistic`.
   - Production candidate family: `bp-studio-completed`.
+  - Region-first completion module for BP Studio layouts:
+    - macro region extraction;
+    - pleat-strip field generation;
+    - boundary completion;
+    - candidate search;
+    - final strict validation.
   - New recipe: `recipes/synthetic/bp_studio_realistic_v1.yaml`.
   - New recipe: `recipes/synthetic/bp_completed_uniaxial_v1.yaml`.
   - Removal or demotion of current fake `realistic-box-pleat` from production recipes.
@@ -213,8 +219,8 @@ These are designed for sub-agents with disjoint write scopes.
 | B. Reference Corpus And Metrics | `data/references/`, `scripts/data/`, `src/data/synthetic/` | Reference manifest, metrics, contact sheets | A, C, D |
 | C. Tree And Layout Sampler | `tools/synthetic-generator/src/bp-studio-tree-*` | Archetype grammars, layout specs, optimizer requests | A, B, E |
 | D. Strict Validation And QA | `tools/synthetic-generator/src/validate.ts`, folded preview and QA modules | Validation gates, visual warnings, failure taxonomy | A, B, C |
-| H. Completion Contracts | `tools/synthetic-generator/src/bp-completion-contracts.ts` | `CompletionLayout`, `MoleculeTemplate`, `Port`, `PortJoin`, `CompletionResult` | A, C, D |
-| I. Certified Molecule Compiler | `tools/synthetic-generator/src/bp-completion.ts`, tests | Molecule/fold-program templates, fixture families, composition rules | H after contracts |
+| H. Completion Contracts | `tools/synthetic-generator/src/bp-completion-contracts.ts` | `CompletionLayout`, `PleatStripRegion`, `BoundaryPort`, `CompletionCandidate`, `CompletionResult` | A, C, D |
+| I. Region/Strip Completion Compiler | `tools/synthetic-generator/src/bp-completion.ts`, tests | Region filling, alternating pleat fields, boundary completion, final assignment search | H after contracts |
 | E. Rendering And Dataset Integration | `src/data/synthetic/`, `scripts/data/` | Manifest schema, renderer styles, loader smoke | A, C, D |
 | F. Human QA Tooling | `scripts/data/`, optional small web/static viewer | Review workflow, accept/reject labels | B, E |
 | G. Training Curriculum | `recipes/synthetic/`, training configs | Small/medium/dense/superdense schedules | B, C, D, E |
@@ -362,47 +368,84 @@ Exit criteria:
 - Layouts have non-overlap, reasonable margins, nontrivial flap clusters, and varied sheet utilization.
 - Specs are deterministic by seed.
 
-## Phase 4: Restricted Completion Compiler
+## Phase 4: Region-First Pleat-Strip Completion Compiler
 
-Goal: turn sampled tree/layout specs and BP Studio optimizer proposals into compiler-generated strict CP labels.
+Goal: turn sampled tree/layout specs and BP Studio optimizer proposals into full candidate CPs by filling macro regions with BP-style pleat strips, then completing boundaries and validating the final graph. This phase explicitly allows intermediate candidate states to be incomplete or not flat-foldable; only final accepted FOLDs must be strict.
+
+Key design change:
+
+- Stop compiling isolated local decorations into a mostly global hub graph.
+- Start compiling from **regions**:
+  - body panels;
+  - flap terminal contours;
+  - river/corridor rectangles;
+  - diagonal staircase corridors;
+  - stretch/gadget footprints;
+  - empty-space masks.
+- Fill corridor regions with long alternating M/V parallel pleat lines like real BP CPs.
+- Resolve the ends of those pleat strips with diagonal stair walls, fan boundaries, flap/body contours, or stretch gadgets.
+
+Validity tiers:
+
+- `layout-valid`: BP Studio/tree layout can be regularized into legal regions.
+- `candidate-complete`: every required terminal/body/river region is represented and every pleat strip has a boundary.
+- `locally-valid`: arranged graph passes Kawasaki/Maekawa.
+- `globally-valid`: Rabbit Ear solver and folded coordinates pass.
+- `training-eligible`: globally-valid plus visual/distribution QA gates.
+
+Intermediate `layout-valid` and `candidate-complete` artifacts may fail local/global validation. They should be retained with structured diagnostics for search and tuning, not forced to pass after every small edit.
 
 Parallel tasks:
 
-- Agent H1: maintain the shared compiler contracts:
-  - `CompletionLayout`;
-  - `MoleculeTemplate`;
-  - `Port`;
-  - `PortJoin`;
+- Agent H1: define region-first contracts:
+  - `RegionLayout`;
+  - `FlapRegion`;
+  - `BodyRegion`;
+  - `PleatStripRegion`;
+  - `StairBoundary`;
+  - `StretchFootprint`;
+  - `BoundaryPort`;
+  - `CompletionCandidate`;
   - `CompletionResult`;
   - label provenance policy.
-- Agent I1: implement certified molecule templates:
-  - flap contours;
-  - river corridors;
-  - hinge corridors;
-  - corner fans;
-  - diagonal staircases;
-  - diamond/chevron connectors;
-  - GOPS/Elias-like stretch gadgets;
-  - body panels.
-- Agent I2: implement typed port composition:
-  - reject incompatible orientation/width/parity joins;
-  - fail completion when required ports cannot be joined;
-  - preserve port checks and rejected-candidate counts in metadata.
-- Agent C5: regularize BP Studio optimizer output:
+- Agent C5: regularize BP Studio optimizer output into macro regions:
   - map optimized adapter IDs back to sampler node IDs;
-  - snap flaps/body/rivers to the compiler grid;
+  - identify terminal flap polygons, body panels, rivers, and empty space;
+  - infer corridor rectangles and diagonal staircase corridors from tree edges;
+  - snap regions to integer/half-grid coordinates;
   - reject layouts that cannot fit the restricted uniaxial model.
+- Agent I1: implement pleat-strip field generation:
+  - choose strip orientation from corridor direction;
+  - generate alternating M/V parallel lines across each corridor;
+  - support configurable pitch, phase, parity, and strip count;
+  - clip strips to corridor polygons;
+  - mark strip source metadata by region id and tree edge id.
+- Agent I2: implement boundary completion:
+  - diagonal staircase walls at corridor turns and offsets;
+  - terminal fan/comb endings at flap tips;
+  - body panel boundaries where several corridors meet;
+  - stretch/gadget footprints for overlapping regions;
+  - contour-preserving empty-space boundaries.
+- Agent I3: implement candidate search over phase/parity/orientation:
+  - try several strip pitches and phases per corridor;
+  - try boundary gadget variants where BP Studio reports GOPS/stretch metadata;
+  - backtrack at region joins when local validation fails;
+  - keep rejected candidates with reason codes.
+- Agent D2: implement final arrangement and validation hooks:
+  - split all intersections once after the full candidate is emitted;
+  - solve or verify M/V assignments after arrangement;
+  - report bad vertices by region, strip, boundary, and BP Studio scaffold source.
 - Agent E1: emit canonical compiler labels:
-  - final M/V/B assignments come from templates/fold programs only;
+  - final M/V/B assignments come from the region compiler and final assignment search only;
   - raw BP Studio CP colors remain debug/reference metadata only;
   - compiler edge source is separate from BP Studio scaffold source.
 
 Exit criteria:
 
-- Fixture families compile to strict FOLD or fail with structured reasons.
-- Port joins cannot be silently ignored.
+- Fixture families can produce both rejected intermediate candidates and at least one strict final FOLD with structured provenance.
+- Contact sheets show long alternating parallel pleat bands, stair boundaries, flap/body contours, and empty spaces.
 - Raw BP Studio exports are never marked training eligible.
-- Contact sheets show completed CP structures, not BP Studio scaffolds.
+- Final accepted rows pass strict local/global validation and folded preview QA.
 
 ## Phase 5: Strict Validation, QA, And Acceptance
 
@@ -424,11 +467,13 @@ Parallel tasks:
   - normalize coordinates to `[0, 1]`;
   - preserve BP Studio scaffold metadata separately.
 - Agent D3: production rejection policy:
-  - reject incompatible ports;
+  - reject final outputs with unresolved strip boundaries;
+  - reject final outputs with incompatible region joins;
   - reject scaffold-only outputs;
   - reject odd active-degree interior vertices;
   - reject uniform diagonal wallpaper/full ruled grids;
-  - never use greedy unassignment/deletion repair as production.
+  - allow candidate search and region-level re-completion before final validation;
+  - never use greedy unassignment/deletion repair as production labels.
 - Agent D4: solver performance:
   - timeout handling;
   - per-sample solver timing;
@@ -439,6 +484,7 @@ Exit criteria:
 
 - Accepted samples all pass strict validation.
 - Rejected samples retain structured failure metadata.
+- Intermediate candidates may fail validation, but no intermediate candidate is training eligible.
 - No validation downgrade exists in the production recipe.
 - Every accepted row has `label_policy.trainingEligible=true` and `labelSource=compiler`.
 - Folded preview contact sheets are generated for every smoke sample.
@@ -539,6 +585,11 @@ These tickets are intentionally small enough to run in parallel.
 11. `bp-render-manifest`: extend manifest/rendering for BP Studio metadata.
 12. `bp-production-recipes`: add smoke and production recipes with curriculum buckets.
 13. `bp-training-smoke`: run a small training/eval smoke and report model-visible failure modes.
+14. `bp-region-contracts`: define `PleatStripRegion`, `StairBoundary`, `BoundaryPort`, and candidate validity tiers.
+15. `bp-region-regularizer`: convert BP Studio optimized flaps/rivers/bodies into corridor and body regions.
+16. `bp-pleat-strip-field`: generate alternating M/V parallel strip fields clipped to corridor polygons.
+17. `bp-boundary-completion`: implement staircase/fan/body/stretch boundaries that terminate strip fields.
+18. `bp-candidate-search`: search strip pitch, phase, parity, and boundary variants until final strict validation passes or produces structured rejection.
 
 ## Risks And Mitigations
 
@@ -574,6 +625,7 @@ Production V1 is done when:
 - At least 1,000 generated samples pass strict local/global validation.
 - At least 70% of a 100-sample reviewed strict smoke is marked in-distribution.
 - Contact sheets show authentic BP structures: flap contours, long stair diagonals, nested fans, river corridors, stretch gadgets, body panels, and appendage clusters.
+- Contact sheets show long alternating M/V parallel pleat bands bounded by stair/fan/body contours, not just isolated hub-and-spoke diamonds.
 - Dataset rows load through `SyntheticManifestDataset`.
 - Folded previews are finite for all smoke samples.
 - Training on the dataset improves evaluation on BP Studio-like held-out references compared with the current fake dense/V3 generators.
@@ -585,7 +637,8 @@ Status as of 2026-05-15:
 - The strict compiler has a `v0.7` clipped-terminal-fan baseline. Terminal fans keep BP-like orthogonal pleat axes, nested flap contour diamonds, and the body corridor diagonal, but no longer emit all eight sheet-wide rays.
 - The previous auxiliary pleat-strip stars and bounded corridor diamonds were removed from active generation because they were not independently certified. They only passed when old global rays happened to pass through them, so they were scaffold-dependent rather than true local molecules.
 - A 32-sample BP Studio-backed smoke passes strict generation, rendering, folded preview, and `SyntheticManifestDataset` loading, but the contact sheet remains too simple and repetitive for production. Crease counts are now in the 136-160 range for the current smoke.
-- Next implementation work should certify new bounded density molecules in isolation: contour-completing terminal wrappers, bounded staircase cells, and bounded corridor/diamond connectors with explicit port joins. These should not be added to sampled generation until fixture, pairwise, and smoke tests pass without relying on sheet-wide rays.
+- The next implementation direction is no longer "add one independently strict molecule at a time." That constraint is too restrictive and keeps producing toy hub graphs. The next direction is a region-first pleat-strip compiler: infer corridor/body/flap regions from BP Studio, fill corridors with alternating M/V parallel bands, complete their boundaries, then run final strict validation.
+- Intermediate region candidates may be locally/global invalid while under construction. They are useful search states and should be logged, but only final strict solver-passing FOLDs can be training labels.
 
 ## Non-Goals
 
