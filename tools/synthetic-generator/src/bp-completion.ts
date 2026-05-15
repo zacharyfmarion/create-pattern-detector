@@ -39,7 +39,7 @@ export interface BoxPleatCompletionOptions {
   maxFoldLines?: number;
 }
 
-const ENGINE_VERSION = "strict-bp-completion/v0.6.0";
+const ENGINE_VERSION = "strict-bp-completion/v0.7.0";
 const DEFAULT_GRID_SIZE = 128;
 const PATCH_LIBRARY = moleculePatchLibrary();
 
@@ -318,6 +318,8 @@ function instantiateMolecules(layout: CompletionLayout): {
     segments.push(...terminalFanSegments(fan.id, fan.kind, terminal.center, target));
     segments.push(...diamondSegments(`flap-contour-${terminal.terminal.id}`, "flap-contour", terminal.center, 1 / 16));
     instances.push(templateOnlyInstance(`flap-contour-${terminal.terminal.id}`, "flap-contour", terminal.center));
+    segments.push(...diamondSegments(`flap-inner-contour-${terminal.terminal.id}`, "flap-contour", terminal.center, 1 / 32));
+    instances.push(templateOnlyInstance(`flap-inner-contour-${terminal.terminal.id}`, "flap-contour", terminal.center));
 
     const route = corridorRoute(terminal.center, target, layout.gridSize);
     for (const [routeIndex, routeCenter] of route.turns.entries()) {

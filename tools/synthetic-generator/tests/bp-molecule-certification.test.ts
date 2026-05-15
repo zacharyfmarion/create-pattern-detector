@@ -49,13 +49,13 @@ test("compiled molecules have no active dangling endpoints", () => {
   expect(countInteriorDanglingActiveEndpoints(completion.fold!)).toBe(0);
 });
 
-test("fixtures use clipped terminal fans without uncertified pleat-strip cells", () => {
+test("fixtures use clipped terminal fans with nested terminal contours", () => {
   for (const fixture of ["two-flap-stretch", "five-flap-uniaxial", "insect-lite"] as const) {
     const completion = completeBoxPleatLayout(fixtureCompletionLayout(fixture));
     expect(completion.ok).toBe(true);
     expect(completion.fold?.molecule_metadata?.molecules["diagonal-staircase"] ?? 0).toBe(0);
-    expect(completion.fold?.molecule_metadata?.molecules["flap-contour"]).toBeGreaterThanOrEqual(2);
-    expect(completion.fold?.edges_assignment.filter((assignment) => assignment === "M" || assignment === "V").length).toBeGreaterThanOrEqual(80);
+    expect(completion.fold?.molecule_metadata?.molecules["flap-contour"]).toBeGreaterThanOrEqual(4);
+    expect(completion.fold?.edges_assignment.filter((assignment) => assignment === "M" || assignment === "V").length).toBeGreaterThanOrEqual(110);
   }
 });
 

@@ -582,9 +582,9 @@ Production V1 is done when:
 
 Status as of 2026-05-15:
 
-- The strict compiler has a `v0.6` clipped-terminal-fan baseline. Terminal fans keep BP-like orthogonal pleat axes, flap contour diamonds, and the body corridor diagonal, but no longer emit all eight sheet-wide rays.
+- The strict compiler has a `v0.7` clipped-terminal-fan baseline. Terminal fans keep BP-like orthogonal pleat axes, nested flap contour diamonds, and the body corridor diagonal, but no longer emit all eight sheet-wide rays.
 - The previous auxiliary pleat-strip stars and bounded corridor diamonds were removed from active generation because they were not independently certified. They only passed when old global rays happened to pass through them, so they were scaffold-dependent rather than true local molecules.
-- A 32-sample BP Studio-backed smoke passes strict generation, rendering, folded preview, and `SyntheticManifestDataset` loading, but the contact sheet remains too simple and repetitive for production.
+- A 32-sample BP Studio-backed smoke passes strict generation, rendering, folded preview, and `SyntheticManifestDataset` loading, but the contact sheet remains too simple and repetitive for production. Crease counts are now in the 136-160 range for the current smoke.
 - Next implementation work should certify new bounded density molecules in isolation: contour-completing terminal wrappers, bounded staircase cells, and bounded corridor/diamond connectors with explicit port joins. These should not be added to sampled generation until fixture, pairwise, and smoke tests pass without relying on sheet-wide rays.
 
 ## Non-Goals
