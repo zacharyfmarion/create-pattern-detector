@@ -31,6 +31,7 @@ interface Options {
   bucket: BPStudioComplexityBucket;
   fixture: RegionFixtureName;
   optimizerLayout: "view" | "random";
+  optimizerUseBH: boolean;
   out: string;
   seed: number;
   size: number;
@@ -62,6 +63,7 @@ async function main(): Promise<void> {
     adapterSpec.optimizeLayout = true;
     adapterSpec.optimizerLayout = options.optimizerLayout;
     adapterSpec.optimizerSeed = options.seed;
+    adapterSpec.optimizerUseBH = options.optimizerUseBH;
     const { metadata: adapterMetadata } = runBPStudioAdapter(adapterSpec);
     const completionLayout = regularizeBPStudioLayout(spec, {
       adapterSpec,
@@ -126,6 +128,7 @@ function parseArgs(args: string[]): Options {
     bucket: "small",
     fixture: "insect-lite",
     optimizerLayout: "view",
+    optimizerUseBH: true,
     out: "/tmp/bp-region-examples",
     seed: 1,
     size: 720,
@@ -146,6 +149,8 @@ function parseArgs(args: string[]): Options {
       options.bucket = parseBucket(args[++index]);
     } else if (arg === "--optimizer-layout") {
       options.optimizerLayout = parseOptimizerLayout(args[++index]);
+    } else if (arg === "--no-optimizer-use-bh") {
+      options.optimizerUseBH = false;
     } else if (arg === "--fixture") {
       options.fixture = parseFixture(args[++index]);
     } else if (arg === "--out") {
@@ -198,29 +203,41 @@ function requiredValue(value: string | undefined, flag: string): string {
 function simpleAnimalSpec(seed: number): BPStudioAdapterSpec {
   const nodes: BPStudioAdapterSpec["tree"]["nodes"] = [
     { id: "root", kind: "root", label: "root" },
-    { id: "body", kind: "body", label: "body", width: 8, height: 4, tags: ["torso"] },
-    { id: "head", kind: "flap", label: "head", width: 4, height: 4, tags: ["terminal"] },
-    { id: "tail", kind: "flap", label: "tail", width: 3, height: 3, tags: ["terminal"] },
-    { id: "front-left-leg", kind: "flap", label: "front left leg", width: 3, height: 5, tags: ["terminal", "leg"] },
-    { id: "front-right-leg", kind: "flap", label: "front right leg", width: 3, height: 5, tags: ["terminal", "leg"] },
-    { id: "rear-left-leg", kind: "flap", label: "rear left leg", width: 3, height: 5, tags: ["terminal", "leg"] },
-    { id: "rear-right-leg", kind: "flap", label: "rear right leg", width: 3, height: 5, tags: ["terminal", "leg"] },
+    { id: "front-hub", kind: "body", label: "front hub", tags: ["torso", "hub"] },
+    { id: "rear-hub", kind: "body", label: "rear hub", tags: ["torso", "hub"] },
+    { id: "head", kind: "flap", label: "head", tags: ["terminal"] },
+    { id: "tail", kind: "flap", label: "tail", tags: ["terminal"] },
+    { id: "front-left-leg", kind: "flap", label: "front left leg", tags: ["terminal", "leg"] },
+    { id: "front-right-leg", kind: "flap", label: "front right leg", tags: ["terminal", "leg"] },
+    { id: "rear-left-leg", kind: "flap", label: "rear left leg", tags: ["terminal", "leg"] },
+    { id: "rear-right-leg", kind: "flap", label: "rear right leg", tags: ["terminal", "leg"] },
   ];
-  const appendages = [
-    ["body-head", "head", 5, "horizontal"],
-    ["body-tail", "tail", 5, "horizontal"],
-    ["body-front-left-leg", "front-left-leg", 4, "vertical"],
-    ["body-front-right-leg", "front-right-leg", 4, "vertical"],
-    ["body-rear-left-leg", "rear-left-leg", 4, "vertical"],
-    ["body-rear-right-leg", "rear-right-leg", 4, "vertical"],
+  const treeEdges: BPStudioAdapterSpec["tree"]["edges"] = [
+    { id: "root-front-hub", from: "root", to: "front-hub", length: 0, role: "body", width: 1 },
+    { id: "front-head", from: "front-hub", to: "head", length: 1, role: "appendage", width: 1 },
+    { id: "front-left-leg", from: "front-hub", to: "front-left-leg", length: 1, role: "appendage", width: 1 },
+    { id: "front-right-leg", from: "front-hub", to: "front-right-leg", length: 1, role: "appendage", width: 1 },
+    { id: "front-rear-river", from: "front-hub", to: "rear-hub", length: 2, role: "river", width: 1 },
+    { id: "rear-left-leg", from: "rear-hub", to: "rear-left-leg", length: 1, role: "appendage", width: 1 },
+    { id: "rear-right-leg", from: "rear-hub", to: "rear-right-leg", length: 1, role: "appendage", width: 1 },
+    { id: "rear-tail", from: "rear-hub", to: "tail", length: 3, role: "appendage", width: 1 },
+  ];
+  const riverHints = [
+    ["front-head", "front-hub", "head", "vertical"],
+    ["front-left-leg", "front-hub", "front-left-leg", "horizontal"],
+    ["front-right-leg", "front-hub", "front-right-leg", "horizontal"],
+    ["front-rear-river", "front-hub", "rear-hub", "vertical"],
+    ["rear-left-leg", "rear-hub", "rear-left-leg", "horizontal"],
+    ["rear-right-leg", "rear-hub", "rear-right-leg", "horizontal"],
+    ["rear-tail", "rear-hub", "tail", "vertical"],
   ] as const;
   const flapPlacements: BPStudioAdapterSpec["layout"]["flaps"] = [
-    { nodeId: "head", label: "head", class: "terminal", terminal: { x: 26, y: 16 }, side: "right", width: 4, height: 4, elevation: 0, terminalRadius: 8, priority: 1 },
-    { nodeId: "tail", label: "tail", class: "terminal", terminal: { x: 6, y: 16 }, side: "left", width: 3, height: 3, elevation: 0, terminalRadius: 8, priority: 2 },
-    { nodeId: "front-left-leg", label: "front left leg", class: "terminal", terminal: { x: 12, y: 25 }, side: "top", width: 3, height: 5, elevation: 0, terminalRadius: 7, priority: 3, mirroredWith: "front-right-leg" },
-    { nodeId: "front-right-leg", label: "front right leg", class: "terminal", terminal: { x: 20, y: 25 }, side: "top", width: 3, height: 5, elevation: 0, terminalRadius: 7, priority: 4, mirroredWith: "front-left-leg" },
-    { nodeId: "rear-left-leg", label: "rear left leg", class: "terminal", terminal: { x: 12, y: 7 }, side: "bottom", width: 3, height: 5, elevation: 0, terminalRadius: 7, priority: 5, mirroredWith: "rear-right-leg" },
-    { nodeId: "rear-right-leg", label: "rear right leg", class: "terminal", terminal: { x: 20, y: 7 }, side: "bottom", width: 3, height: 5, elevation: 0, terminalRadius: 7, priority: 6, mirroredWith: "rear-left-leg" },
+    { nodeId: "head", label: "head", class: "terminal", terminal: { x: 16, y: 25 }, side: "top", width: 0, height: 0, elevation: 0, terminalRadius: 1, priority: 1 },
+    { nodeId: "front-left-leg", label: "front left leg", class: "terminal", terminal: { x: 12, y: 21 }, side: "left", width: 0, height: 0, elevation: 0, terminalRadius: 1, priority: 2, mirroredWith: "front-right-leg" },
+    { nodeId: "front-right-leg", label: "front right leg", class: "terminal", terminal: { x: 20, y: 21 }, side: "right", width: 0, height: 0, elevation: 0, terminalRadius: 1, priority: 3, mirroredWith: "front-left-leg" },
+    { nodeId: "rear-left-leg", label: "rear left leg", class: "terminal", terminal: { x: 12, y: 12 }, side: "left", width: 0, height: 0, elevation: 0, terminalRadius: 1, priority: 4, mirroredWith: "rear-right-leg" },
+    { nodeId: "rear-right-leg", label: "rear right leg", class: "terminal", terminal: { x: 20, y: 12 }, side: "right", width: 0, height: 0, elevation: 0, terminalRadius: 1, priority: 5, mirroredWith: "rear-left-leg" },
+    { nodeId: "tail", label: "tail", class: "terminal", terminal: { x: 16, y: 5 }, side: "bottom", width: 0, height: 0, elevation: 0, terminalRadius: 3, priority: 6 },
   ];
   return {
     schemaVersion: BP_STUDIO_SPEC_SCHEMA_VERSION,
@@ -230,7 +247,7 @@ function simpleAnimalSpec(seed: number): BPStudioAdapterSpec {
     expectedComplexity: {
       bucket: "small",
       targetFlaps: [6, 6],
-      targetTreeEdges: [7, 7],
+      targetTreeEdges: [8, 8],
       targetCreases: [80, 220],
       expectedGridSize: [16, 32],
     },
@@ -245,28 +262,19 @@ function simpleAnimalSpec(seed: number): BPStudioAdapterSpec {
     tree: {
       rootId: "root",
       nodes,
-      edges: [
-        { id: "root-body", from: "root", to: "body", length: 0, role: "body", width: 4 },
-        ...appendages.map(([id, to, length]) => ({
-          id,
-          from: "body",
-          to,
-          length,
-          role: "appendage" as const,
-          width: 2,
-        })),
-      ],
+      edges: treeEdges,
     },
     layout: {
       symmetry: "bilateral-x",
       bodies: [
-        { nodeId: "body", label: "body", center: { x: 16, y: 16 }, width: 8, height: 4, elevation: 0, tags: ["torso"] },
+        { nodeId: "front-hub", label: "front hub", center: { x: 16, y: 21 }, width: 2, height: 2, elevation: 0, tags: ["torso", "hub"] },
+        { nodeId: "rear-hub", label: "rear hub", center: { x: 16, y: 12 }, width: 2, height: 2, elevation: 0, tags: ["torso", "hub"] },
       ],
       flaps: flapPlacements,
-      rivers: appendages.map(([id, , , preferredAxis]) => ({
+      rivers: riverHints.map(([id, from, to, preferredAxis]) => ({
         edgeId: id,
-        from: "body",
-        to: id.replace("body-", ""),
+        from,
+        to,
         width: 2,
         preferredAxis,
         bend: preferredAxis === "horizontal" ? "direct" : "dogleg",
@@ -343,7 +351,7 @@ function threePanelSvg(
       x: gutter * 2 + panelSize,
       title: "2. BP Studio Optimized Packing",
       subtitle: adapterMetadata.layout?.optimized
-        ? `${adapterMetadata.spec?.optimizerLayout ?? "unknown"} optimizer output, sheet ${formatSheetSize(chosenLayout(adapterMetadata)?.sheet)}`
+        ? `${adapterMetadata.spec?.optimizerLayout ?? "unknown"} optimizer${adapterMetadata.spec?.optimizerUseBH ? " + variations" : ""}, sheet ${formatSheetSize(chosenLayout(adapterMetadata)?.sheet)}`
         : "adapter did not report optimized layout",
       body: packingPanel(spec, adapterMetadata, panelSize),
     },
@@ -364,14 +372,14 @@ function threePanelSvg(
       `<g transform="translate(0,${titleHeight})">${panel.body}</g>`,
       `</g>`,
     ].join("\n")),
-    `<text x="${gutter}" y="${height - gutter * 0.85}" font-family="Inter, Arial, sans-serif" font-size="14" fill="#475569">Panel 3 overlays BP Studio's optimized flap squares/circles with our region compiler scaffold and candidate crease content. Fills/dashed outlines are debug layers, not final training labels.</text>`,
+    `<text x="${gutter}" y="${height - gutter * 0.85}" font-family="Inter, Arial, sans-serif" font-size="14" fill="#475569">Panel 3 overlays BP Studio's optimized flap targets and tree-length circles with our region compiler scaffold and candidate crease content. Fills/dashed outlines are debug layers, not final training labels.</text>`,
     `</svg>`,
   ].join("\n");
 }
 
 function sourceTreePanel(spec: BPStudioAdapterSpec, size: number): string {
   const graph = treeLayout(spec, size);
-  const edgeItems = spec.tree.edges.map((edge) => {
+  const edgeItems = spec.tree.edges.filter((edge) => edge.from !== spec.tree.rootId).map((edge) => {
     const a = graph.get(edge.from);
     const b = graph.get(edge.to);
     if (!a || !b) return "";
@@ -384,11 +392,12 @@ function sourceTreePanel(spec: BPStudioAdapterSpec, size: number): string {
       `</g>`,
     ].join("\n");
   });
-  const nodeItems = spec.tree.nodes.map((node) => {
+  const nodeItems = spec.tree.nodes.filter((node) => node.id !== spec.tree.rootId).map((node) => {
     const point = graph.get(node.id);
     if (!point) return "";
-    const color = node.kind === "flap" ? "#4ade80" : node.kind === "body" ? "#93c5fd" : "#facc15";
-    const stroke = node.kind === "flap" ? "#16a34a" : node.kind === "body" ? "#2563eb" : "#ca8a04";
+    const isHub = node.kind === "body" || node.kind === "hub";
+    const color = node.kind === "flap" ? "#4ade80" : isHub ? "#93c5fd" : "#facc15";
+    const stroke = node.kind === "flap" ? "#16a34a" : isHub ? "#2563eb" : "#ca8a04";
     const radius = node.kind === "flap" ? 11 : 14;
     return [
       `<circle cx="${point.x}" cy="${point.y}" r="${radius}" fill="${color}" fill-opacity="0.85" stroke="${stroke}" stroke-width="2"/>`,
@@ -406,18 +415,20 @@ function packingPanel(spec: BPStudioAdapterSpec, adapterMetadata: AdapterMetadat
   const layout = chosenLayout(adapterMetadata) ?? adapterMetadata.inputLayout;
   const sheet = layout?.sheet ?? { width: spec.sheet.width, height: spec.sheet.height };
   const toPanel = sheetProjector(sheet.width, sheet.height, size);
+  const scale = sheetScale(sheet.width, sheet.height, size);
+  const terminalLengths = terminalLengthByAdapterId(spec);
   const edges = packedTreeOverlay(spec, layout, toPanel);
   const nodes = (layout?.nodes ?? [])
     .filter((node) => !node.isLeaf)
     .map((node) => adapterNodeBoundsMark(node, toPanel, String(node.id)));
-  const flaps = (layout?.flaps ?? []).map((flap) => adapterFlapMark(flap, toPanel, "#4ade80", "#16a34a", true));
+  const flaps = (layout?.flaps ?? []).map((flap) => adapterFlapMark(flap, toPanel, scale, terminalLengths.get(flap.id), "#4ade80", "#16a34a", true));
   return panelFrame(size, [
     sheetGrid(size, 16),
     ...edges,
     ...nodes,
     ...flaps,
     packingLegend(size),
-  ]);
+  ], true, "bp-packing-clip");
 }
 
 function candidateOverlayPanel(
@@ -429,10 +440,12 @@ function candidateOverlayPanel(
   const layout = chosenLayout(adapterMetadata) ?? adapterMetadata.inputLayout;
   const sheet = layout?.sheet ?? { width: spec.sheet.width, height: spec.sheet.height };
   const toPanel = sheetProjector(sheet.width, sheet.height, size);
+  const scale = sheetScale(sheet.width, sheet.height, size);
+  const terminalLengths = terminalLengthByAdapterId(spec);
   const optimizedNodes = (layout?.nodes ?? [])
     .filter((node) => !node.isLeaf)
     .map((node) => adapterNodeBoundsMark(node, toPanel, String(node.id)));
-  const optimizedFlaps = (layout?.flaps ?? []).map((flap) => adapterFlapMark(flap, toPanel, "#22c55e", "#15803d", false));
+  const optimizedFlaps = (layout?.flaps ?? []).map((flap) => adapterFlapMark(flap, toPanel, scale, terminalLengths.get(flap.id), "#22c55e", "#15803d", false));
   const candidateSvg = regionCandidateToSvg(candidate, size)
     .replace(/<svg[^>]*>/, `<g>`)
     .replace(/<\/svg>\s*$/, `</g>`);
@@ -440,13 +453,16 @@ function candidateOverlayPanel(
     candidateSvg,
     `<g opacity="0.56">${optimizedNodes.join("\n")}</g>`,
     `<g opacity="0.72">${optimizedFlaps.join("\n")}</g>`,
-  ], false);
+  ], false, "bp-candidate-overlay-clip");
 }
 
-function panelFrame(size: number, body: string[], includeBorder = true): string {
+function panelFrame(size: number, body: string[], includeBorder = true, clipId?: string): string {
   return [
+    clipId ? `<defs><clipPath id="${clipId}"><rect x="0" y="0" width="${size}" height="${size}"/></clipPath></defs>` : "",
     `<rect x="0" y="0" width="${size}" height="${size}" fill="white" stroke="#cbd5e1" stroke-width="1.2"/>`,
+    clipId ? `<g clip-path="url(#${clipId})">` : "",
     ...body,
+    clipId ? `</g>` : "",
     includeBorder ? `<rect x="0" y="0" width="${size}" height="${size}" fill="none" stroke="#0f172a" stroke-width="2"/>` : "",
   ].join("\n");
 }
@@ -515,6 +531,18 @@ function adapterNodeIds(spec: BPStudioAdapterSpec): Map<string, number> {
   );
 }
 
+function terminalLengthByAdapterId(spec: BPStudioAdapterSpec): Map<number, number> {
+  const adapterIds = adapterNodeIds(spec);
+  const incomingLength = new Map(spec.tree.edges.map((edge) => [edge.to, edge.length]));
+  const result = new Map<number, number>();
+  for (const flap of spec.layout.flaps) {
+    const adapterId = adapterIds.get(flap.nodeId);
+    if (adapterId === undefined) continue;
+    result.set(adapterId, incomingLength.get(flap.nodeId) ?? flap.terminalRadius ?? 0);
+  }
+  return result;
+}
+
 function chosenLayout(adapterMetadata: AdapterMetadata): NonNullable<AdapterMetadata["layout"]> | NonNullable<AdapterMetadata["optimizedLayout"]> | undefined {
   return adapterMetadata.optimizedLayout ?? adapterMetadata.layout;
 }
@@ -538,6 +566,8 @@ function sheetGrid(size: number, divisions: number): string {
 }
 
 function treeLayout(spec: BPStudioAdapterSpec, size: number): Map<string, { x: number; y: number }> {
+  if (spec.sampler.grammar === "debug-simple-animal") return simpleAnimalTreeLayout(size);
+
   const children = new Map<string, string[]>();
   const parent = new Map<string, string>();
   for (const edge of spec.tree.edges) {
@@ -580,15 +610,37 @@ function treeLayout(spec: BPStudioAdapterSpec, size: number): Map<string, { x: n
   return result;
 }
 
+function simpleAnimalTreeLayout(size: number): Map<string, { x: number; y: number }> {
+  const cx = size * 0.5;
+  const topHubY = size * 0.32;
+  const rearHubY = size * 0.56;
+  const sideDx = size * 0.115;
+  return new Map([
+    ["root", { x: cx, y: topHubY }],
+    ["front-hub", { x: cx, y: topHubY }],
+    ["head", { x: cx, y: topHubY - size * 0.12 }],
+    ["front-left-leg", { x: cx - sideDx, y: topHubY }],
+    ["front-right-leg", { x: cx + sideDx, y: topHubY }],
+    ["rear-hub", { x: cx, y: rearHubY }],
+    ["rear-left-leg", { x: cx - sideDx, y: rearHubY }],
+    ["rear-right-leg", { x: cx + sideDx, y: rearHubY }],
+    ["tail", { x: cx, y: rearHubY + size * 0.22 }],
+  ]);
+}
+
 function sheetProjector(width: number, height: number, size: number): (point: { x: number; y: number }) => { x: number; y: number } {
   const maxDimension = Math.max(width, height);
-  const scale = size / maxDimension;
+  const scale = sheetScale(width, height, size);
   const offsetX = (size - width * scale) / 2;
   const offsetY = (size - height * scale) / 2;
   return (point) => ({
     x: offsetX + point.x * scale,
     y: offsetY + (height - point.y) * scale,
   });
+}
+
+function sheetScale(width: number, height: number, size: number): number {
+  return size / Math.max(width, height);
 }
 
 function centerOfAdapterFlap(flap: { x: number; y: number; width?: number; height?: number }): { x: number; y: number } {
@@ -601,6 +653,8 @@ function centerOfAdapterFlap(flap: { x: number; y: number; width?: number; heigh
 function adapterFlapMark(
   flap: { id: number; x: number; y: number; width?: number; height?: number },
   project: (point: { x: number; y: number }) => { x: number; y: number },
+  scale: number,
+  flapLength: number | undefined,
   fill: string,
   stroke: string,
   showLabel: boolean,
@@ -612,10 +666,11 @@ function adapterFlapMark(
   const width = Math.max(10, Math.abs(p2.x - p1.x));
   const height = Math.max(10, Math.abs(p2.y - p1.y));
   const center = project(centerOfAdapterFlap(flap));
-  const circleRadius = Math.max(4, Math.min(width, height) * 0.45);
+  const lengthRadius = Math.max(0, (flapLength ?? 0) * scale);
   return [
     `<rect x="${x}" y="${y}" width="${width}" height="${height}" fill="${fill}" fill-opacity="0.22" stroke="${stroke}" stroke-width="1.8" stroke-dasharray="5 4"/>`,
-    `<circle cx="${center.x}" cy="${center.y}" r="${circleRadius}" fill="none" stroke="${stroke}" stroke-width="1.4" stroke-opacity="0.75"/>`,
+    lengthRadius > 0 ? `<circle cx="${center.x}" cy="${center.y}" r="${lengthRadius}" fill="none" stroke="${stroke}" stroke-width="1.6" stroke-opacity="0.78"/>` : "",
+    lengthRadius > 0 && showLabel ? `<text x="${center.x + lengthRadius + 4}" y="${center.y + 4}" font-family="Inter, Arial, sans-serif" font-size="10.5" fill="#064e3b">L ${flapLength}</text>` : "",
     showLabel ? `<text x="${center.x + 6}" y="${center.y - 6}" font-family="Inter, Arial, sans-serif" font-size="11" fill="#064e3b">id ${flap.id}</text>` : "",
   ].join("\n");
 }
@@ -652,10 +707,10 @@ function treeLegend(size: number): string {
 
 function packingLegend(size: number): string {
   return [
-    `<g transform="translate(${size - 224},18)">`,
-    `<rect width="206" height="116" rx="8" fill="white" fill-opacity="0.9" stroke="#cbd5e1"/>`,
-    `<rect x="12" y="16" width="22" height="18" fill="#4ade80" fill-opacity="0.22" stroke="#16a34a" stroke-dasharray="5 4"/><text x="44" y="30" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">optimized flap square</text>`,
-    `<circle cx="23" cy="52" r="11" fill="none" stroke="#16a34a" stroke-width="1.4"/><text x="44" y="56" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">flap circle/radius guide</text>`,
+    `<g transform="translate(${size - 248},18)">`,
+    `<rect width="230" height="116" rx="8" fill="white" fill-opacity="0.9" stroke="#cbd5e1"/>`,
+    `<rect x="12" y="16" width="22" height="18" fill="#4ade80" fill-opacity="0.22" stroke="#16a34a" stroke-dasharray="5 4"/><text x="44" y="30" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">optimized flap target</text>`,
+    `<circle cx="23" cy="52" r="15" fill="none" stroke="#16a34a" stroke-width="1.6"/><text x="44" y="56" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">flap length circle</text>`,
     `<rect x="12" y="72" width="22" height="14" fill="#60a5fa" fill-opacity="0.10" stroke="#2563eb" stroke-dasharray="8 5"/><text x="44" y="84" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">BP Studio node bounds</text>`,
     `<line x1="12" y1="98" x2="34" y2="98" stroke="#64748b" stroke-width="1.8"/><text x="44" y="102" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">inferred tree edge</text>`,
     `</g>`,

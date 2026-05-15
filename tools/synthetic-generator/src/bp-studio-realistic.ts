@@ -39,6 +39,7 @@ export interface AdapterSpec {
   optimizerLayout: "view" | "random";
   optimizerSeed: number;
   optimizerUseDimension: boolean;
+  optimizerUseBH: boolean;
   nodeIdByAdapterId?: Record<string, string>;
   tree: {
     edges: Array<{ n1: number; n2: number; length: number }>;
@@ -55,6 +56,7 @@ export interface AdapterMetadata {
     exportMode?: "outer" | "final" | "expanded";
     optimizerLayout?: "view" | "random";
     optimizerSeed?: number | null;
+    optimizerUseBH?: boolean;
   };
   layout?: {
     optimized?: boolean;
@@ -256,6 +258,7 @@ export function toAdapterSpec(spec: BPStudioAdapterSpec): AdapterSpec {
     optimizerLayout: "view",
     optimizerSeed: spec.seed,
     optimizerUseDimension: true,
+    optimizerUseBH: true,
     nodeIdByAdapterId: Object.fromEntries([...idMap.entries()].map(([nodeId, id]) => [String(id), nodeId])),
     tree: {
       edges: edges.map((edge) => ({

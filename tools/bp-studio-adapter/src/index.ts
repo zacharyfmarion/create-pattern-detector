@@ -72,6 +72,7 @@ export async function generate(specInput: unknown): Promise<GenerationResult> {
   const optimizeLayout = spec.optimizeLayout ?? false;
   const optimizerLayout = spec.optimizerLayout ?? "view";
   const optimizerSeed = spec.optimizerSeed ?? null;
+  const optimizerUseBH = spec.optimizerUseBH ?? false;
 
   validateLeafFlaps(edges, flaps);
   createBpStudioTree(edges, flaps, { runTasks: !optimizeLayout || optimizerLayout === "random" });
@@ -88,7 +89,7 @@ export async function generate(specInput: unknown): Promise<GenerationResult> {
   const border = sheetBorder(sheet);
   const cpLines = getCPByMode(border, useAuxiliary, exportMode);
   const fold = toFold(cpLines, spec);
-  const metadata = collectMetadata(spec, fold, cpLines, edges, flaps, inputLayout, useAuxiliary, completeRepositories, exportMode, optimizeLayout, optimizerLayout, optimizerSeed);
+  const metadata = collectMetadata(spec, fold, cpLines, edges, flaps, inputLayout, useAuxiliary, completeRepositories, exportMode, optimizeLayout, optimizerLayout, optimizerSeed, optimizerUseBH);
   return { fold, metadata };
 }
 
@@ -150,7 +151,7 @@ async function optimizeTreeLayout(
   });
   const request: OptimizerRequest = {
     command: "start",
-    useBH: false,
+    useBH: spec.optimizerUseBH ?? false,
     layout: spec.optimizerLayout ?? "view",
     random: 5,
     problem: {
@@ -523,7 +524,8 @@ function collectMetadata(
   exportMode: BPStudioExportMode,
   optimizeLayout: boolean,
   optimizerLayout: "view" | "random",
-  optimizerSeed: number | null
+  optimizerSeed: number | null,
+  optimizerUseBH: boolean
 ): AdapterMetadata {
   const nodes = collectNodeLayout();
   return {
@@ -544,6 +546,7 @@ function collectMetadata(
       optimizeLayout,
       optimizerLayout,
       optimizerSeed,
+      optimizerUseBH,
       edgeCount: edges.length,
       flapCount: flaps.length
     },

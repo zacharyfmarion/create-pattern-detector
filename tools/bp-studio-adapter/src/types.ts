@@ -9,6 +9,7 @@ export interface BpStudioAdapterSpec {
   optimizerLayout?: "view" | "random";
   optimizerSeed?: number;
   optimizerUseDimension?: boolean;
+  optimizerUseBH?: boolean;
   tree?: TreeSpec;
   edges?: EdgeSpec[];
   flaps?: FlapSpec[];
@@ -98,6 +99,7 @@ export interface AdapterMetadata {
     optimizeLayout: boolean;
     optimizerLayout: "view" | "random";
     optimizerSeed: number | null;
+    optimizerUseBH: boolean;
     edgeCount: number;
     flapCount: number;
   };
