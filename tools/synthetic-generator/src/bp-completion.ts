@@ -8,6 +8,7 @@ import {
   moleculeTemplateFromPatch,
   roleForDirection,
 } from "./bp-molecule-patches.ts";
+import { buildBPStudioLayoutGraph } from "./bp-studio-layout-graph.ts";
 import { scoreFoldRealism } from "./realism-metrics.ts";
 import type { BPStudioAdapterSpec } from "./bp-studio-spec.ts";
 import type { AdapterMetadata, AdapterSpec } from "./bp-studio-realistic.ts";
@@ -145,59 +146,80 @@ export function regularizeBPStudioLayout(
   spec: BPStudioAdapterSpec,
   options: BoxPleatCompletionOptions = {},
 ): CompletionLayout {
+  const graph = buildBPStudioLayoutGraph(spec, options);
   const adapterLayout = options.adapterMetadata?.optimizedLayout ?? options.adapterMetadata?.layout;
-  const sheet = adapterLayout?.sheet ?? options.adapterSpec?.sheet ?? { width: spec.sheet.width, height: spec.sheet.height };
+  const sheet = graph?.sheet ?? adapterLayout?.sheet ?? options.adapterSpec?.sheet ?? { width: spec.sheet.width, height: spec.sheet.height };
   const sheetWidth = Math.max(1, sheet.width);
   const sheetHeight = Math.max(1, sheet.height);
   const gridSize = options.gridSize ?? compilerGridSizeForSheet(sheetWidth, sheetHeight);
-  const optimizedFlaps = adapterLayout?.flaps ?? [];
   const terminalByNodeId = new Map(spec.layout.flaps.map((terminal) => [terminal.nodeId, terminal]));
-  const terminalByIndex = new Map(spec.layout.flaps.map((terminal, index) => [index, terminal]));
-  const terminals: CompletionTerminal[] = (optimizedFlaps.length ? optimizedFlaps : spec.layout.flaps.map((terminal, index) => ({
-    id: index,
-    x: terminal.terminal.x,
-    y: terminal.terminal.y,
-    width: terminal.width,
-    height: terminal.height,
-  }))).map((flap, index) => {
-    const adapterNodeId = options.adapterSpec?.nodeIdByAdapterId?.[String(flap.id)];
-    const sourceTerminal = adapterNodeId ? terminalByNodeId.get(adapterNodeId) : terminalByIndex.get(index);
-    const x = snap(clamp((flap.x + (flap.width ?? 0) / 2) / sheetWidth, 0, 1), gridSize);
-    const y = snap(clamp((flap.y + (flap.height ?? 0) / 2) / sheetHeight, 0, 1), gridSize);
+  const optimizedTerminalNodes = graph?.nodes.filter((node) => node.kind === "terminal") ?? [];
+  const terminals: CompletionTerminal[] = (optimizedTerminalNodes.length ? optimizedTerminalNodes : spec.layout.flaps.map((terminal) => ({
+    adapterId: -1,
+    nodeId: terminal.nodeId,
+    normalized: {
+      x: terminal.terminal.x / spec.sheet.width,
+      y: terminal.terminal.y / spec.sheet.height,
+    },
+  }))).map((node, index) => {
+    const sourceTerminal = terminalByNodeId.get(node.nodeId);
+    const x = snap(clamp(node.normalized.x, 0, 1), gridSize);
+    const y = snap(clamp(node.normalized.y, 0, 1), gridSize);
     return {
-      id: sourceTerminal?.nodeId ?? `flap-${flap.id}`,
-      nodeId: String(flap.id),
+      id: sourceTerminal?.nodeId ?? `flap-${node.adapterId}`,
+      nodeId: String(node.adapterId),
       x,
       y,
       side: sourceTerminal?.side ?? sideForPoint({ x, y }),
-      width: snap(Math.max(1 / (gridSize * 2), (flap.width ?? 0) / sheetWidth), gridSize),
-      height: snap(Math.max(1 / (gridSize * 2), (flap.height ?? 0) / sheetHeight), gridSize),
+      width: snap(Math.max(1 / (gridSize * 2), (sourceTerminal?.width ?? 0) / sheetWidth), gridSize),
+      height: snap(Math.max(1 / (gridSize * 2), (sourceTerminal?.height ?? 0) / sheetHeight), gridSize),
       priority: sourceTerminal?.priority ?? index,
     };
   });
-  const bodies = spec.layout.bodies.map((body): CompletionRegion => ({
-    id: body.nodeId,
-    kind: "body",
-    x1: snap(clamp((body.center.x - body.width / 2) / spec.sheet.width, 0, 1), gridSize),
-    y1: snap(clamp((body.center.y - body.height / 2) / spec.sheet.height, 0, 1), gridSize),
-    x2: snap(clamp((body.center.x + body.width / 2) / spec.sheet.width, 0, 1), gridSize),
-    y2: snap(clamp((body.center.y + body.height / 2) / spec.sheet.height, 0, 1), gridSize),
-  }));
+  const graphNodeById = new Map(graph?.nodes.map((node) => [node.nodeId, node]) ?? []);
+  const bodyNodeIds = spec.layout.bodies.length
+    ? spec.layout.bodies.map((body) => body.nodeId)
+    : graph?.nodes.filter((node) => node.kind === "hub").map((node) => node.nodeId) ?? [];
+  const bodyHalfSize = 1 / gridSize;
+  const bodies = bodyNodeIds.flatMap((nodeId): CompletionRegion[] => {
+    const graphNode = graphNodeById.get(nodeId);
+    const sourceBody = spec.layout.bodies.find((body) => body.nodeId === nodeId);
+    const center = graphNode?.normalized ?? (sourceBody ? {
+      x: sourceBody.center.x / spec.sheet.width,
+      y: sourceBody.center.y / spec.sheet.height,
+    } : undefined);
+    if (!center) return [];
+    return [{
+      id: nodeId,
+      kind: "body",
+      x1: snap(clamp(center.x - bodyHalfSize, 0, 1), gridSize),
+      y1: snap(clamp(center.y - bodyHalfSize, 0, 1), gridSize),
+      x2: snap(clamp(center.x + bodyHalfSize, 0, 1), gridSize),
+      y2: snap(clamp(center.y + bodyHalfSize, 0, 1), gridSize),
+    }];
+  });
   const axis = chooseAxis(spec, terminals);
   const spineCoordinate = snap(
     clamp(mean(bodies.map((body) => axis === "horizontal" ? (body.y1 + body.y2) / 2 : (body.x1 + body.x2) / 2), 0.5), 0.1875, 0.8125),
     gridSize,
   );
   const layoutPoints = completionPointMap(bodies, terminals);
-  const corridors: CompletionCorridor[] = spec.layout.rivers.map((river) => {
-    const orientation = river.preferredAxis === "vertical" ? "vertical" : river.preferredAxis === "horizontal" ? "horizontal" : axis;
+  const terminalIds = new Set(terminals.map((terminal) => terminal.id));
+  const graphEdges = graph?.edges.length ? graph.edges : spec.layout.rivers.map((river) => ({
+    id: river.edgeId,
+    from: river.from,
+    to: river.to,
+    length: river.width,
+  }));
+  const corridors: CompletionCorridor[] = graphEdges.map((edge) => {
+    const orientation = orientationForPoints(layoutPoints.get(edge.from), layoutPoints.get(edge.to), axis);
     return {
-      id: river.edgeId,
-      from: river.from,
-      to: river.to,
+      id: edge.id,
+      from: edge.from,
+      to: edge.to,
       orientation,
-      coordinate: snap(corridorCoordinate(river.from, river.to, layoutPoints, orientation), gridSize),
-      width: snap(Math.max(1 / gridSize, river.width / spec.sheet.gridSize), gridSize),
+      coordinate: snap(corridorCoordinate(edge.from, edge.to, layoutPoints, orientation, terminalIds), gridSize),
+      width: snap(Math.max(2 / gridSize, 0.5 / Math.max(sheetWidth, sheetHeight)), gridSize),
     };
   });
 
@@ -214,7 +236,7 @@ export function regularizeBPStudioLayout(
       adapterLineCount: options.adapterMetadata?.cp?.lineCount ?? 0,
       adapterVertexCount: options.adapterMetadata?.cp?.vertexCount ?? 0,
       adapterEdgeCount: options.adapterMetadata?.cp?.edgeCount ?? 0,
-      optimizedFlapCount: optimizedFlaps.length,
+      optimizedFlapCount: optimizedTerminalNodes.length,
       optimizedTreeEdgeCount: adapterLayout?.edges?.length ?? options.adapterSpec?.tree.edges.length ?? spec.tree.edges.length,
     },
   };
@@ -860,10 +882,23 @@ function completionPointMap(bodies: CompletionRegion[], terminals: CompletionTer
   return points;
 }
 
-function corridorCoordinate(from: string, to: string, points: Map<string, CompletionPoint>, axis: CompletionAxis): number {
+function orientationForPoints(a: CompletionPoint | undefined, b: CompletionPoint | undefined, fallback: CompletionAxis): CompletionAxis {
+  if (!a || !b) return fallback;
+  return Math.abs(a.x - b.x) >= Math.abs(a.y - b.y) ? "horizontal" : "vertical";
+}
+
+function corridorCoordinate(
+  from: string,
+  to: string,
+  points: Map<string, CompletionPoint>,
+  axis: CompletionAxis,
+  terminalIds: Set<string> = new Set(),
+): number {
   const a = points.get(from);
   const b = points.get(to);
   if (!a || !b) return 0.5;
+  if (terminalIds.has(from)) return axis === "horizontal" ? a.y : a.x;
+  if (terminalIds.has(to)) return axis === "horizontal" ? b.y : b.x;
   return axis === "horizontal" ? (a.y + b.y) / 2 : (a.x + b.x) / 2;
 }
 

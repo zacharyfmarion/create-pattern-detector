@@ -19,6 +19,10 @@ import {
 } from "./bp-studio-spec.ts";
 import { simpleQuadrupedBPStudioSpec } from "./bp-studio-fixtures.ts";
 import {
+  buildBPStudioLayoutGraph,
+  type BPStudioLayoutGraph,
+} from "./bp-studio-layout-graph.ts";
+import {
   validateBPStudioPacking,
   type BPStudioPackingValidation,
 } from "./bp-studio-packing-validity.ts";
@@ -325,12 +329,13 @@ function sourceTreePanel(spec: BPStudioAdapterSpec, size: number): string {
 }
 
 function packingPanel(spec: BPStudioAdapterSpec, adapterMetadata: AdapterMetadata, size: number): string {
+  const graph = buildBPStudioLayoutGraph(spec, { adapterMetadata });
   const layout = chosenLayout(adapterMetadata) ?? adapterMetadata.inputLayout;
-  const sheet = layout?.sheet ?? { width: spec.sheet.width, height: spec.sheet.height };
+  const sheet = graph?.sheet ?? layout?.sheet ?? { width: spec.sheet.width, height: spec.sheet.height };
   const toPanel = sheetProjector(sheet.width, sheet.height, size);
   const scale = sheetScale(sheet.width, sheet.height, size);
   const terminalLengths = terminalLengthByAdapterId(spec);
-  const edges = packedTreeOverlay(spec, layout, toPanel);
+  const edges = graph ? bpStudioGraphOverlay(graph, toPanel, true) : packedTreeOverlay(spec, layout, toPanel);
   const flaps = (layout?.flaps ?? []).map((flap) => adapterFlapMark(flap, toPanel, scale, terminalLengths.get(flap.id), "#4ade80", "#16a34a", true));
   return panelFrame(size, [
     sheetGridForSheet(sheet.width, sheet.height, size),
@@ -345,12 +350,14 @@ function candidateOverlayPanel(
   candidate: RegionCompletionCandidate,
   size: number,
 ): string {
+  const graph = buildBPStudioLayoutGraph(spec, { adapterMetadata });
   const layout = chosenLayout(adapterMetadata) ?? adapterMetadata.inputLayout;
-  const sheet = layout?.sheet ?? { width: spec.sheet.width, height: spec.sheet.height };
+  const sheet = graph?.sheet ?? layout?.sheet ?? { width: spec.sheet.width, height: spec.sheet.height };
   const toPanel = sheetProjector(sheet.width, sheet.height, size);
   const scale = sheetScale(sheet.width, sheet.height, size);
   const terminalLengths = terminalLengthByAdapterId(spec);
   const optimizedFlaps = (layout?.flaps ?? []).map((flap) => adapterFlapMark(flap, toPanel, scale, terminalLengths.get(flap.id), "#22c55e", "#15803d", false));
+  const graphOverlay = graph ? bpStudioGraphOverlay(graph, toPanel, false).join("\n") : "";
   const candidateSvg = regionCandidateToSvg(candidate, size, {
     showGrid: false,
     showLegend: false,
@@ -362,6 +369,7 @@ function candidateOverlayPanel(
   return panelFrame(size, [
     sheetGridForSheet(sheet.width, sheet.height, size),
     candidateSvg,
+    graphOverlay,
     `<g opacity="0.72">${optimizedFlaps.join("\n")}</g>`,
   ], false, "bp-candidate-overlay-clip");
 }
@@ -423,6 +431,39 @@ function packedTreeOverlay(
       `</g>`,
     ].join("\n");
   });
+}
+
+function bpStudioGraphOverlay(
+  graph: BPStudioLayoutGraph,
+  project: (point: { x: number; y: number }) => { x: number; y: number },
+  showLabels: boolean,
+): string[] {
+  const nodeById = new Map(graph.nodes.map((node) => [node.nodeId, node]));
+  const edgeItems = graph.edges.map((edge) => {
+    const a = nodeById.get(edge.from);
+    const b = nodeById.get(edge.to);
+    if (!a || !b) return "";
+    const pa = project(a.point);
+    const pb = project(b.point);
+    const mid = { x: (pa.x + pb.x) / 2, y: (pa.y + pb.y) / 2 };
+    return [
+      `<line x1="${pa.x}" y1="${pa.y}" x2="${pb.x}" y2="${pb.y}" stroke="#475569" stroke-width="2.1" stroke-linecap="round" stroke-opacity="0.72"/>`,
+      showLabels ? [
+        `<g transform="translate(${mid.x},${mid.y})">`,
+        `<rect x="-14" y="-11" width="28" height="16" rx="4" fill="#ffffff" fill-opacity="0.90" stroke="#cbd5e1" stroke-width="0.7"/>`,
+        `<text x="0" y="1" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="10" font-weight="700" fill="#334155">L ${edge.length}</text>`,
+        `</g>`,
+      ].join("\n") : "",
+    ].join("\n");
+  });
+  const hubItems = graph.nodes.filter((node) => node.kind === "hub").map((node) => {
+    const p = project(node.point);
+    return [
+      `<circle cx="${p.x}" cy="${p.y}" r="5.5" fill="#f59e0b" fill-opacity="0.92" stroke="#92400e" stroke-width="1.5"/>`,
+      showLabels ? `<text x="${p.x + 7}" y="${p.y - 7}" font-family="Inter, Arial, sans-serif" font-size="10.5" fill="#78350f">${escapeXml(node.label)}</text>` : "",
+    ].join("\n");
+  });
+  return [...edgeItems, ...hubItems];
 }
 
 function adapterNodeIds(spec: BPStudioAdapterSpec): Map<string, number> {
@@ -640,8 +681,9 @@ function packingLegendOutside(size: number): string {
     legendBand(size, "Packing legend"),
     `<circle cx="20" cy="${y1}" r="4.2" fill="#4ade80" fill-opacity="0.9" stroke="#16a34a" stroke-width="1.6"/><line x1="12" y1="${y1}" x2="28" y2="${y1}" stroke="#16a34a" stroke-width="1.4"/><line x1="20" y1="${y1 - 8}" x2="20" y2="${y1 + 8}" stroke="#16a34a" stroke-width="1.4"/><text x="42" y="${y1 + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">zero-size optimized flap point</text>`,
     `<circle cx="274" cy="${y1}" r="17" fill="none" stroke="#16a34a" stroke-width="1.6"/><text x="302" y="${y1 + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">flap length circle</text>`,
-    `<line x1="468" y1="${y1}" x2="496" y2="${y1}" stroke="#64748b" stroke-width="1.8"/><text x="508" y="${y1 + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">inferred tree edge</text>`,
-    `<text x="18" y="${y2 + 4}" font-family="Inter, Arial, sans-serif" font-size="11" fill="#64748b">No area boxes are rendered for point flaps.</text>`,
+    `<line x1="468" y1="${y1}" x2="496" y2="${y1}" stroke="#475569" stroke-width="2.1"/><text x="508" y="${y1 + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">BP Studio tree edge</text>`,
+    `<circle cx="20" cy="${y2}" r="5.5" fill="#f59e0b" stroke="#92400e" stroke-width="1.5"/><text x="42" y="${y2 + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">inferred internal hub from BP graph</text>`,
+    `<text x="18" y="${y2 + 32}" font-family="Inter, Arial, sans-serif" font-size="11" fill="#64748b">Flap circles/edges come from BP Studio optimized layout.</text>`,
   ].join("\n");
 }
 

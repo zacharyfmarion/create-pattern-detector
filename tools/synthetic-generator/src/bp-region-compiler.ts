@@ -33,6 +33,7 @@ const DEFAULT_CORRIDOR_WIDTH = 0.25;
 interface CorridorEndpoint {
   id: string;
   center: CompletionPoint;
+  kind: "flap" | "body";
   rect?: RegionRect;
 }
 
@@ -351,9 +352,9 @@ function corridorPleatStripRegions(
   bodies: BodyPanelRegion[],
 ): PleatStripRegion[] {
   const endpoints = new Map<string, CorridorEndpoint>();
-  for (const flap of flaps) endpoints.set(flap.terminalId, { id: flap.terminalId, center: flap.center, rect: flap.rect });
-  for (const body of bodies) endpoints.set(body.id, { id: body.id, center: body.center, rect: body.rect });
-  if (!endpoints.has("body") && bodies[0]) endpoints.set("body", { id: "body", center: bodies[0].center, rect: bodies[0].rect });
+  for (const flap of flaps) endpoints.set(flap.terminalId, { id: flap.terminalId, center: flap.center, kind: "flap", rect: flap.rect });
+  for (const body of bodies) endpoints.set(body.id, { id: body.id, center: body.center, kind: "body", rect: body.rect });
+  if (!endpoints.has("body") && bodies[0]) endpoints.set("body", { id: "body", center: bodies[0].center, kind: "body", rect: bodies[0].rect });
 
   return layout.corridors.flatMap((corridor, index) => {
     const from = endpoints.get(corridor.from);
@@ -414,6 +415,7 @@ function endpointBoundaryCoordinate(
   toward: CompletionPoint,
   corridorOrientation: CompletionCorridor["orientation"],
 ): number {
+  if (endpoint.kind === "flap") return corridorOrientation === "horizontal" ? endpoint.center.x : endpoint.center.y;
   if (!endpoint.rect) return corridorOrientation === "horizontal" ? endpoint.center.x : endpoint.center.y;
   if (corridorOrientation === "horizontal") {
     return toward.x >= endpoint.center.x ? endpoint.rect.x2 : endpoint.rect.x1;
