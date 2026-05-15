@@ -101,8 +101,11 @@ test("region debug SVG exposes BP steering layers", () => {
   expect(candidate.stairBoundaries.every((boundary) => boundary.lines.length > 1)).toBe(true);
   const svg = regionCandidateToSvg(candidate, 320);
   expect(svg).toContain("<svg");
-  expect(svg).toContain("#ff2a2a");
-  expect(svg).toContain("#005cff");
+  expect(svg).toContain("#ff1f1f");
+  expect(svg).toContain("#0057ff");
+  expect(svg).toContain("Debug legend");
+  expect(svg).toContain("Pleat corridor");
+  expect(svg).toContain("Flap target");
   expect(svg).toContain("stroke-dasharray");
 });
 

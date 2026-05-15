@@ -99,10 +99,20 @@ export function compileRegionCandidate(layout: RegionLayout): RegionCompletionCa
 export function regionCandidateToSvg(candidate: RegionCompletionCandidate, size = 900): string {
   const strokeScale = size / 900;
   const toPx = ([x, y]: Point): Point => [round(x * size), round((1 - y) * size)];
+  const colors = {
+    mountain: "#ff1f1f",
+    valley: "#0057ff",
+    border: "#111827",
+    pleatStrip: "#facc15",
+    body: "#93c5fd",
+    flap: "#4ade80",
+    legendText: "#111827",
+    legendMuted: "#475569",
+  };
   const line = (segment: RegionCandidateSegment): string => {
     const [x1, y1] = toPx(segment.p1);
     const [x2, y2] = toPx(segment.p2);
-    const color = segment.assignment === "M" ? "#ff2a2a" : segment.assignment === "V" ? "#005cff" : "#111827";
+    const color = segment.assignment === "M" ? colors.mountain : segment.assignment === "V" ? colors.valley : colors.border;
     const width = segment.kind === "border" ? 3.4 : segment.kind === "strip-pleat" ? 3.6 : segment.kind === "stair-boundary" ? 3.5 : 1.8;
     const dash = segment.kind === "body-boundary" || segment.kind === "flap-boundary" ? " stroke-dasharray=\"5 4\"" : "";
     return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${color}" stroke-width="${round(width * strokeScale)}" stroke-linecap="round" stroke-opacity="0.98"${dash}/>`;
@@ -131,11 +141,57 @@ export function regionCandidateToSvg(candidate: RegionCompletionCandidate, size 
     `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" shape-rendering="geometricPrecision">`,
     `<rect width="${size}" height="${size}" fill="white"/>`,
     ...gridLines,
-    ...candidate.layout.pleatStrips.map((strip) => rect(strip, "#fde68a", 0.14)),
-    ...candidate.layout.bodies.map((body) => rect(body, "#c7d2fe", 0.20)),
-    ...candidate.layout.flaps.map((flap) => rect(flap, "#bbf7d0", 0.18)),
+    ...candidate.layout.pleatStrips.map((strip) => rect(strip, colors.pleatStrip, 0.34)),
+    ...candidate.layout.bodies.map((body) => rect(body, colors.body, 0.32)),
+    ...candidate.layout.flaps.map((flap) => rect(flap, colors.flap, 0.34)),
     ...candidate.segments.map(line),
+    legendSvg(size, colors),
     `</svg>`,
+  ].join("\n");
+}
+
+function legendSvg(
+  size: number,
+  colors: {
+    mountain: string;
+    valley: string;
+    border: string;
+    pleatStrip: string;
+    body: string;
+    flap: string;
+    legendText: string;
+    legendMuted: string;
+  },
+): string {
+  const x = round(size * 0.022);
+  const y = round(size * 0.022);
+  const width = round(size * 0.27);
+  const row = round(size * 0.024);
+  const swatch = round(size * 0.014);
+  const lineX1 = x + swatch * 0.2;
+  const lineX2 = x + swatch * 1.45;
+  const labelX = x + swatch * 2.0;
+  const titleY = y + row * 0.95;
+  const firstY = y + row * 2.0;
+  const height = round(row * 8.0);
+  const fontSize = Math.max(10, round(size * 0.014));
+  const titleSize = Math.max(11, round(size * 0.016));
+  const item = (index: number, label: string, mark: string): string => {
+    const cy = firstY + row * index;
+    return `${mark}<text x="${labelX}" y="${cy + fontSize * 0.35}" font-family="Inter, Arial, sans-serif" font-size="${fontSize}" fill="${colors.legendText}">${label}</text>`;
+  };
+  return [
+    `<g data-debug-legend="bp-region">`,
+    `<rect x="${x}" y="${y}" width="${width}" height="${height}" rx="7" fill="white" fill-opacity="0.92" stroke="#cbd5e1" stroke-width="1"/>`,
+    `<text x="${x + swatch}" y="${titleY}" font-family="Inter, Arial, sans-serif" font-size="${titleSize}" font-weight="700" fill="${colors.legendText}">Debug legend</text>`,
+    item(0, "Pleat corridor", `<rect x="${lineX1}" y="${firstY - swatch * 0.55}" width="${swatch * 1.25}" height="${swatch * 0.95}" fill="${colors.pleatStrip}" fill-opacity="0.70" stroke="#ca8a04" stroke-width="0.8"/>`),
+    item(1, "Body panel", `<rect x="${lineX1}" y="${firstY + row - swatch * 0.55}" width="${swatch * 1.25}" height="${swatch * 0.95}" fill="${colors.body}" fill-opacity="0.76" stroke="#2563eb" stroke-width="0.8"/>`),
+    item(2, "Flap target", `<rect x="${lineX1}" y="${firstY + row * 2 - swatch * 0.55}" width="${swatch * 1.25}" height="${swatch * 0.95}" fill="${colors.flap}" fill-opacity="0.76" stroke="#16a34a" stroke-width="0.8"/>`),
+    item(3, "Mountain crease", `<line x1="${lineX1}" y1="${firstY + row * 3}" x2="${lineX2}" y2="${firstY + row * 3}" stroke="${colors.mountain}" stroke-width="3" stroke-linecap="round"/>`),
+    item(4, "Valley crease", `<line x1="${lineX1}" y1="${firstY + row * 4}" x2="${lineX2}" y2="${firstY + row * 4}" stroke="${colors.valley}" stroke-width="3" stroke-linecap="round"/>`),
+    item(5, "Debug boundary", `<line x1="${lineX1}" y1="${firstY + row * 5}" x2="${lineX2}" y2="${firstY + row * 5}" stroke="${colors.valley}" stroke-width="2" stroke-dasharray="5 4" stroke-linecap="round"/>`),
+    `<text x="${x + swatch}" y="${firstY + row * 6.35}" font-family="Inter, Arial, sans-serif" font-size="${Math.max(9, round(size * 0.0115))}" fill="${colors.legendMuted}">Fills are scaffold/debug only</text>`,
+    `</g>`,
   ].join("\n");
 }
 
