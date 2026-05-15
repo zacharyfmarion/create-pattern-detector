@@ -48,3 +48,12 @@ test("compiled molecules have no active dangling endpoints", () => {
   expect(completion.ok).toBe(true);
   expect(countInteriorDanglingActiveEndpoints(completion.fold!)).toBe(0);
 });
+
+test("eligible fixtures receive certified pleat-strip staircase cells", () => {
+  for (const fixture of ["two-flap-stretch", "five-flap-uniaxial", "insect-lite"] as const) {
+    const completion = completeBoxPleatLayout(fixtureCompletionLayout(fixture));
+    expect(completion.ok).toBe(true);
+    expect(completion.fold?.molecule_metadata?.molecules["diagonal-staircase"]).toBeGreaterThanOrEqual(4);
+    expect(completion.fold?.edges_assignment.filter((assignment) => assignment === "M" || assignment === "V").length).toBeGreaterThan(150);
+  }
+});

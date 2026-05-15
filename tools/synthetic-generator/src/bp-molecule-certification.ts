@@ -7,7 +7,7 @@ export const COMPLETION_FIXTURE_LADDER: CompositionFixture[] = [
   {
     id: "two-flap-stretch",
     description: "two terminal fans joined through a central body/stretch connector",
-    requiredMoleculeKinds: ["corner-fan", "river-corridor", "body-panel", "diamond-connector", "stretch-gadget"],
+    requiredMoleculeKinds: ["corner-fan", "river-corridor", "diagonal-staircase", "body-panel", "diamond-connector", "stretch-gadget"],
   },
   {
     id: "three-flap-relay",
@@ -17,12 +17,12 @@ export const COMPLETION_FIXTURE_LADDER: CompositionFixture[] = [
   {
     id: "five-flap-uniaxial",
     description: "multi-terminal uniaxial chain around one body hub",
-    requiredMoleculeKinds: ["corner-fan", "river-corridor", "body-panel", "diamond-connector", "stretch-gadget"],
+    requiredMoleculeKinds: ["corner-fan", "river-corridor", "diagonal-staircase", "body-panel", "diamond-connector", "stretch-gadget"],
   },
   {
     id: "insect-lite",
     description: "paired appendage layout with antenna/tail-like terminal",
-    requiredMoleculeKinds: ["corner-fan", "river-corridor", "body-panel", "diamond-connector", "stretch-gadget"],
+    requiredMoleculeKinds: ["corner-fan", "river-corridor", "diagonal-staircase", "body-panel", "diamond-connector", "stretch-gadget"],
   },
 ];
 

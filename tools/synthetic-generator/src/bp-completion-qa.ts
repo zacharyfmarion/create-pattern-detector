@@ -49,8 +49,8 @@ export function runBPCompletionQA(fold: FOLDFormat): BPCompletionQAReport {
   if (metrics.dominantOrientationShare > 0.62) warnings.push("orientation-distribution-too-uniform");
   if (metrics.maxInteriorVertexDegree >= 16) warnings.push("high-degree-global-line-junctions");
   if (fold.completion_metadata?.version.endsWith("/v0.1.0")) warnings.push("baseline-compiler-version-not-production");
-  if (fold.completion_metadata?.version.endsWith("/v0.2.0")) {
-    warnings.push("restricted-corner-fan-compiler-not-production-distribution");
+  if (fold.completion_metadata?.version.endsWith("/v0.2.0") || fold.completion_metadata?.version.endsWith("/v0.3.0")) {
+    warnings.push("restricted-pleat-strip-compiler-not-production-distribution");
   }
 
   return {

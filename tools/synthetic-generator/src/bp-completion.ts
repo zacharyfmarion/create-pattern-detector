@@ -39,7 +39,7 @@ export interface BoxPleatCompletionOptions {
   maxFoldLines?: number;
 }
 
-const ENGINE_VERSION = "strict-bp-completion/v0.2.0";
+const ENGINE_VERSION = "strict-bp-completion/v0.3.0";
 const DEFAULT_GRID_SIZE = 128;
 const PATCH_LIBRARY = moleculePatchLibrary();
 
@@ -348,6 +348,24 @@ function instantiateMolecules(layout: CompletionLayout): {
     });
   }
 
+  const pleatStripLayer = auxiliaryPleatStripLayer(layout);
+  if (pleatStripLayer !== undefined) {
+    for (const [index, center] of cornerLayerCenters(pleatStripLayer).entries()) {
+      const stripCell = instanceFor(patches, `pleat-strip-${index}`, "diagonal-staircase", center);
+      instances.push(stripCell);
+      segments.push(...starSegments(stripCell.id, "diagonal-staircase", center));
+      joins.push({
+        from: `${stripCell.id}:west`,
+        to: "body-0:west",
+        orientation: "diagonal-positive",
+        width: 1 / 16,
+        accepted: true,
+        fromPosition: center,
+        toPosition: bodyCenters[0] ?? point(0.5, 0.5),
+      });
+    }
+  }
+
   if (bodyCenters.length > 0) {
     const stretchCenter = bodyCenters[0];
     const stretch = instanceFor(patches, "central-stretch", "stretch-gadget", stretchCenter);
@@ -524,6 +542,21 @@ function sideLaneFallback(priority: number, layer: number): number {
 function terminalLayer(layout: CompletionLayout): number {
   const layers = [0.125, 0.25];
   return layers[Math.abs(hashString(layout.id) + layout.terminals.length) % layers.length];
+}
+
+function auxiliaryPleatStripLayer(layout: CompletionLayout): number | undefined {
+  if (layout.terminals.length === 3) return undefined;
+  const layer = terminalLayer(layout);
+  return layer < 0.1875 ? 0.3125 : 0.375;
+}
+
+function cornerLayerCenters(layer: number): CompletionPoint[] {
+  return [
+    point(layer, layer),
+    point(1 - layer, 1 - layer),
+    point(layer, 1 - layer),
+    point(1 - layer, layer),
+  ];
 }
 
 function hashString(value: string): number {
