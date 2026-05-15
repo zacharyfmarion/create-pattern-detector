@@ -1,5 +1,9 @@
 import { expect, test } from "bun:test";
-import { buildStaircaseBridgePrimitive } from "../src/bp-staircase-bridge.ts";
+import {
+  buildStaircaseBridgePrimitive,
+  staircaseBridgePortProfile,
+} from "../src/bp-staircase-bridge.ts";
+import { compatiblePorts, port } from "../src/bp-port-assignment-solver.ts";
 import { makeFlatFoldedPreview } from "../src/folded-preview.ts";
 import { validateFold } from "../src/validate.ts";
 
@@ -48,4 +52,30 @@ test("staircase bridge is deterministic", () => {
   const a = buildStaircaseBridgePrimitive({ laneCount: 5, orientation: "diagonal-negative" });
   const b = buildStaircaseBridgePrimitive({ laneCount: 5, orientation: "diagonal-negative" });
   expect(a).toEqual(b);
+});
+
+test("staircase bridge exposes boundary port sequences for solver integration", () => {
+  const profile = staircaseBridgePortProfile({ laneCount: 5, orientation: "diagonal-positive" });
+
+  expect(profile.ports.top.sequence).toHaveLength(5);
+  expect(profile.ports.right.sequence).toHaveLength(5);
+  expect(profile.ports.bottom.sequence).toHaveLength(5);
+  expect(profile.ports.left.sequence).toHaveLength(5);
+
+  const matching = port("matching-top", profile.ports.top.sequence, {
+    orientation: profile.ports.top.orientation,
+    side: "bottom",
+    width: profile.ports.top.width,
+    parity: profile.ports.top.parity,
+    role: profile.ports.top.role,
+  });
+  const mismatched = port("mismatched-top", profile.ports.right.sequence, {
+    orientation: profile.ports.top.orientation,
+    side: "bottom",
+    width: profile.ports.top.width,
+    parity: profile.ports.top.parity,
+    role: profile.ports.top.role,
+  });
+  expect(compatiblePorts(profile.ports.top, matching).ok).toBe(true);
+  expect(compatiblePorts(profile.ports.top, mismatched).ok).toBe(false);
 });

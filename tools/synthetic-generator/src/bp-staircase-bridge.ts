@@ -1,6 +1,7 @@
 import { roleCounts } from "./fold-utils.ts";
 import { arrangeSegments } from "./line-arrangement.ts";
 import { solveMaekawaAssignments } from "./bp-maekawa-assignment.ts";
+import type { PortAssignment, SolverPort } from "./bp-port-assignment-solver.ts";
 import { buildDiagonalStaircaseCapPrimitive, type StaircaseCapCorner } from "./bp-staircase-cap.ts";
 import type { BPRole, EdgeAssignment, FOLDFormat } from "./types.ts";
 
@@ -23,6 +24,18 @@ export interface StaircaseBridgeResult {
   fold?: FOLDFormat;
   assignmentSteps: number;
   errors: string[];
+}
+
+export interface StaircaseBridgePortProfile {
+  orientation: StaircaseBridgeOptions["orientation"];
+  laneCount: number;
+  gridSize: number;
+  ports: {
+    top: SolverPort;
+    right: SolverPort;
+    bottom: SolverPort;
+    left: SolverPort;
+  };
 }
 
 export function buildStaircaseBridgePrimitive(options: StaircaseBridgeOptions): StaircaseBridgeResult {
@@ -78,6 +91,25 @@ export function buildStaircaseBridgePrimitive(options: StaircaseBridgeOptions): 
   };
 }
 
+export function staircaseBridgePortProfile(options: StaircaseBridgeOptions): StaircaseBridgePortProfile {
+  const result = buildStaircaseBridgePrimitive(options);
+  if (!result.ok || !result.fold) {
+    throw new Error(`cannot build staircase bridge profile: ${result.errors.join("; ")}`);
+  }
+  const laneCount = Math.max(1, Math.floor(options.laneCount));
+  return {
+    orientation: options.orientation,
+    laneCount,
+    gridSize: laneCount + 3,
+    ports: {
+      top: boundaryPort(result.fold, "top", "horizontal", "axis", laneCount),
+      right: boundaryPort(result.fold, "right", "vertical", "hinge", laneCount),
+      bottom: boundaryPort(result.fold, "bottom", "horizontal", "axis", laneCount),
+      left: boundaryPort(result.fold, "left", "vertical", "hinge", laneCount),
+    },
+  };
+}
+
 function nonBorderSegments(fold: FOLDFormat): BridgeSegment[] {
   return fold.edges_vertices.flatMap(([a, b], edgeIndex): BridgeSegment[] => {
     if (fold.edges_assignment[edgeIndex] === "B") return [];
@@ -88,6 +120,58 @@ function nonBorderSegments(fold: FOLDFormat): BridgeSegment[] {
       role: fold.edges_bpRole?.[edgeIndex] ?? roleForEdge(fold.vertices_coords[a], fold.vertices_coords[b]),
     }];
   });
+}
+
+function boundaryPort(
+  fold: FOLDFormat,
+  side: SolverPort["side"],
+  orientation: SolverPort["orientation"],
+  role: Exclude<BPRole, "border">,
+  laneCount: number,
+): SolverPort {
+  const entries: Array<{ coordinate: number; assignment: PortAssignment }> = [];
+  for (const [edgeIndex, [a, b]] of fold.edges_vertices.entries()) {
+    if (fold.edges_bpRole?.[edgeIndex] !== role) continue;
+    const assignment = fold.edges_assignment[edgeIndex];
+    if (assignment !== "M" && assignment !== "V") continue;
+    const p1 = fold.vertices_coords[a];
+    const p2 = fold.vertices_coords[b];
+    const boundary = boundaryEndpoint(p1, p2, side);
+    if (!boundary) continue;
+    entries.push({
+      coordinate: side === "top" || side === "bottom" ? boundary[0] : boundary[1],
+      assignment,
+    });
+  }
+  const sorted = entries.sort((a, b) => a.coordinate - b.coordinate);
+  if (sorted.length !== laneCount) {
+    throw new Error(`expected ${laneCount} ${side} boundary lanes, found ${sorted.length}`);
+  }
+  return {
+    id: `staircase-bridge:${side}`,
+    orientation,
+    side,
+    width: laneCount,
+    parity: "integer",
+    sequence: sorted.map((entry) => entry.assignment),
+    role,
+  };
+}
+
+function boundaryEndpoint(a: Point, b: Point, side: SolverPort["side"]): Point | undefined {
+  if (side === "top") return endpointWithCoordinate(a, b, 1, "y");
+  if (side === "bottom") return endpointWithCoordinate(a, b, 0, "y");
+  if (side === "right") return endpointWithCoordinate(a, b, 1, "x");
+  if (side === "left") return endpointWithCoordinate(a, b, 0, "x");
+  return undefined;
+}
+
+function endpointWithCoordinate(a: Point, b: Point, value: number, axis: "x" | "y"): Point | undefined {
+  const index = axis === "x" ? 0 : 1;
+  const aOn = Math.abs(a[index] - value) < 1e-9;
+  const bOn = Math.abs(b[index] - value) < 1e-9;
+  if (aOn === bOn) return undefined;
+  return aOn ? a : b;
 }
 
 function sheetBorderSegments(): BridgeSegment[] {
