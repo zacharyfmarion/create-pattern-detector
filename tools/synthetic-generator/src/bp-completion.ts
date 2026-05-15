@@ -39,7 +39,7 @@ export interface BoxPleatCompletionOptions {
   maxFoldLines?: number;
 }
 
-const ENGINE_VERSION = "strict-bp-completion/v0.3.0";
+const ENGINE_VERSION = "strict-bp-completion/v0.4.0";
 const DEFAULT_GRID_SIZE = 128;
 const PATCH_LIBRARY = moleculePatchLibrary();
 
@@ -366,6 +366,21 @@ function instantiateMolecules(layout: CompletionLayout): {
     }
   }
 
+  for (const [index, center] of relayHubCenters(layout).entries()) {
+    const relayHub = instanceFor(patches, `relay-hub-${index}`, "body-panel", center);
+    instances.push(relayHub);
+    segments.push(...starSegments(relayHub.id, "body-panel", center));
+    joins.push({
+      from: `${relayHub.id}:west`,
+      to: "body-0:west",
+      orientation: layout.axis,
+      width: 1 / 16,
+      accepted: true,
+      fromPosition: center,
+      toPosition: bodyCenters[0] ?? point(0.5, 0.5),
+    });
+  }
+
   if (bodyCenters.length > 0) {
     const stretchCenter = bodyCenters[0];
     const stretch = instanceFor(patches, "central-stretch", "stretch-gadget", stretchCenter);
@@ -557,6 +572,13 @@ function cornerLayerCenters(layer: number): CompletionPoint[] {
     point(layer, 1 - layer),
     point(1 - layer, layer),
   ];
+}
+
+function relayHubCenters(layout: CompletionLayout): CompletionPoint[] {
+  if (layout.terminals.length !== 3) return [];
+  return layout.axis === "horizontal"
+    ? [point(0.5, 0.25), point(0.5, 0.75)]
+    : [point(0.25, 0.5), point(0.75, 0.5)];
 }
 
 function hashString(value: string): number {
