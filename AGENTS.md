@@ -121,6 +121,16 @@ git submodule update --init --recursive
 bun install --cwd tools/bp-studio-adapter
 ```
 
+## BP Compiler Context Reset
+
+Before touching BP Studio-backed generation or the box-pleat completion compiler, read these files in order, especially after context compaction:
+
+1. `implementations-plans/realistic-box-pleat-production-data.md`
+2. `implementations-plans/bp-studio-raw-export-rca.md`
+3. `implementations-plans/bp-crease-assignment-solver.md`
+
+The crease-assignment solver doc is the source of truth for the current M/V assignment algorithm. If the algorithm, solver contracts, or rejection policy changes, update that doc in the same change.
+
 ## Common Commands
 
 Light syntax check:

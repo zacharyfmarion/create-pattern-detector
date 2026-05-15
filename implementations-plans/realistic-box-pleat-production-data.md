@@ -8,6 +8,8 @@ This plan replaces the fake BP generator with a BP Studio-centered production da
 
 Important correction: the compiler should not require every intermediate molecule addition to be flat-foldable in isolation. Real BP design is region-first: designers establish flap/body/river regions, fill corridors with alternating pleat strips, then resolve boundaries, turns, stretches, and assignments as a whole. Intermediate candidate graphs may be incomplete or locally invalid while they are being completed. The production invariant is stricter and simpler: only final completed FOLDs that pass local Kawasaki/Maekawa, Rabbit Ear global solving, and folded-coordinate QA can enter training.
 
+The current M/V assignment strategy is documented in `implementations-plans/bp-crease-assignment-solver.md`. Treat that file as the source of truth for region variables, molecule states, port phase compatibility, backtracking, and rejection policy.
+
 The work is intentionally decomposed into parallel streams so multiple agents can work independently with narrow ownership.
 
 ## Grounding And Source Audit
@@ -144,7 +146,8 @@ Use a staged hybrid:
    - fill river/body corridors with long alternating M/V parallel pleat strips;
    - terminate strips on contour boundaries, diagonal stair walls, fan boundaries, or stretch gadgets;
    - add flap contours, body panels, nested fans, diagonal staircase boundaries, diamond/chevron connectors, and GOPS/Elias-like stretches as boundary completion elements;
-   - solve assignments and parity at the region/composition level, not one tiny molecule at a time.
+   - solve assignments and parity with a deterministic backtracking search over molecule states, transforms, phases, and connector choices;
+   - reject incompatible layouts instead of deleting creases or recoloring arbitrary individual edges.
 5. Normalize the compiler output into this repo's canonical FOLD graph.
 6. Run Rabbit Ear strict validation:
    - local Kawasaki/Maekawa;
