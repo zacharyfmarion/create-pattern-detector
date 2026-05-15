@@ -1,5 +1,6 @@
 import { roleCounts } from "./fold-utils.ts";
 import { arrangeSegments } from "./line-arrangement.ts";
+import { alternatingSequence, type PortAssignment, type SolverPort } from "./bp-port-assignment-solver.ts";
 import type { BPRole, EdgeAssignment, FOLDFormat } from "./types.ts";
 
 type Point = [number, number];
@@ -17,6 +18,17 @@ export interface DiagonalStaircaseCapOptions {
   laneCount: number;
   startAxisAssignment: Extract<EdgeAssignment, "M" | "V">;
   corner?: StaircaseCapCorner;
+}
+
+export interface StaircaseCapPortProfile {
+  corner: StaircaseCapCorner;
+  laneCount: number;
+  gridSize: number;
+  ridgeOrientation: Extract<SolverPort["orientation"], "diagonal-positive" | "diagonal-negative">;
+  axisSequence: PortAssignment[];
+  hingeSequence: PortAssignment[];
+  diagonalPort: SolverPort;
+  lanePositions: Point[];
 }
 
 export function buildDiagonalStaircaseCapPrimitive(options: DiagonalStaircaseCapOptions): FOLDFormat {
@@ -62,6 +74,39 @@ export function buildDiagonalStaircaseCapPrimitive(options: DiagonalStaircaseCap
     axisCount: counts.axis ?? 0,
   };
   return fold;
+}
+
+export function staircaseCapPortProfile(options: DiagonalStaircaseCapOptions): StaircaseCapPortProfile {
+  const laneCount = Math.max(1, Math.floor(options.laneCount));
+  const gridSize = laneCount + 3;
+  const corner = options.corner ?? "bottom-left";
+  const axisSequence = alternatingSequence(options.startAxisAssignment, laneCount);
+  const hingeSequence = axisSequence.map(opposite);
+  const lanePositions = Array.from({ length: laneCount }, (_, index): Point => {
+    const t = (index + 2) / gridSize;
+    return transformPoint([t, t], corner);
+  });
+  const ridgeOrientation = corner === "bottom-left" || corner === "top-right"
+    ? "diagonal-positive"
+    : "diagonal-negative";
+  return {
+    corner,
+    laneCount,
+    gridSize,
+    ridgeOrientation,
+    axisSequence,
+    hingeSequence,
+    lanePositions,
+    diagonalPort: {
+      id: `${corner}:diagonal-staircase-cap`,
+      orientation: ridgeOrientation,
+      side: "interior",
+      width: laneCount,
+      parity: "integer",
+      sequence: axisSequence,
+      role: "ridge",
+    },
+  };
 }
 
 function transformSegment(segment: StaircaseCapSegment, corner: StaircaseCapCorner): StaircaseCapSegment {
