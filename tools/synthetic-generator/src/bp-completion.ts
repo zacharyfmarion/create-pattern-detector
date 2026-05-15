@@ -41,6 +41,7 @@ export interface BoxPleatCompletionOptions {
 
 const ENGINE_VERSION = "strict-bp-completion/v0.7.0";
 const DEFAULT_GRID_SIZE = 128;
+const BP_STUDIO_GRID_SUBDIVISION = 4;
 const PATCH_LIBRARY = moleculePatchLibrary();
 
 export function completeBoxPleat(spec: BPStudioAdapterSpec, options: BoxPleatCompletionOptions = {}): CompletionResult {
@@ -144,11 +145,11 @@ export function regularizeBPStudioLayout(
   spec: BPStudioAdapterSpec,
   options: BoxPleatCompletionOptions = {},
 ): CompletionLayout {
-  const gridSize = options.gridSize ?? DEFAULT_GRID_SIZE;
-  const adapterLayout = options.adapterMetadata?.layout;
+  const adapterLayout = options.adapterMetadata?.optimizedLayout ?? options.adapterMetadata?.layout;
   const sheet = adapterLayout?.sheet ?? options.adapterSpec?.sheet ?? { width: spec.sheet.width, height: spec.sheet.height };
   const sheetWidth = Math.max(1, sheet.width);
   const sheetHeight = Math.max(1, sheet.height);
+  const gridSize = options.gridSize ?? compilerGridSizeForSheet(sheetWidth, sheetHeight);
   const optimizedFlaps = adapterLayout?.flaps ?? [];
   const terminalByNodeId = new Map(spec.layout.flaps.map((terminal) => [terminal.nodeId, terminal]));
   const terminalByIndex = new Map(spec.layout.flaps.map((terminal, index) => [index, terminal]));
@@ -161,8 +162,8 @@ export function regularizeBPStudioLayout(
   }))).map((flap, index) => {
     const adapterNodeId = options.adapterSpec?.nodeIdByAdapterId?.[String(flap.id)];
     const sourceTerminal = adapterNodeId ? terminalByNodeId.get(adapterNodeId) : terminalByIndex.get(index);
-    const x = snap(clamp((flap.x + (flap.width ?? 0) / 2) / sheetWidth, 0.05, 0.95), gridSize);
-    const y = snap(clamp((flap.y + (flap.height ?? 0) / 2) / sheetHeight, 0.05, 0.95), gridSize);
+    const x = snap(clamp((flap.x + (flap.width ?? 0) / 2) / sheetWidth, 0, 1), gridSize);
+    const y = snap(clamp((flap.y + (flap.height ?? 0) / 2) / sheetHeight, 0, 1), gridSize);
     return {
       id: sourceTerminal?.nodeId ?? `flap-${flap.id}`,
       nodeId: String(flap.id),
@@ -897,6 +898,34 @@ function toLayoutMetadata(layout: CompletionLayout): LayoutMetadata {
 function gridSizeForFold(fold: FOLDFormat, preferred: number): number {
   const candidates = [...new Set([preferred, 128, 256, 512, 1024, 2048])].sort((a, b) => a - b);
   return candidates.find((gridSize) => fold.vertices_coords.every(([x, y]) => onHalfGrid(x, gridSize) && onHalfGrid(y, gridSize))) ?? preferred;
+}
+
+export function compilerGridSizeForSheet(sheetWidth: number, sheetHeight: number): number {
+  const widthUnits = integerSheetUnits(sheetWidth);
+  const heightUnits = integerSheetUnits(sheetHeight);
+  if (widthUnits && heightUnits) return lcm(widthUnits, heightUnits) * BP_STUDIO_GRID_SUBDIVISION;
+  return DEFAULT_GRID_SIZE;
+}
+
+function integerSheetUnits(value: number): number | undefined {
+  const rounded = Math.round(value);
+  if (rounded > 0 && Math.abs(value - rounded) < 1e-8) return rounded;
+  return undefined;
+}
+
+function lcm(a: number, b: number): number {
+  return Math.abs(a * b) / gcd(a, b);
+}
+
+function gcd(a: number, b: number): number {
+  let left = Math.abs(a);
+  let right = Math.abs(b);
+  while (right !== 0) {
+    const next = left % right;
+    left = right;
+    right = next;
+  }
+  return left || 1;
 }
 
 function onHalfGrid(value: number, gridSize: number): boolean {

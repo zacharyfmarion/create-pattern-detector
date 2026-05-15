@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { compilerGridSizeForSheet, regularizeBPStudioLayout } from "../src/bp-completion.ts";
 import { runBPStudioAdapter, toAdapterSpec } from "../src/bp-studio-realistic.ts";
 import { simpleQuadrupedBPStudioSpec } from "../src/bp-studio-fixtures.ts";
 import {
@@ -24,6 +25,29 @@ test("BP Studio optimized simple quadruped packing has no overlapping flap circl
   expect(validation.metrics.overlapCount).toBe(0);
   expect(validation.metrics.minGap ?? 0).toBeGreaterThanOrEqual(-1e-8);
   expect(validation.circles.find((circle) => circle.nodeId === "tail")?.radius).toBe(3);
+});
+
+test("regularized compiler grid is a multiple of BP Studio optimized sheet units", () => {
+  const spec = simpleQuadrupedBPStudioSpec(7);
+  const adapterSpec = toAdapterSpec(spec);
+  adapterSpec.optimizeLayout = true;
+  adapterSpec.optimizerLayout = "view";
+  adapterSpec.optimizerSeed = 7;
+  adapterSpec.optimizerUseBH = true;
+
+  const { metadata } = runBPStudioAdapter(adapterSpec);
+  const layout = regularizeBPStudioLayout(spec, { adapterSpec, adapterMetadata: metadata });
+
+  expect(compilerGridSizeForSheet(7, 7)).toBe(28);
+  expect(layout.gridSize).toBe(28);
+  expect(layout.terminals.find((terminal) => terminal.id === "head")).toMatchObject({
+    x: 4 / 7,
+    y: 6 / 7,
+  });
+  expect(layout.terminals.find((terminal) => terminal.id === "tail")).toMatchObject({
+    x: 3 / 7,
+    y: 0,
+  });
 });
 
 test("packing validity rejects overlapping flap allocation circles", () => {

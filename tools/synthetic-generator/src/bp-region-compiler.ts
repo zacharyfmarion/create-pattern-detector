@@ -30,6 +30,12 @@ type Point = [number, number];
 
 const DEFAULT_CORRIDOR_WIDTH = 0.25;
 
+interface CorridorEndpoint {
+  id: string;
+  center: CompletionPoint;
+  rect?: RegionRect;
+}
+
 export type RegionFixtureName = "two-flap-stretch" | "three-flap-relay" | "five-flap-uniaxial" | "insect-lite";
 
 export interface CompileRegionCandidateOptions {
@@ -344,14 +350,14 @@ function corridorPleatStripRegions(
   flaps: FlapRegion[],
   bodies: BodyPanelRegion[],
 ): PleatStripRegion[] {
-  const centers = new Map<string, CompletionPoint>();
-  for (const flap of flaps) centers.set(flap.terminalId, flap.center);
-  for (const body of bodies) centers.set(body.id, body.center);
-  if (!centers.has("body") && bodies[0]) centers.set("body", bodies[0].center);
+  const endpoints = new Map<string, CorridorEndpoint>();
+  for (const flap of flaps) endpoints.set(flap.terminalId, { id: flap.terminalId, center: flap.center, rect: flap.rect });
+  for (const body of bodies) endpoints.set(body.id, { id: body.id, center: body.center, rect: body.rect });
+  if (!endpoints.has("body") && bodies[0]) endpoints.set("body", { id: "body", center: bodies[0].center, rect: bodies[0].rect });
 
   return layout.corridors.flatMap((corridor, index) => {
-    const from = centers.get(corridor.from);
-    const to = centers.get(corridor.to);
+    const from = endpoints.get(corridor.from);
+    const to = endpoints.get(corridor.to);
     if (!from || !to) return [];
     return [corridorPleatStripRegion(corridor, from, to, layout.gridSize, index)];
   });
@@ -359,8 +365,8 @@ function corridorPleatStripRegions(
 
 function corridorPleatStripRegion(
   corridor: CompletionCorridor,
-  from: CompletionPoint,
-  to: CompletionPoint,
+  from: CorridorEndpoint,
+  to: CorridorEndpoint,
   gridSize: number,
   index: number,
 ): PleatStripRegion {
@@ -371,19 +377,23 @@ function corridorPleatStripRegion(
   let rect: RegionRect;
   if (corridor.orientation === "horizontal") {
     const y = snapToStep(corridor.coordinate, pitch);
+    const x1 = endpointBoundaryCoordinate(from, to.center, "horizontal");
+    const x2 = endpointBoundaryCoordinate(to, from.center, "horizontal");
     rect = normalizeRect({
-      x1: snapToStep(from.x, pitch),
+      x1: snapToStep(x1, pitch),
       y1: snapToStep(y - half, pitch),
-      x2: snapToStep(to.x, pitch),
+      x2: snapToStep(x2, pitch),
       y2: snapToStep(y + half, pitch),
     });
   } else {
     const x = snapToStep(corridor.coordinate, pitch);
+    const y1 = endpointBoundaryCoordinate(from, to.center, "vertical");
+    const y2 = endpointBoundaryCoordinate(to, from.center, "vertical");
     rect = normalizeRect({
       x1: snapToStep(x - half, pitch),
-      y1: snapToStep(from.y, pitch),
+      y1: snapToStep(y1, pitch),
       x2: snapToStep(x + half, pitch),
-      y2: snapToStep(to.y, pitch),
+      y2: snapToStep(y2, pitch),
     });
   }
   return {
@@ -397,6 +407,18 @@ function corridorPleatStripRegion(
     startAssignment: index % 2 === 0 ? "M" : "V",
     treeEdgeId: corridor.id,
   };
+}
+
+function endpointBoundaryCoordinate(
+  endpoint: CorridorEndpoint,
+  toward: CompletionPoint,
+  corridorOrientation: CompletionCorridor["orientation"],
+): number {
+  if (!endpoint.rect) return corridorOrientation === "horizontal" ? endpoint.center.x : endpoint.center.y;
+  if (corridorOrientation === "horizontal") {
+    return toward.x >= endpoint.center.x ? endpoint.rect.x2 : endpoint.rect.x1;
+  }
+  return toward.y >= endpoint.center.y ? endpoint.rect.y2 : endpoint.rect.y1;
 }
 
 function flapRegion(terminal: CompletionTerminal, gridSize: number): FlapRegion {
@@ -588,7 +610,7 @@ function offGridRejections(segments: RegionCandidateSegment[], gridSize: number)
   const result: string[] = [];
   for (const item of segments) {
     const axisAligned = item.p1[0] === item.p2[0] || item.p1[1] === item.p2[1];
-    const diagonal45 = Math.abs(Math.abs(item.p1[0] - item.p2[0]) - Math.abs(item.p1[1] - item.p2[1])) < 1e-9;
+    const diagonal45 = Math.abs(Math.abs(item.p1[0] - item.p2[0]) - Math.abs(item.p1[1] - item.p2[1])) < 1e-6;
     if (!axisAligned && !diagonal45) {
       result.push(`non-grid-angle:${item.id}`);
       continue;
@@ -720,7 +742,7 @@ function snapEvenDistance(value: number, gridSize: number): number {
 }
 
 function pleatPitchForGrid(gridSize: number): number {
-  return round(1 / Math.min(gridSize, 32));
+  return 1 / Math.min(gridSize, 32);
 }
 
 function nextGridInside(value: number, pitch: number): number {
@@ -728,8 +750,8 @@ function nextGridInside(value: number, pitch: number): number {
 }
 
 function isOnGrid(value: number, gridSize: number): boolean {
-  const pitch = pleatPitchForGrid(gridSize);
-  return Math.abs(value / pitch - Math.round(value / pitch)) < 1e-9;
+  const denominator = Math.min(gridSize, 32);
+  return Math.abs(value * denominator - Math.round(value * denominator)) < 1e-6;
 }
 
 function roundPoint(point: Point): Point {

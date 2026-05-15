@@ -93,6 +93,7 @@ Current implementation detail:
 - `bp-studio-packing-validity` extracts optimized flap centers from BP Studio metadata and uses the corresponding tree-edge length as the flap allocation circle radius.
 - Pairwise circle overlap is a hard error because it means the BP Studio-style flap territories collide.
 - Circle overflow beyond the sheet boundary is reported as a warning for now, not a production hard gate, because BP Studio can place zero-area terminal points on the sheet boundary while showing the relevant in-sheet arc. If we later confirm that full-circle containment is required for the specific production scaffold, promote this warning to a hard rejection and update this document.
+- The compiler lattice for optimized layouts is derived from BP Studio's optimized sheet dimensions. A `7 x 7` optimized sheet uses a `28` compiler grid by default, which preserves BP Studio integer coordinates and gives four compiler lanes per BP Studio cell. Do not fall back to a standalone `32/128` lattice for optimized BP Studio layouts, because that makes circles, corridors, and debug grids visually and geometrically disagree.
 
 ## Backtracking Strategy
 
