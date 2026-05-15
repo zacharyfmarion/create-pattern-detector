@@ -13,11 +13,15 @@ import { runBPStudioAdapter, toAdapterSpec } from "./bp-studio-realistic.ts";
 import {
   BP_STUDIO_ARCHETYPES,
   BP_STUDIO_COMPLEXITY_BUCKETS,
-  BP_STUDIO_SPEC_SCHEMA_VERSION,
   type BPStudioAdapterSpec,
   type BPStudioArchetype,
   type BPStudioComplexityBucket,
 } from "./bp-studio-spec.ts";
+import { simpleQuadrupedBPStudioSpec } from "./bp-studio-fixtures.ts";
+import {
+  validateBPStudioPacking,
+  type BPStudioPackingValidation,
+} from "./bp-studio-packing-validity.ts";
 import type { AdapterMetadata } from "./bp-studio-realistic.ts";
 import type { RegionCompletionCandidate } from "./bp-completion-contracts.ts";
 
@@ -53,7 +57,7 @@ async function main(): Promise<void> {
   const rendered: RenderedCandidate[] = [];
   if (options.bpStudioSample) {
     const spec = options.simpleAnimal
-      ? simpleAnimalSpec(options.seed)
+      ? simpleQuadrupedBPStudioSpec(options.seed)
       : generateBPStudioSpec({
         seed: options.seed,
         archetype: options.archetype,
@@ -65,6 +69,7 @@ async function main(): Promise<void> {
     adapterSpec.optimizerSeed = options.seed;
     adapterSpec.optimizerUseBH = options.optimizerUseBH;
     const { metadata: adapterMetadata } = runBPStudioAdapter(adapterSpec);
+    const packingValidity = validateBPStudioPacking(spec, adapterMetadata);
     const completionLayout = regularizeBPStudioLayout(spec, {
       adapterSpec,
       adapterMetadata,
@@ -86,7 +91,8 @@ async function main(): Promise<void> {
     await writeFile(join(options.out, `${label}.json`), JSON.stringify(candidate, null, 2));
     await writeFile(join(options.out, `${label}.spec.json`), JSON.stringify(spec, null, 2));
     await writeFile(join(options.out, `${label}.adapter_metadata.json`), JSON.stringify(adapterMetadata, null, 2));
-    await writeFile(join(options.out, `${label}.three_panel.svg`), threePanelSvg(spec, adapterMetadata, candidate, options.size));
+    await writeFile(join(options.out, `${label}.packing_validity.json`), JSON.stringify(packingValidity, null, 2));
+    await writeFile(join(options.out, `${label}.three_panel.svg`), threePanelSvg(spec, adapterMetadata, candidate, packingValidity, options.size));
   } else {
     const fixtures = options.allFixtures ? [...FIXTURES] : [options.fixture];
     for (const fixture of fixtures) {
@@ -200,105 +206,6 @@ function requiredValue(value: string | undefined, flag: string): string {
   return value;
 }
 
-function simpleAnimalSpec(seed: number): BPStudioAdapterSpec {
-  const nodes: BPStudioAdapterSpec["tree"]["nodes"] = [
-    { id: "root", kind: "root", label: "root" },
-    { id: "front-hub", kind: "body", label: "front hub", tags: ["torso", "hub"] },
-    { id: "rear-hub", kind: "body", label: "rear hub", tags: ["torso", "hub"] },
-    { id: "head", kind: "flap", label: "head", tags: ["terminal"] },
-    { id: "tail", kind: "flap", label: "tail", tags: ["terminal"] },
-    { id: "front-left-leg", kind: "flap", label: "front left leg", tags: ["terminal", "leg"] },
-    { id: "front-right-leg", kind: "flap", label: "front right leg", tags: ["terminal", "leg"] },
-    { id: "rear-left-leg", kind: "flap", label: "rear left leg", tags: ["terminal", "leg"] },
-    { id: "rear-right-leg", kind: "flap", label: "rear right leg", tags: ["terminal", "leg"] },
-  ];
-  const treeEdges: BPStudioAdapterSpec["tree"]["edges"] = [
-    { id: "root-front-hub", from: "root", to: "front-hub", length: 0, role: "body", width: 1 },
-    { id: "front-head", from: "front-hub", to: "head", length: 1, role: "appendage", width: 1 },
-    { id: "front-left-leg", from: "front-hub", to: "front-left-leg", length: 1, role: "appendage", width: 1 },
-    { id: "front-right-leg", from: "front-hub", to: "front-right-leg", length: 1, role: "appendage", width: 1 },
-    { id: "front-rear-river", from: "front-hub", to: "rear-hub", length: 2, role: "river", width: 1 },
-    { id: "rear-left-leg", from: "rear-hub", to: "rear-left-leg", length: 1, role: "appendage", width: 1 },
-    { id: "rear-right-leg", from: "rear-hub", to: "rear-right-leg", length: 1, role: "appendage", width: 1 },
-    { id: "rear-tail", from: "rear-hub", to: "tail", length: 3, role: "appendage", width: 1 },
-  ];
-  const riverHints = [
-    ["front-head", "front-hub", "head", "vertical"],
-    ["front-left-leg", "front-hub", "front-left-leg", "horizontal"],
-    ["front-right-leg", "front-hub", "front-right-leg", "horizontal"],
-    ["front-rear-river", "front-hub", "rear-hub", "vertical"],
-    ["rear-left-leg", "rear-hub", "rear-left-leg", "horizontal"],
-    ["rear-right-leg", "rear-hub", "rear-right-leg", "horizontal"],
-    ["rear-tail", "rear-hub", "tail", "vertical"],
-  ] as const;
-  const flapPlacements: BPStudioAdapterSpec["layout"]["flaps"] = [
-    { nodeId: "head", label: "head", class: "terminal", terminal: { x: 16, y: 25 }, side: "top", width: 0, height: 0, elevation: 0, terminalRadius: 1, priority: 1 },
-    { nodeId: "front-left-leg", label: "front left leg", class: "terminal", terminal: { x: 12, y: 21 }, side: "left", width: 0, height: 0, elevation: 0, terminalRadius: 1, priority: 2, mirroredWith: "front-right-leg" },
-    { nodeId: "front-right-leg", label: "front right leg", class: "terminal", terminal: { x: 20, y: 21 }, side: "right", width: 0, height: 0, elevation: 0, terminalRadius: 1, priority: 3, mirroredWith: "front-left-leg" },
-    { nodeId: "rear-left-leg", label: "rear left leg", class: "terminal", terminal: { x: 12, y: 12 }, side: "left", width: 0, height: 0, elevation: 0, terminalRadius: 1, priority: 4, mirroredWith: "rear-right-leg" },
-    { nodeId: "rear-right-leg", label: "rear right leg", class: "terminal", terminal: { x: 20, y: 12 }, side: "right", width: 0, height: 0, elevation: 0, terminalRadius: 1, priority: 5, mirroredWith: "rear-left-leg" },
-    { nodeId: "tail", label: "tail", class: "terminal", terminal: { x: 16, y: 5 }, side: "bottom", width: 0, height: 0, elevation: 0, terminalRadius: 3, priority: 6 },
-  ];
-  return {
-    schemaVersion: BP_STUDIO_SPEC_SCHEMA_VERSION,
-    id: `simple-animal-${seed}`,
-    seed,
-    archetype: "quadruped",
-    expectedComplexity: {
-      bucket: "small",
-      targetFlaps: [6, 6],
-      targetTreeEdges: [8, 8],
-      targetCreases: [80, 220],
-      expectedGridSize: [16, 32],
-    },
-    sheet: {
-      width: 32,
-      height: 32,
-      gridSize: 32,
-      margin: 1,
-      coordinateSystem: "integer-grid",
-      unit: "bp-grid",
-    },
-    tree: {
-      rootId: "root",
-      nodes,
-      edges: treeEdges,
-    },
-    layout: {
-      symmetry: "bilateral-x",
-      bodies: [
-        { nodeId: "front-hub", label: "front hub", center: { x: 16, y: 21 }, width: 2, height: 2, elevation: 0, tags: ["torso", "hub"] },
-        { nodeId: "rear-hub", label: "rear hub", center: { x: 16, y: 12 }, width: 2, height: 2, elevation: 0, tags: ["torso", "hub"] },
-      ],
-      flaps: flapPlacements,
-      rivers: riverHints.map(([id, from, to, preferredAxis]) => ({
-        edgeId: id,
-        from,
-        to,
-        width: 2,
-        preferredAxis,
-        bend: preferredAxis === "horizontal" ? "direct" : "dogleg",
-        clearance: 1,
-      })),
-      optimizerHints: {
-        objective: "compact-flaps",
-        keepSymmetry: false,
-        allowTerminalRelaxation: true,
-        maxIterations: 5000,
-        topK: 5,
-      },
-    },
-    sampler: {
-      samplerVersion: "bp-studio-sampler/v1",
-      grammar: "debug-simple-animal",
-      seed,
-      variation: seed,
-      symmetry: "bilateral-x",
-      notes: ["Debug fixture: body, head, tail, and four legs only."],
-    },
-  };
-}
-
 function contactSheetSvg(items: RenderedCandidate[], size: number): string {
   const columns = Math.min(2, Math.max(1, items.length));
   const labelHeight = 56;
@@ -333,6 +240,7 @@ function threePanelSvg(
   spec: BPStudioAdapterSpec,
   adapterMetadata: AdapterMetadata,
   candidate: RegionCompletionCandidate,
+  packingValidity: BPStudioPackingValidation,
   panelSize: number,
 ): string {
   const gutter = Math.max(24, Math.round(panelSize * 0.035));
@@ -353,8 +261,8 @@ function threePanelSvg(
     {
       x: gutter * 2 + panelSize,
       title: "2. BP Studio Optimized Packing",
-      subtitle: adapterMetadata.layout?.optimized
-        ? `${adapterMetadata.spec?.optimizerLayout ?? "unknown"} optimizer${adapterMetadata.spec?.optimizerUseBH ? " + variations" : ""}, sheet ${formatSheetSize(chosenLayout(adapterMetadata)?.sheet)}`
+      subtitle: chosenLayout(adapterMetadata)?.optimized
+        ? `${adapterMetadata.spec?.optimizerLayout ?? "unknown"} optimizer${adapterMetadata.spec?.optimizerUseBH ? " + variations" : ""}, sheet ${formatSheetSize(chosenLayout(adapterMetadata)?.sheet)}, ${packingSubtitle(packingValidity)}`
         : "adapter did not report optimized layout",
       body: packingPanel(spec, adapterMetadata, panelSize),
       legend: packingLegendOutside(panelSize),
@@ -552,6 +460,13 @@ function chosenLayout(adapterMetadata: AdapterMetadata): NonNullable<AdapterMeta
 function formatSheetSize(sheet: { width?: number; height?: number } | undefined): string {
   if (!sheet?.width || !sheet?.height) return "unknown";
   return `${round2(sheet.width)} x ${round2(sheet.height)}`;
+}
+
+function packingSubtitle(validity: BPStudioPackingValidation): string {
+  const status = validity.ok ? "no circle overlaps" : `${validity.metrics.overlapCount} circle overlaps`;
+  const outside = validity.metrics.outsideCount ? `, ${validity.metrics.outsideCount} boundary warnings` : "";
+  const minGap = validity.metrics.minGap === null ? "" : `, min gap ${round2(validity.metrics.minGap)}`;
+  return `${status}${outside}${minGap}`;
 }
 
 function sheetGridForSheet(width: number, height: number, size: number): string {

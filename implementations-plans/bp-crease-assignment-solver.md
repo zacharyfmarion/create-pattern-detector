@@ -88,6 +88,12 @@ Port compatibility must check at least:
 
 These checks happen before full FOLD arrangement so bad layouts fail cheaply.
 
+Current implementation detail:
+
+- `bp-studio-packing-validity` extracts optimized flap centers from BP Studio metadata and uses the corresponding tree-edge length as the flap allocation circle radius.
+- Pairwise circle overlap is a hard error because it means the BP Studio-style flap territories collide.
+- Circle overflow beyond the sheet boundary is reported as a warning for now, not a production hard gate, because BP Studio can place zero-area terminal points on the sheet boundary while showing the relevant in-sheet arc. If we later confirm that full-circle containment is required for the specific production scaffold, promote this warning to a hard rejection and update this document.
+
 ## Backtracking Strategy
 
 Use constraint search rather than a fixed left-to-right placement order.
