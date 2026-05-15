@@ -349,6 +349,7 @@ function candidateOverlayPanel(
   const scale = sheetScale(sheet.width, sheet.height, size);
   const terminalLengths = terminalLengthByAdapterId(spec);
   const optimizedFlaps = (layout?.flaps ?? []).map((flap) => adapterFlapMark(flap, toPanel, scale, terminalLengths.get(flap.id), "#22c55e", "#15803d", false));
+  const routeOverlay = compilerRouteOverlay(candidate, size);
   const candidateSvg = regionCandidateToSvg(candidate, size, {
     showGrid: false,
     showLegend: false,
@@ -360,8 +361,89 @@ function candidateOverlayPanel(
   return panelFrame(size, [
     sheetGridForSheet(sheet.width, sheet.height, size),
     candidateSvg,
+    routeOverlay,
     `<g opacity="0.72">${optimizedFlaps.join("\n")}</g>`,
   ], false, "bp-candidate-overlay-clip");
+}
+
+function compilerRouteOverlay(candidate: RegionCompletionCandidate, size: number): string {
+  const toPx = (point: { x: number; y: number }): { x: number; y: number } => ({
+    x: Math.round(point.x * size),
+    y: Math.round((1 - point.y) * size),
+  });
+  const endpoints = new Map<string, { x: number; y: number; kind: "body" | "flap"; label: string }>();
+  for (const body of candidate.layout.bodies) {
+    endpoints.set(body.id, { ...body.center, kind: "body", label: body.id });
+  }
+  for (const flap of candidate.layout.flaps) {
+    endpoints.set(flap.terminalId, { ...flap.center, kind: "flap", label: flap.terminalId });
+    endpoints.set(flap.id, { ...flap.center, kind: "flap", label: flap.terminalId });
+  }
+  const anchors = [...endpoints.entries()]
+    .filter(([, endpoint]) => endpoint.kind === "body")
+    .map(([id, endpoint]) => {
+      const p = toPx(endpoint);
+      return [
+        `<circle cx="${p.x}" cy="${p.y}" r="5.2" fill="#bfdbfe" stroke="#1d4ed8" stroke-width="1.5"/>`,
+        `<text x="${p.x + 7}" y="${p.y - 7}" font-family="Inter, Arial, sans-serif" font-size="9.5" fill="#1e3a8a">${escapeXml(id)}</text>`,
+      ].join("\n");
+    });
+  const routes = candidate.layout.pleatStrips.map((strip) => {
+    const from = endpoints.get(strip.from);
+    const to = endpoints.get(strip.to);
+    if (!from || !to) return "";
+    const [a, b] = stripAxisEndpoints(strip);
+    const direct = distanceSquared(from, a) + distanceSquared(to, b);
+    const swapped = distanceSquared(from, b) + distanceSquared(to, a);
+    const fromPort = direct <= swapped ? a : b;
+    const toPort = direct <= swapped ? b : a;
+    const fromPx = toPx(from);
+    const toPxPoint = toPx(to);
+    const fromPortPx = toPx(fromPort);
+    const toPortPx = toPx(toPort);
+    const mid = toPx({ x: (fromPort.x + toPort.x) / 2, y: (fromPort.y + toPort.y) / 2 });
+    const label = strip.treeEdgeId ?? strip.id.replace(/^strip-\d+-/, "");
+    return [
+      `<line x1="${fromPx.x}" y1="${fromPx.y}" x2="${fromPortPx.x}" y2="${fromPortPx.y}" stroke="#64748b" stroke-width="1.2" stroke-opacity="0.52" stroke-dasharray="3 4"/>`,
+      `<line x1="${toPxPoint.x}" y1="${toPxPoint.y}" x2="${toPortPx.x}" y2="${toPortPx.y}" stroke="#64748b" stroke-width="1.2" stroke-opacity="0.52" stroke-dasharray="3 4"/>`,
+      `<line x1="${fromPortPx.x}" y1="${fromPortPx.y}" x2="${toPortPx.x}" y2="${toPortPx.y}" stroke="#7c3aed" stroke-width="2.2" stroke-opacity="0.82" stroke-dasharray="7 5" stroke-linecap="round"/>`,
+      routePortDot(fromPortPx, from.kind),
+      routePortDot(toPortPx, to.kind),
+      `<g transform="translate(${mid.x},${mid.y})">`,
+      `<rect x="-24" y="-10" width="48" height="16" rx="4" fill="#ffffff" fill-opacity="0.88" stroke="#ddd6fe" stroke-width="0.8"/>`,
+      `<text x="0" y="2" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="8.8" font-weight="700" fill="#5b21b6">${escapeXml(shortRouteLabel(label))}</text>`,
+      `</g>`,
+    ].join("\n");
+  });
+  return `<g data-debug-overlay="compiler-routes">${anchors.join("\n")}${routes.join("\n")}</g>`;
+}
+
+function stripAxisEndpoints(strip: RegionCompletionCandidate["layout"]["pleatStrips"][number]): [{ x: number; y: number }, { x: number; y: number }] {
+  const rect = strip.rect;
+  if (strip.orientation === "vertical") {
+    const y = (rect.y1 + rect.y2) / 2;
+    return [{ x: rect.x1, y }, { x: rect.x2, y }];
+  }
+  const x = (rect.x1 + rect.x2) / 2;
+  return [{ x, y: rect.y1 }, { x, y: rect.y2 }];
+}
+
+function routePortDot(point: { x: number; y: number }, kind: "body" | "flap"): string {
+  const fill = kind === "flap" ? "#f97316" : "#2563eb";
+  return `<circle cx="${point.x}" cy="${point.y}" r="4.4" fill="${fill}" fill-opacity="0.96" stroke="#ffffff" stroke-width="1.2"/>`;
+}
+
+function shortRouteLabel(label: string): string {
+  return label
+    .replace(/^front-/, "f-")
+    .replace(/^rear-/, "r-")
+    .replace("-right-", "-R-")
+    .replace("-left-", "-L-")
+    .replace("-hub", "");
+}
+
+function distanceSquared(a: { x: number; y: number }, b: { x: number; y: number }): number {
+  return (a.x - b.x) ** 2 + (a.y - b.y) ** 2;
 }
 
 function panelFrame(size: number, body: string[], includeBorder = true, clipId?: string): string {
@@ -584,6 +666,7 @@ function packingLegendOutside(size: number): string {
 function compilerLegendOutside(size: number): string {
   const y1 = 34;
   const y2 = 72;
+  const y3 = 102;
   return [
     legendBand(size, "Compiler overlay legend"),
     `<rect x="16" y="${y1 - 9}" width="22" height="18" fill="#ffdf4d" fill-opacity="0.72" stroke="#ca8a04" stroke-width="0.8"/><text x="48" y="${y1 + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">pleat corridor</text>`,
@@ -592,12 +675,15 @@ function compilerLegendOutside(size: number): string {
     `<line x1="16" y1="${y2}" x2="48" y2="${y2}" stroke="#0057ff" stroke-width="3" stroke-linecap="round"/><text x="58" y="${y2 + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">valley</text>`,
     `<line x1="170" y1="${y2}" x2="202" y2="${y2}" stroke="#0057ff" stroke-width="2" stroke-dasharray="5 4" stroke-linecap="round"/><text x="212" y="${y2 + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">debug boundary</text>`,
     `<text x="350" y="${y2 + 4}" font-family="Inter, Arial, sans-serif" font-size="11" fill="#64748b">Fills are scaffold/debug only</text>`,
+    `<line x1="16" y1="${y3}" x2="48" y2="${y3}" stroke="#7c3aed" stroke-width="2.2" stroke-dasharray="7 5" stroke-linecap="round"/><text x="58" y="${y3 + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">selected route lane</text>`,
+    `<circle cx="184" cy="${y3}" r="4.4" fill="#f97316" stroke="#ffffff" stroke-width="1.2"/><text x="198" y="${y3 + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">circle contact</text>`,
+    `<line x1="310" y1="${y3}" x2="340" y2="${y3}" stroke="#64748b" stroke-width="1.2" stroke-dasharray="3 4"/><text x="350" y="${y3 + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">center-to-port guide</text>`,
   ].join("\n");
 }
 
 function legendBand(size: number, title: string): string {
   return [
-    `<rect x="0" y="0" width="${size}" height="100" rx="8" fill="#ffffff" fill-opacity="0.96" stroke="#cbd5e1"/>`,
+    `<rect x="0" y="0" width="${size}" height="116" rx="8" fill="#ffffff" fill-opacity="0.96" stroke="#cbd5e1"/>`,
     `<text x="14" y="18" font-family="Inter, Arial, sans-serif" font-size="13" font-weight="700" fill="#0f172a">${escapeXml(title)}</text>`,
   ].join("\n");
 }
