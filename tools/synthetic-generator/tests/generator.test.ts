@@ -13,8 +13,8 @@ test("strict validation APIs are available", () => {
   expect(typeof ear.layer.solver).toBe("function");
 });
 
-test("synthetic generation is BP-Studio-only", () => {
-  expect(availableFamilies()).toEqual(["bp-studio-realistic"]);
+test("synthetic generation is BP-Studio-backed-only", () => {
+  expect(availableFamilies()).toEqual(["bp-studio-realistic", "bp-studio-completed"]);
   expect(() =>
     generateFold({
       id: "legacy",
@@ -23,18 +23,37 @@ test("synthetic generation is BP-Studio-only", () => {
       numCreases: 80,
       bucket: "small",
     }),
-  ).toThrow(/BP-Studio-only/);
+  ).toThrow(/BP-Studio-backed-only/);
 });
 
-test("BP Studio production recipe loads through Bun YAML parser", async () => {
+test("BP Studio raw diagnostic recipe loads through Bun YAML parser", async () => {
   const recipe = await loadRecipe("../../recipes/synthetic/bp_studio_realistic_v1.yaml");
   expect(recipe.name).toBe("bp_studio_realistic_v1");
-  expect(recipe.families).toEqual({ "bp-studio-realistic": 1 });
+  expect(recipe.families).toEqual({ "bp-studio-realistic": 1, "bp-studio-completed": 0 });
   expect(recipe.validation).toMatchObject({
     strictGlobal: true,
     requireBoxPleat: true,
     requireDense: true,
     requireRealistic: true,
+  });
+});
+
+test("default recipe uses compiler-backed labels", async () => {
+  const recipe = await loadRecipe();
+  expect(recipe.name).toBe("bp_completed_uniaxial_v1");
+  expect(recipe.families).toEqual({ "bp-studio-realistic": 0, "bp-studio-completed": 1 });
+  expect(recipe.validation.requireRealistic).toBe(false);
+});
+
+test("BP Studio completed recipe loads as the strict e2e smoke path", async () => {
+  const recipe = await loadRecipe("../../recipes/synthetic/bp_completed_uniaxial_v1.yaml");
+  expect(recipe.name).toBe("bp_completed_uniaxial_v1");
+  expect(recipe.families).toEqual({ "bp-studio-realistic": 0, "bp-studio-completed": 1 });
+  expect(recipe.validation).toMatchObject({
+    strictGlobal: true,
+    requireBoxPleat: true,
+    requireDense: true,
+    requireRealistic: false,
   });
 });
 

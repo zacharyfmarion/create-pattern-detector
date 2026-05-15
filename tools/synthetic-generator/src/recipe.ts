@@ -2,31 +2,29 @@ import { GENERATOR_FAMILIES } from "./types.ts";
 import type { GeneratorFamily, SyntheticRecipe } from "./types.ts";
 
 const DEFAULT_RECIPE: SyntheticRecipe = {
-  name: "bp_studio_realistic_v1",
+  name: "bp_completed_uniaxial_v1",
   seed: 9170,
   imageSize: 768,
   padding: 42,
   splits: { train: 0.85, val: 0.1, test: 0.05 },
   families: {
-    "bp-studio-realistic": 1,
+    "bp-studio-realistic": 0,
+    "bp-studio-completed": 1,
   },
   complexityBuckets: [
-    { name: "small", minCreases: 80, maxCreases: 300, weight: 0.2 },
-    { name: "medium", minCreases: 300, maxCreases: 900, weight: 0.4 },
-    { name: "dense", minCreases: 900, maxCreases: 2500, weight: 0.3 },
-    { name: "superdense", minCreases: 2500, maxCreases: 6000, weight: 0.1 },
+    { name: "small", minCreases: 80, maxCreases: 1500, weight: 1 },
   ],
   validation: {
     strictGlobal: true,
     globalBackend: "rabbit-ear-solver",
     minVertexDistance: 1e-5,
-    maxVertices: 12000,
-    maxEdges: 12000,
+    maxVertices: 4000,
+    maxEdges: 4000,
     requireBoxPleat: true,
     boxPleatMode: "dense",
     requireDense: true,
-    requireRealistic: true,
-    minRealismScore: 0.45,
+    requireRealistic: false,
+    minRealismScore: 0,
   },
   renderVariants: [
     { name: "bp_assignment_clean", assignmentVisibility: "visible", count: 1 },

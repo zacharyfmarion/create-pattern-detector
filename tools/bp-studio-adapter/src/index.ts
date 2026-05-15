@@ -64,6 +64,7 @@ export async function generate(specInput: unknown): Promise<GenerationResult> {
   const { edges } = getTreeParts(spec);
   let { flaps } = getTreeParts(spec);
   let sheet = spec.sheet;
+  const inputLayout = cloneLayout(sheet, edges, flaps);
   const useAuxiliary = spec.useAuxiliary ?? false;
   const completeRepositories = spec.completeRepositories ?? true;
   const exportMode = spec.exportMode ?? "outer";
@@ -86,7 +87,7 @@ export async function generate(specInput: unknown): Promise<GenerationResult> {
   const border = sheetBorder(sheet);
   const cpLines = getCPByMode(border, useAuxiliary, exportMode);
   const fold = toFold(cpLines, spec);
-  const metadata = collectMetadata(spec, fold, cpLines, edges, flaps, useAuxiliary, completeRepositories, exportMode, optimizeLayout, optimizerLayout, optimizerSeed);
+  const metadata = collectMetadata(spec, fold, cpLines, edges, flaps, inputLayout, useAuxiliary, completeRepositories, exportMode, optimizeLayout, optimizerLayout, optimizerSeed);
   return { fold, metadata };
 }
 
@@ -503,6 +504,7 @@ function collectMetadata(
   lines: CPLine[],
   edges: EdgeSpec[],
   flaps: FlapSpec[],
+  inputLayout: { sheet: SheetSpec; edges: EdgeSpec[]; flaps: FlapSpec[] },
   useAuxiliary: boolean,
   completeRepositories: boolean,
   exportMode: BPStudioExportMode,
@@ -531,6 +533,21 @@ function collectMetadata(
       edgeCount: edges.length,
       flapCount: flaps.length
     },
+    layout: {
+      optimized: optimizeLayout,
+      optimizerLayout,
+      sheet: spec.sheet,
+      edges,
+      flaps
+    },
+    inputLayout,
+    optimizedLayout: {
+      optimized: optimizeLayout,
+      optimizerLayout,
+      sheet: spec.sheet,
+      edges,
+      flaps
+    },
     cp: {
       lineCount: lines.length,
       vertexCount: fold.vertices_coords.length,
@@ -539,6 +556,14 @@ function collectMetadata(
       roleCounts: countRoles(fold.edges_bpRole)
     },
     stretches: collectStretchMetadata()
+  };
+}
+
+function cloneLayout(sheet: SheetSpec, edges: EdgeSpec[], flaps: FlapSpec[]): { sheet: SheetSpec; edges: EdgeSpec[]; flaps: FlapSpec[] } {
+  return {
+    sheet: { ...sheet },
+    edges: edges.map(edge => ({ ...edge })),
+    flaps: flaps.map(flap => ({ ...flap })),
   };
 }
 

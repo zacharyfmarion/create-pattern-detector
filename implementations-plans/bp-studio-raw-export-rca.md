@@ -2,7 +2,11 @@
 
 ## Status
 
-The old synthetic generator families and strict-completion fallback have been removed from the production synthetic path. `bp-studio-realistic` is now BP-Studio-or-fail: it samples a BP Studio-style tree/layout, runs the headless BP Studio adapter, normalizes the raw export, and only returns raw exports that pass local Kawasaki/Maekawa precheck before the normal strict validator runs.
+The old synthetic generator families and previous fake strict-completion fallback have been removed from the production synthetic path.
+
+`bp-studio-realistic` is diagnostic/calibration-only: it samples a BP Studio-style tree/layout, runs the headless BP Studio adapter, normalizes the raw export, and only returns raw exports that pass local Kawasaki/Maekawa precheck before the normal strict validator runs.
+
+`bp-studio-completed` is the production candidate path: it samples a tree/layout, runs BP Studio for optimizer/scaffold metadata, regularizes that layout into a restricted uniaxial compiler contract, emits the final FOLD through our own certified molecule/fold-program compiler, and then runs the normal strict validator. Raw BP Studio exported CP lines are never accepted as training labels in this path.
 
 Current raw-only smoke:
 
@@ -27,7 +31,7 @@ Optimizer experiment:
 - Added an adapter path that calls BP Studio's WASM optimizer bridge before CP export (`TreeController.getHierarchy(...)` + `Bridge.solve(...)`).
 - A 5-attempt smoke still produced `0/1` accepted.
 - Successful optimized exports still failed locally with very large counts (`~1150-1350` Kawasaki, `~1577-1848` Maekawa in representative attempts), and several sampled trees still crashed inside BP Studio layout/geometry code.
-- Conclusion: optimizer-backed coordinates are necessary for production realism, but they do not turn BP Studio's exported design CP into a strict FOLD label. The hard missing layer remains CP completion/assignment repair.
+- Conclusion: optimizer-backed coordinates are necessary for production realism, but they do not turn BP Studio's exported design CP into a strict FOLD label. The hard missing layer is our own restricted CP completion compiler, not raw-export repair.
 
 Final-rendered/source-ancestry experiment:
 
@@ -42,7 +46,22 @@ Adapter crash RCA and fixes:
 - Crash class `a.$AABB.$points[dir]`: our synthetic specs contained an artificial single-child root with no flap rectangle. BP Studio balancing can rotate that root into a directed leaf, then junction creation expects leaf AABB points and crashes. Fix: `bp-studio-realistic` now contracts the artificial root out of adapter specs, and the adapter rejects any input tree leaf without flap geometry before BP Studio junction processing.
 - Crash class `n.$right`: BP Studio's sweep-line `Clip` can crash on large final-mode line sets with tiny/duplicate segments. Fix: the adapter no longer uses BP Studio `Clip` for export; it now does conservative rectangle clipping, finite/tiny-line filtering, and exact same-type segment dedupe, leaving full planar intersection splitting to the downstream normalizer.
 - Preserved `n.$right` fixture `/var/folders/.../cp-bp-studio-BTkM9f/spec.json` now exports successfully after the adapter clip replacement: `1985` vertices, `1714` edges, assignments `{B:4, F:382, M:588, V:740}`.
-- Current 2-sample smoke after these fixes has moved the primary failure mode back to strictness: `0/1` accepted, with recent local failures such as `kawasaki=433, maekawa=461` on a medium-ish preserved export. This is expected until source-aware completion exists.
+- Current raw-export smoke after these fixes has moved the primary failure mode back to strictness: `0/1` accepted, with recent local failures such as `kawasaki=433, maekawa=461` on a medium-ish preserved export. This is expected and should not be "fixed" by greedy deletion/unassignment.
+
+Compiler-backed smoke:
+
+```bash
+cd tools/synthetic-generator
+bun run generate -- --recipe ../../recipes/synthetic/bp_completed_uniaxial_v1.yaml --count 8 --out /tmp/bp_completed_uniaxial_v1 --max-attempts 32
+```
+
+Result:
+
+- `8/8` accepted after `12` attempts.
+- Folded crease count range: `121-353`.
+- Face count range: `53-193`.
+- Rabbit Ear strict pass rate: `100%`.
+- This is not final production distribution quality yet, but it proves the intended architecture: BP Studio scaffold metadata in, compiler-generated strict FOLD out.
 
 Source-aware local diagnostics:
 
@@ -67,10 +86,14 @@ The problem is the export contract. BP Studio emits visible/design lines: sheet 
 
 This is not only caused by the random sampler. BP Studio's own tiny two-flap fixture also fails local Rabbit Ear checks after export/normalization, which means raw BP Studio CP export cannot be treated as a production training label by itself.
 
-The blocker is now sharper than "need better assignments": the arranged BP Studio export contains locally impossible active-crease geometry under the planned strict policy that all non-border BP lines are M/V. A pure M/V CSP over existing edges cannot fix vertices whose active crease count/sector geometry violates Kawasaki/Maekawa before assignment. The next production step must either:
+The blocker is now sharper than "need better assignments": the arranged BP Studio export contains locally impossible active-crease geometry under the planned strict policy that all non-border BP lines are M/V. A pure M/V CSP over existing edges cannot fix vertices whose active crease count/sector geometry violates Kawasaki/Maekawa before assignment.
 
-- generate a BP Studio-derived geometry subset whose mandatory active edges are locally feasible; or
-- add a source-aware geometry completion stage that inserts/extends BP-compatible creases before assignment solving.
+The next production step is therefore not to repair raw exports. It is to expand the restricted completion compiler:
+
+- richer certified molecule templates;
+- typed port joins with stronger compatibility checks;
+- better tree-to-macro-layout regularization from optimized BP Studio flaps/rivers;
+- visual QA gates that reject uniform diagonal wallpaper, full ruled grids, and scaffold-only outputs.
 
 ## Evidence
 
@@ -93,25 +116,20 @@ Likely cause ranking:
 
 ## Required Next Work
 
-Production data requires a true BP Studio completion/repair layer, not a fallback generator.
+Production data requires a true BP Studio-guided completion compiler, not a fallback generator and not a raw-export repairer.
 
 Ordered next patches:
 
-1. Use source-tagged BP Studio exports as the candidate geometry source. Keep `F`/auxiliary lines as candidate geometry, not forced strict valleys.
-2. Stabilize adapter/spec generation by collecting crash fixtures with `CP_KEEP_BP_STUDIO_TMP=1`, reducing the sampler's invalid layout rate, and adding fixture regressions for each BP Studio crash class.
-3. Compare local failure counts for `outer`, `final`, and carefully selected optional geometry on BP Studio fixtures. Do not use rough/trace contours as production labels unless a source-specific test proves they help.
-4. Implement a scalable local completion layer guided by BP Studio geometry and source ancestry:
-   - arrange/split all lines;
-   - classify BP Studio source lines as mandatory folds, optional construction geometry, or completion candidates using source-specific tests;
-   - reject or complete any interior vertex whose active candidate set has impossible parity/sector geometry before assignment solving;
-   - solve/search active candidate geometry and M/V assignments under Kawasaki/Maekawa;
-   - avoid greedy full-graph repair on dense exports because naive per-edge reruns are too slow and tend to erase all folded labels;
-   - then run Rabbit Ear global validation.
-5. Promote only source-ancestry-preserving, strict-global-passing repairs into the production generator. Greedy unassignment/deletion remains diagnostic-only.
+1. Expand the `CompletionLayout`, `MoleculeTemplate`, `Port`, `PortJoin`, and `CompletionResult` contracts.
+2. Add certified molecule templates for flap contours, river corridors, hinge corridors, corner fans, diagonal staircases, diamond/chevron connectors, stretch gadgets, and body panels.
+3. Improve BP Studio optimizer regularization so flap/body/river proposals snap to the restricted compiler grid with explicit rejection reasons.
+4. Compose molecules by typed ports and parity checks; reject incompatible layouts instead of deleting creases.
+5. Run arrangement, local checks, Rabbit Ear global solver, folded-preview QA, and visual-distribution gates before accepting samples.
+6. Keep raw BP Studio exports as side-by-side debug/reference overlays only.
 
 ## Non-Negotiable Gate
 
-No sample enters production training unless the raw BP Studio-derived graph or a BP Studio-geometry-based repaired graph passes:
+No sample enters production training unless the compiler-generated graph passes:
 
 - complete border;
 - no duplicate/degenerate/unsplit crossing geometry;

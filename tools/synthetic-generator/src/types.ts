@@ -10,11 +10,18 @@ export interface BPStudioEdgeSource {
   lineIndex?: number;
   clippedSegmentIndex?: number;
 }
+export interface CompilerEdgeSource {
+  kind: string;
+  mandatory: boolean;
+  moleculeKind?: string;
+  role?: BPRole;
+}
 export type BPSubfamily =
   | "two-flap-stretch"
   | "dense-molecule-tessellation"
   | "realistic-tree-base"
-  | "bp-studio-export";
+  | "bp-studio-export"
+  | "bp-studio-completed-uniaxial";
 export type DenseNonBPSubfamily = "recursive-axiom" | "expanded-classic" | "radial-multi-vertex" | "tessellation-like";
 export type RealisticBPArchetype = "insect" | "quadruped" | "bird" | "object" | "abstract";
 export type BoxPleatMode = "simple" | "dense";
@@ -87,6 +94,45 @@ export interface RealismMetadata {
   gates: Record<string, boolean>;
 }
 
+export interface CompletionMetadata {
+  engine: string;
+  version: string;
+  source: "fixture" | "bp-studio-optimized-layout";
+  scaffoldSummary: {
+    adapterLineCount: number;
+    adapterVertexCount: number;
+    adapterEdgeCount: number;
+    optimizedFlapCount: number;
+    optimizedTreeEdgeCount: number;
+  };
+  selectedCenter: [number, number];
+  selectedFlapIds: number[];
+  portJoinCount: number;
+  rejectedCandidateCount: number;
+  compilerSteps: string[];
+}
+
+export interface LabelPolicy {
+  labelSource: "compiler" | "bp-studio-raw";
+  geometrySource: "compiler" | "bp-studio-raw";
+  assignmentSource: "compiler" | "bp-studio-raw";
+  trainingEligible: boolean;
+  notes: string[];
+}
+
+export interface BPStudioSummary {
+  adapterVersion?: string;
+  bpStudioVersion?: string;
+  optimizerLayout?: string;
+  optimizerSeed?: number | null;
+  exportMode?: string;
+  scaffoldEdges?: number;
+  scaffoldVertices?: number;
+  scaffoldAssignments?: Record<string, number>;
+  optimizedFlapCount?: number;
+  optimizedTreeEdgeCount?: number;
+}
+
 export interface FOLDFormat {
   file_spec: number;
   file_creator: string;
@@ -98,12 +144,16 @@ export interface FOLDFormat {
   edges_foldAngle?: number[];
   edges_bpRole?: BPRole[];
   edges_bpStudioSource?: BPStudioEdgeSource[];
+  edges_compilerSource?: CompilerEdgeSource[];
   bp_metadata?: BPMetadata;
   density_metadata?: DensityMetadata;
   design_tree?: DesignTreeMetadata;
   layout_metadata?: LayoutMetadata;
   molecule_metadata?: MoleculeMetadata;
   realism_metadata?: RealismMetadata;
+  completion_metadata?: CompletionMetadata;
+  label_policy?: LabelPolicy;
+  bp_studio_summary?: BPStudioSummary;
   faces_vertices?: number[][];
   faces_edges?: number[][];
   [key: string]: unknown;
@@ -111,6 +161,7 @@ export interface FOLDFormat {
 
 export const GENERATOR_FAMILIES = [
   "bp-studio-realistic",
+  "bp-studio-completed",
 ] as const;
 export type GeneratorFamily = (typeof GENERATOR_FAMILIES)[number];
 export type GlobalValidationBackend = "rabbit-ear-solver" | "fold-cli";
@@ -195,5 +246,8 @@ export interface RawManifestRow {
   layoutMetadata?: LayoutMetadata;
   moleculeMetadata?: MoleculeMetadata;
   realismMetadata?: RealismMetadata;
+  completionMetadata?: CompletionMetadata;
+  labelPolicy?: LabelPolicy;
+  bpStudioSummary?: BPStudioSummary;
   validation: ValidationResult;
 }

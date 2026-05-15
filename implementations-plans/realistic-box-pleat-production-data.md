@@ -130,20 +130,32 @@ Use a staged hybrid:
 1. Pin BP Studio as a third-party source dependency.
 2. Build `tools/bp-studio-adapter/`, a headless TypeScript package that can:
    - create BP Studio projects from generated tree/layout specs;
-   - run BP Studio pattern/stretch completion;
-   - export CP/FOLD lines with `useAuxiliary=false` for strict canonical labels;
-   - emit internal metadata for flaps, rivers, stretches, devices, gadgets, contours, and pattern choices.
-3. Normalize exported CP/FOLD into this repo's canonical FOLD graph.
-4. Run Rabbit Ear strict validation:
+   - run BP Studio's optimizer and stretch/GOPS metadata paths;
+   - export scaffold CP/FOLD lines for debug/reference overlays only;
+   - emit internal metadata for optimized flaps, tree edges, rivers, stretches, devices, gadgets, contours, and pattern choices.
+3. Regularize the BP Studio tree/layout proposal into the restricted compiler contract:
+   - one horizontal or vertical uniaxial spine in V1;
+   - integer or half-grid flap/body/river regions;
+   - explicit corridors, ports, parity, and rejection reasons.
+4. Compile final training labels with our own certified molecule/fold-program compiler:
+   - flap contours;
+   - river and hinge corridors;
+   - corner fans;
+   - diagonal staircases;
+   - diamond/chevron connectors;
+   - GOPS/Elias-like stretch gadgets;
+   - body panels.
+5. Normalize the compiler output into this repo's canonical FOLD graph.
+6. Run Rabbit Ear strict validation:
    - local Kawasaki/Maekawa;
    - Rabbit Ear layer solver;
    - finite folded coordinates;
    - no unsplit crossings;
    - no bad border/degenerate/duplicate edges.
-5. Render and QA only accepted strict outputs.
-6. Use real/BPStudio-like references only for calibration, distribution metrics, and human visual review unless explicit licensing permits training.
+7. Render and QA only accepted strict outputs.
+8. Use real/BPStudio-like references only for calibration, distribution metrics, and human visual review unless explicit licensing permits training.
 
-This gives us authentic BP structure first, with strict labels second.
+This gives us BP Studio's tree-aware layout realism first, with strict labels generated only by our compiler.
 
 ## Target Deliverables
 
@@ -152,8 +164,10 @@ This gives us authentic BP structure first, with strict labels second.
   - Headless CLI for tree/layout -> CP/FOLD export.
   - Adapter tests based on BP Studio two-flap, three-flap, CP export, and optimizer fixtures.
 - `tools/synthetic-generator/`
-  - New family: `bp-studio-realistic`.
+  - Diagnostic family: `bp-studio-realistic`.
+  - Production candidate family: `bp-studio-completed`.
   - New recipe: `recipes/synthetic/bp_studio_realistic_v1.yaml`.
+  - New recipe: `recipes/synthetic/bp_completed_uniaxial_v1.yaml`.
   - Removal or demotion of current fake `realistic-box-pleat` from production recipes.
 - `data/references/bp_clean_v1/`
   - Calibration-only manifest schema.
@@ -165,23 +179,28 @@ This gives us authentic BP structure first, with strict labels second.
 - Dataset:
   - Strict accepted FOLD files.
   - Rendered variants.
-  - Manifest rows containing BP Studio project metadata and strict validation metadata.
+- Manifest rows containing BP Studio project metadata and strict validation metadata.
+  - Manifest rows containing BP Studio project metadata, compiler metadata, molecule counts, and strict validation metadata.
 
 ## Implementation Status
 
 Current checkpoint:
 
 - BP Studio is pinned as `third_party/bp-studio` and wrapped by `tools/bp-studio-adapter/`.
-- `bp-studio-realistic` exists as a main generator family with `recipes/synthetic/bp_studio_realistic_v1.yaml`.
+- `bp-studio-realistic` exists as a diagnostic/calibration generator family with `recipes/synthetic/bp_studio_realistic_v1.yaml`.
+- `bp-studio-completed` exists as the first restricted compiler-backed generator family with `recipes/synthetic/bp_completed_uniaxial_v1.yaml`.
 - The old hand-written generator families, old recipes, and strict-completion fallback have been removed from the production synthetic path.
-- The generator now samples BP Studio-style tree/layout specs, runs the BP Studio adapter, normalizes raw exports, and fails unless the raw BP Studio-derived graph passes local precheck and the normal strict validator.
-- Raw-only generation is currently blocked: current smokes still produce `0` accepted samples because the BP Studio export geometry is not locally strict after arrangement.
+- The diagnostic generator samples BP Studio-style tree/layout specs, runs the BP Studio adapter, normalizes raw exports, and fails unless the raw BP Studio-derived graph passes local precheck and the normal strict validator.
+- Raw-only generation remains blocked and should stay calibration-only: current raw smokes produce `0` accepted samples because the BP Studio export geometry is not locally strict after arrangement.
+- The production candidate path now samples a tree/layout, runs the BP Studio adapter/optimizer, regularizes the optimized layout, emits a restricted certified fold program, and validates the compiler-generated FOLD graph.
+- A current 8-sample strict smoke for `bp_completed_uniaxial_v1` produced `8/8` accepted samples after `12` attempts, `121-353` folded creases, `53-193` faces, and `100%` Rabbit Ear strict pass rate.
 - Diagnostic tooling now exists: `cd tools/synthetic-generator && bun run bp-local-diagnostics -- --fold <export.fold>` reports bad vertices by BP Studio source kind, role, assignment, degree, folded degree, and auxiliary policy.
 
 Important blocker discovered during implementation:
 
-- Raw BP Studio CP exports are useful candidates/calibration artifacts, but they can fail local Kawasaki/Maekawa after arrangement. They must not be treated as production labels until Phase 5 grows a certified BP Studio repair/completion layer.
+- Raw BP Studio CP exports are useful scaffold/calibration artifacts, but they can fail local Kawasaki/Maekawa after arrangement. They must not be treated as production labels.
 - Source-aware diagnostics show the problem is not merely F/U auxiliary mapping. Representative preserved exports have thousands of failures dominated by active `device-draw-ridge`, `device-axis-parallel`, and `node-ridge` lines; some interior vertices have impossible odd active folded degree. Assignment solving over existing edges is therefore necessary but not sufficient.
+- Greedy deletion or unassignment repair is explicitly not a production path. The accepted path is restricted compilation from regularized tree/layout plus certified molecules.
 - See `implementations-plans/bp-studio-raw-export-rca.md` for the current RCA.
 
 ## Parallel Workstreams
@@ -193,12 +212,14 @@ These are designed for sub-agents with disjoint write scopes.
 | A. BP Studio Adapter | `tools/bp-studio-adapter/` | Headless wrapper, project schema, CP/FOLD export | B, C, D, E |
 | B. Reference Corpus And Metrics | `data/references/`, `scripts/data/`, `src/data/synthetic/` | Reference manifest, metrics, contact sheets | A, C, D |
 | C. Tree And Layout Sampler | `tools/synthetic-generator/src/bp-studio-tree-*` | Archetype grammars, layout specs, optimizer requests | A, B, E |
-| D. Strict Validation And Repair | `tools/synthetic-generator/src/validate.ts`, new repair modules | Validation gates, repair attempts, failure taxonomy | A, B, C |
+| D. Strict Validation And QA | `tools/synthetic-generator/src/validate.ts`, folded preview and QA modules | Validation gates, visual warnings, failure taxonomy | A, B, C |
+| H. Completion Contracts | `tools/synthetic-generator/src/bp-completion-contracts.ts` | `CompletionLayout`, `MoleculeTemplate`, `Port`, `PortJoin`, `CompletionResult` | A, C, D |
+| I. Certified Molecule Compiler | `tools/synthetic-generator/src/bp-completion.ts`, tests | Molecule/fold-program templates, fixture families, composition rules | H after contracts |
 | E. Rendering And Dataset Integration | `src/data/synthetic/`, `scripts/data/` | Manifest schema, renderer styles, loader smoke | A, C, D |
 | F. Human QA Tooling | `scripts/data/`, optional small web/static viewer | Review workflow, accept/reject labels | B, E |
 | G. Training Curriculum | `recipes/synthetic/`, training configs | Small/medium/dense/superdense schedules | B, C, D, E |
 
-Sub-agents should not share write ownership. If a stream needs another stream’s data contract, define an interface file first and then proceed independently.
+Sub-agents should not share write ownership. If a stream needs another stream's data contract, define an interface file first and then proceed independently.
 
 ## Phase 0: Integration Spike And Source Lock
 
@@ -341,36 +362,51 @@ Exit criteria:
 - Layouts have non-overlap, reasonable margins, nontrivial flap clusters, and varied sheet utilization.
 - Specs are deterministic by seed.
 
-## Phase 4: BP Studio Pattern Completion And Export
+## Phase 4: Restricted Completion Compiler
 
-Goal: turn sampled tree/layout specs into authentic BP Studio CP exports.
+Goal: turn sampled tree/layout specs and BP Studio optimizer proposals into compiler-generated strict CP labels.
 
 Parallel tasks:
 
-- Agent A5: implement batch adapter runner with concurrency controls.
-- Agent C5: implement pattern selection policy:
-  - prefer configurations with richer valid gadgets;
-  - sample alternate valid patterns for diversity;
-  - reject patternless repositories unless configured as negative examples.
-- Agent E1: normalize BP Studio lines:
-  - border: `B`;
-  - ridge: `M`;
-  - hinge contours: `V` for strict canonical;
-  - axis-parallel stretch lines: `V`;
-  - optional `F` only for non-strict auxiliary render variants, never for strict labels.
-- Agent E2: metadata bridge:
-  - map BP Studio stretches/devices/gadgets to dataset manifest fields;
-  - include source commit and adapter version.
+- Agent H1: maintain the shared compiler contracts:
+  - `CompletionLayout`;
+  - `MoleculeTemplate`;
+  - `Port`;
+  - `PortJoin`;
+  - `CompletionResult`;
+  - label provenance policy.
+- Agent I1: implement certified molecule templates:
+  - flap contours;
+  - river corridors;
+  - hinge corridors;
+  - corner fans;
+  - diagonal staircases;
+  - diamond/chevron connectors;
+  - GOPS/Elias-like stretch gadgets;
+  - body panels.
+- Agent I2: implement typed port composition:
+  - reject incompatible orientation/width/parity joins;
+  - fail completion when required ports cannot be joined;
+  - preserve port checks and rejected-candidate counts in metadata.
+- Agent C5: regularize BP Studio optimizer output:
+  - map optimized adapter IDs back to sampler node IDs;
+  - snap flaps/body/rivers to the compiler grid;
+  - reject layouts that cannot fit the restricted uniaxial model.
+- Agent E1: emit canonical compiler labels:
+  - final M/V/B assignments come from templates/fold programs only;
+  - raw BP Studio CP colors remain debug/reference metadata only;
+  - compiler edge source is separate from BP Studio scaffold source.
 
 Exit criteria:
 
-- Batch export creates CP/FOLD files for at least 1,000 attempted specs.
-- Failures are categorized: layout invalid, no pattern, export error, strict validation failure, visual rejection.
-- Contact sheets show recognizable BP Studio-like structures before Rabbit Ear filtering.
+- Fixture families compile to strict FOLD or fail with structured reasons.
+- Port joins cannot be silently ignored.
+- Raw BP Studio exports are never marked training eligible.
+- Contact sheets show completed CP structures, not BP Studio scaffolds.
 
-## Phase 5: Strict Validation, Repair, And Acceptance
+## Phase 5: Strict Validation, QA, And Acceptance
 
-Goal: convert BP Studio starting points into strict training labels.
+Goal: validate and promote only compiler-generated strict labels.
 
 Parallel tasks:
 
@@ -383,16 +419,16 @@ Parallel tasks:
   - finite folded coordinates;
   - assignment completeness.
 - Agent D2: arrangement and normalization:
-  - robustly split BP Studio CP line intersections;
+  - robustly split compiler output intersections;
   - dedupe collinear fragments without losing roles;
   - normalize coordinates to `[0, 1]`;
-  - preserve original BP Studio coordinates in metadata.
-- Agent D3: repair strategies:
-  - convert auxiliary hinges to valleys;
-  - snap near-grid coordinates;
-  - split missed intersections;
-  - drop provably duplicate collinear fragments;
-  - reject rather than invent assignment fixes when semantics are unclear.
+  - preserve BP Studio scaffold metadata separately.
+- Agent D3: production rejection policy:
+  - reject incompatible ports;
+  - reject scaffold-only outputs;
+  - reject odd active-degree interior vertices;
+  - reject uniform diagonal wallpaper/full ruled grids;
+  - never use greedy unassignment/deletion repair as production.
 - Agent D4: solver performance:
   - timeout handling;
   - per-sample solver timing;
@@ -404,6 +440,7 @@ Exit criteria:
 - Accepted samples all pass strict validation.
 - Rejected samples retain structured failure metadata.
 - No validation downgrade exists in the production recipe.
+- Every accepted row has `label_policy.trainingEligible=true` and `labelSource=compiler`.
 - Folded preview contact sheets are generated for every smoke sample.
 
 ## Phase 6: Visual QA And Distribution Tuning

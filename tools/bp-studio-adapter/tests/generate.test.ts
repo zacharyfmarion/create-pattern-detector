@@ -27,6 +27,11 @@ describe("BP Studio adapter", () => {
     expect(metadata.cp.assignmentCounts.M).toBeGreaterThan(0);
     expect(metadata.cp.assignmentCounts.V).toBeGreaterThan(0);
     expect(metadata.cp.roleCounts.ridge).toBeGreaterThan(0);
+    expect(metadata.layout.sheet.width).toBe(metadata.spec.sheet.width);
+    expect(metadata.layout.flaps.length).toBe(metadata.spec.flapCount);
+    expect(metadata.layout.edges.length).toBe(metadata.spec.edgeCount);
+    expect(metadata.inputLayout.flaps.length).toBeGreaterThan(0);
+    expect(metadata.optimizedLayout.flaps.length).toBe(metadata.layout.flaps.length);
   });
 
   test("supports final-rendered export mode with BP Studio source ancestry", async () => {

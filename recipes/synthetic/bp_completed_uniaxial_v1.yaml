@@ -1,0 +1,43 @@
+name: bp_completed_uniaxial_v1
+seed: 9170
+imageSize: 768
+padding: 42
+
+splits:
+  train: 0.85
+  val: 0.10
+  test: 0.05
+
+families:
+  bp-studio-completed: 1.0
+
+complexityBuckets:
+  - name: small
+    minCreases: 80
+    maxCreases: 1500
+    weight: 1.0
+
+bpStudioSampler:
+  schemaVersion: bp-studio-adapter-spec/v1
+  samplerVersion: bp-studio-sampler/v1
+  purpose: strict-e2e-bp-studio-completion-smoke
+
+validation:
+  strictGlobal: true
+  globalBackend: rabbit-ear-solver
+  minVertexDistance: 0.00001
+  maxVertices: 4000
+  maxEdges: 4000
+  requireBoxPleat: true
+  boxPleatMode: dense
+  requireDense: true
+  requireRealistic: false
+  minRealismScore: 0.0
+
+renderVariants:
+  - name: bp_assignment_clean
+    assignmentVisibility: visible
+    count: 1
+  - name: monochrome_ink
+    assignmentVisibility: hidden
+    count: 1

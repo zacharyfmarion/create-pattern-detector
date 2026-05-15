@@ -100,6 +100,9 @@ async function main(): Promise<void> {
         layoutMetadata: fold.layout_metadata,
         moleculeMetadata: fold.molecule_metadata,
         realismMetadata: fold.realism_metadata,
+        completionMetadata: fold.completion_metadata,
+        labelPolicy: fold.label_policy,
+        bpStudioSummary: fold.bp_studio_summary,
         validation,
       };
       rows.push(row);

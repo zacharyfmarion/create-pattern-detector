@@ -87,6 +87,25 @@ export interface AdapterMetadata {
     edgeCount: number;
     flapCount: number;
   };
+  layout: {
+    optimized: boolean;
+    optimizerLayout: "view" | "random";
+    sheet: SheetSpec;
+    edges: EdgeSpec[];
+    flaps: FlapSpec[];
+  };
+  inputLayout: {
+    sheet: SheetSpec;
+    edges: EdgeSpec[];
+    flaps: FlapSpec[];
+  };
+  optimizedLayout: {
+    optimized: boolean;
+    optimizerLayout: "view" | "random";
+    sheet: SheetSpec;
+    edges: EdgeSpec[];
+    flaps: FlapSpec[];
+  };
   cp: {
     lineCount: number;
     vertexCount: number;

@@ -17,6 +17,7 @@ import { normalizeBPStudioFold } from "./bp-studio-validation.ts";
 import { assignmentToFoldAngle, normalizeFold, roleCounts } from "./fold-utils.ts";
 import { scoreFoldRealism } from "./realism-metrics.ts";
 import type {
+  BPStudioSummary,
   BPRole,
   DesignTreeMetadata,
   EdgeAssignment,
@@ -27,7 +28,7 @@ import type {
   RealisticBPArchetype,
 } from "./types.ts";
 
-interface AdapterSpec {
+export interface AdapterSpec {
   title: string;
   description: string;
   sheet: { width: number; height: number };
@@ -38,14 +39,42 @@ interface AdapterSpec {
   optimizerLayout: "view" | "random";
   optimizerSeed: number;
   optimizerUseDimension: boolean;
+  nodeIdByAdapterId?: Record<string, string>;
   tree: {
     edges: Array<{ n1: number; n2: number; length: number }>;
     flaps: Array<{ id: number; x: number; y: number; width: number; height: number }>;
   };
 }
 
-interface AdapterMetadata {
-  spec?: { edgeCount?: number; flapCount?: number };
+export interface AdapterMetadata {
+  adapter?: { name?: string; version?: string };
+  bpStudio?: { version?: string; source?: string };
+  spec?: {
+    edgeCount?: number;
+    flapCount?: number;
+    exportMode?: "outer" | "final" | "expanded";
+    optimizerLayout?: "view" | "random";
+    optimizerSeed?: number | null;
+  };
+  layout?: {
+    optimized?: boolean;
+    optimizerLayout?: "view" | "random";
+    sheet?: { width: number; height: number };
+    edges?: Array<{ n1: number; n2: number; length: number }>;
+    flaps?: Array<{ id: number; x: number; y: number; width?: number; height?: number }>;
+  };
+  inputLayout?: {
+    sheet?: { width: number; height: number };
+    edges?: Array<{ n1: number; n2: number; length: number }>;
+    flaps?: Array<{ id: number; x: number; y: number; width?: number; height?: number }>;
+  };
+  optimizedLayout?: {
+    optimized?: boolean;
+    optimizerLayout?: "view" | "random";
+    sheet?: { width: number; height: number };
+    edges?: Array<{ n1: number; n2: number; length: number }>;
+    flaps?: Array<{ id: number; x: number; y: number; width?: number; height?: number }>;
+  };
   cp?: { lineCount?: number; vertexCount?: number; edgeCount?: number; assignmentCounts?: Record<string, number> };
   stretches?: Array<{
     active?: boolean;
@@ -91,7 +120,7 @@ export function generateBPStudioRealisticFold(config: GenerationConfig): FOLDFor
       assertValidBPStudioSpec(spec);
 
       const adapterSpec = toAdapterSpec(spec);
-      const { fold: rawFold, metadata: adapterMetadata } = runAdapter(adapterSpec);
+      const { fold: rawFold, metadata: adapterMetadata } = runBPStudioAdapter(adapterSpec);
       const fold = normalizeBPStudioFold(rawFold, {
         creator: "cp-synthetic-generator/bp-studio-realistic",
         auxiliaryPolicy: "unassigned",
@@ -105,6 +134,16 @@ export function generateBPStudioRealisticFold(config: GenerationConfig): FOLDFor
       });
 
       attachBPStudioMetadata(fold, spec, adapterMetadata);
+      fold.label_policy = {
+        labelSource: "bp-studio-raw",
+        geometrySource: "bp-studio-raw",
+        assignmentSource: "bp-studio-raw",
+        trainingEligible: false,
+        notes: [
+          "Diagnostic/calibration output only. Raw BP Studio exports are not trusted training labels.",
+        ],
+      };
+      fold.bp_studio_summary = summarizeAdapterMetadata(adapterMetadata);
       const local = localPrecheck(fold);
       if (!local.ok) {
         const tempDirNote = adapterMetadata.adapterTempDir ? `, tempDir=${adapterMetadata.adapterTempDir}` : "";
@@ -123,7 +162,7 @@ export function generateBPStudioRealisticFold(config: GenerationConfig): FOLDFor
   );
 }
 
-function ensureAdapterAvailable(): void {
+export function ensureAdapterAvailable(): void {
   if (!existsSync(resolve(ADAPTER_DIR, "package.json")) || !existsSync(resolve(ADAPTER_DIR, ADAPTER_ENTRY))) {
     throw new Error(
       "BP Studio adapter is unavailable. Initialize submodules and install Bun dependencies before using bp-studio-realistic.",
@@ -131,7 +170,7 @@ function ensureAdapterAvailable(): void {
   }
 }
 
-function runAdapter(spec: AdapterSpec): { fold: FOLDFormat; metadata: AdapterMetadata } {
+export function runBPStudioAdapter(spec: AdapterSpec): { fold: FOLDFormat; metadata: AdapterMetadata } {
   const dir = mkdtempSync(join(tmpdir(), "cp-bp-studio-"));
   const specPath = join(dir, "spec.json");
   const foldPath = join(dir, "out.fold");
@@ -172,7 +211,7 @@ function runAdapter(spec: AdapterSpec): { fold: FOLDFormat; metadata: AdapterMet
   }
 }
 
-function toAdapterSpec(spec: BPStudioAdapterSpec): AdapterSpec {
+export function toAdapterSpec(spec: BPStudioAdapterSpec): AdapterSpec {
   const idMap = makeNodeIdMap(spec);
   const leaves = leafNodeIds(spec);
   const edges = adapterTreeEdges(spec);
@@ -200,6 +239,7 @@ function toAdapterSpec(spec: BPStudioAdapterSpec): AdapterSpec {
     optimizerLayout: "view",
     optimizerSeed: spec.seed,
     optimizerUseDimension: true,
+    nodeIdByAdapterId: Object.fromEntries([...idMap.entries()].map(([nodeId, id]) => [String(id), nodeId])),
     tree: {
       edges: edges.map((edge) => ({
         n1: idMap.get(edge.from)!,
@@ -208,6 +248,21 @@ function toAdapterSpec(spec: BPStudioAdapterSpec): AdapterSpec {
       })),
       flaps,
     },
+  };
+}
+
+export function summarizeAdapterMetadata(adapterMetadata: AdapterMetadata): BPStudioSummary {
+  return {
+    adapterVersion: typeof adapterMetadata.adapter === "object" ? String((adapterMetadata.adapter as Record<string, unknown>).version ?? "") : undefined,
+    bpStudioVersion: typeof adapterMetadata.bpStudio === "object" ? String((adapterMetadata.bpStudio as Record<string, unknown>).version ?? "") : undefined,
+    optimizerLayout: adapterMetadata.spec?.optimizerLayout,
+    optimizerSeed: adapterMetadata.spec?.optimizerSeed as number | null | undefined,
+    exportMode: adapterMetadata.spec?.exportMode,
+    scaffoldEdges: adapterMetadata.cp?.edgeCount,
+    scaffoldVertices: adapterMetadata.cp?.vertexCount,
+    scaffoldAssignments: adapterMetadata.cp?.assignmentCounts,
+    optimizedFlapCount: adapterMetadata.layout?.flaps?.length ?? adapterMetadata.optimizedLayout?.flaps?.length,
+    optimizedTreeEdgeCount: adapterMetadata.layout?.edges?.length ?? adapterMetadata.optimizedLayout?.edges?.length,
   };
 }
 
@@ -348,7 +403,7 @@ function assignBPRolesByGeometry(fold: FOLDFormat): BPRole[] {
   });
 }
 
-function makeMoleculeCounts(spec: BPStudioAdapterSpec, adapterMetadata: AdapterMetadata): Record<string, number> {
+export function makeMoleculeCounts(spec: BPStudioAdapterSpec, adapterMetadata: AdapterMetadata): Record<string, number> {
   const stretches = adapterMetadata.stretches ?? [];
   const activeStretches = stretches.filter((stretch) => stretch.active !== false).length;
   const selectedDevices = sumStretchValue(stretches, "selectedDeviceCount");
@@ -370,7 +425,7 @@ function sumStretchValue(stretches: NonNullable<AdapterMetadata["stretches"]>, k
   return stretches.reduce((sum, stretch) => sum + Math.max(0, Number(stretch.repository?.[key] ?? 0)), 0);
 }
 
-function makeDesignTree(spec: BPStudioAdapterSpec): DesignTreeMetadata {
+export function makeDesignTree(spec: BPStudioAdapterSpec): DesignTreeMetadata {
   return {
     archetype: spec.archetype as RealisticBPArchetype,
     rootId: spec.tree.rootId,
@@ -388,7 +443,7 @@ function makeDesignTree(spec: BPStudioAdapterSpec): DesignTreeMetadata {
   };
 }
 
-function makeLayoutMetadata(spec: BPStudioAdapterSpec): LayoutMetadata {
+export function makeLayoutMetadata(spec: BPStudioAdapterSpec): LayoutMetadata {
   return {
     gridSize: spec.sheet.gridSize,
     symmetry: spec.layout.symmetry,
@@ -459,7 +514,7 @@ function layoutScore(spec: BPStudioAdapterSpec): number {
   return Math.round((0.45 * flapScore + 0.35 * riverScore + 0.2 * bodyScore) * 1_000) / 1_000;
 }
 
-function bucketFor(config: GenerationConfig): BPStudioComplexityBucket {
+export function bucketFor(config: GenerationConfig): BPStudioComplexityBucket {
   if (BUCKETS.has(config.bucket as BPStudioComplexityBucket)) return config.bucket as BPStudioComplexityBucket;
   if (config.numCreases >= 2500) return "superdense";
   if (config.numCreases >= 900) return "dense";
