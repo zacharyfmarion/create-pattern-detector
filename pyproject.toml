@@ -21,6 +21,7 @@ dependencies = [
     "scipy>=1.11.0",
     "Pillow>=10.0.0",
     "numpy>=1.24.0",
+    "pypdfium2>=4.30.0",
 
     # Training utilities
     "wandb>=0.15.0",
