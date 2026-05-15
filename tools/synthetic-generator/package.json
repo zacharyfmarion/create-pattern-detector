@@ -8,6 +8,7 @@
     "folded-preview": "bun run src/folded-preview.ts",
     "bp-strict-repair-lab": "bun run src/bp-strict-repair-lab.ts",
     "bp-local-diagnostics": "bun run src/bp-local-diagnostics.ts",
+    "bp-pleat-primitive-debug": "bun run src/bp-pleat-primitive-debug.ts",
     "bp-region-debug": "bun run src/bp-region-debug.ts",
     "bp-region-phase-debug": "bun run src/bp-region-phase-debug.ts",
     "bp-port-solver-debug": "bun run src/bp-port-solver-debug.ts",
