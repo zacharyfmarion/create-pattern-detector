@@ -41,6 +41,9 @@ class SyntheticManifestRow:
     layout_metadata: Optional[Dict[str, Any]]
     molecule_metadata: Optional[Dict[str, Any]]
     realism_metadata: Optional[Dict[str, Any]]
+    completion_metadata: Optional[Dict[str, Any]]
+    graph_label_policy: Optional[Dict[str, Any]]
+    bp_studio_summary: Optional[Dict[str, Any]]
     validation: Dict[str, Any]
 
     @classmethod
@@ -81,6 +84,15 @@ class SyntheticManifestRow:
             else None,
             realism_metadata=dict(row["realism_metadata"] if "realism_metadata" in row else row["realismMetadata"])
             if row.get("realism_metadata") is not None or row.get("realismMetadata") is not None
+            else None,
+            completion_metadata=dict(row["completion_metadata"] if "completion_metadata" in row else row["completionMetadata"])
+            if row.get("completion_metadata") is not None or row.get("completionMetadata") is not None
+            else None,
+            graph_label_policy=dict(row["graph_label_policy"] if "graph_label_policy" in row else row["labelPolicy"])
+            if row.get("graph_label_policy") is not None or row.get("labelPolicy") is not None
+            else None,
+            bp_studio_summary=dict(row["bp_studio_summary"] if "bp_studio_summary" in row else row["bpStudioSummary"])
+            if row.get("bp_studio_summary") is not None or row.get("bpStudioSummary") is not None
             else None,
             validation=dict(row["validation"]),
         )

@@ -125,6 +125,9 @@ def render_dataset(
                     layout_metadata=dict(raw_row["layoutMetadata"]) if raw_row.get("layoutMetadata") is not None else None,
                     molecule_metadata=dict(raw_row["moleculeMetadata"]) if raw_row.get("moleculeMetadata") is not None else None,
                     realism_metadata=dict(raw_row["realismMetadata"]) if raw_row.get("realismMetadata") is not None else None,
+                    completion_metadata=dict(raw_row["completionMetadata"]) if raw_row.get("completionMetadata") is not None else None,
+                    graph_label_policy=dict(raw_row["labelPolicy"]) if raw_row.get("labelPolicy") is not None else None,
+                    bp_studio_summary=dict(raw_row["bpStudioSummary"]) if raw_row.get("bpStudioSummary") is not None else None,
                     validation=dict(raw_row["validation"]),
                 )
             )
