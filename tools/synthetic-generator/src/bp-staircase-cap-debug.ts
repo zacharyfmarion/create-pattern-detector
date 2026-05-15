@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { foldComparisonSvg } from "./bp-debug-svg.ts";
-import { buildSheetPleatPrimitive } from "./bp-pleat-primitive.ts";
+import { buildDiagonalStaircaseCapPrimitive } from "./bp-staircase-cap.ts";
 import { makeFlatFoldedPreview } from "./folded-preview.ts";
 import { validateFold } from "./validate.ts";
 
@@ -12,10 +12,9 @@ interface Options {
 
 async function main(): Promise<void> {
   const options = parseArgs(Bun.argv.slice(2));
-  const fold = buildSheetPleatPrimitive({
+  const fold = buildDiagonalStaircaseCapPrimitive({
     laneCount: options.laneCount,
-    orientation: "vertical",
-    startAssignment: "M",
+    startAxisAssignment: "V",
   });
   const validation = await validateFold(fold, {
     strictGlobal: true,
@@ -23,13 +22,15 @@ async function main(): Promise<void> {
     minVertexDistance: 1e-9,
     maxVertices: 1000,
     maxEdges: 1000,
+    requireBoxPleat: true,
+    boxPleatMode: "dense",
   });
-  if (!validation.valid) throw new Error(`pleat primitive failed validation: ${validation.errors.join("; ")}`);
+  if (!validation.valid) throw new Error(`staircase cap failed validation: ${validation.errors.join("; ")}`);
   const preview = makeFlatFoldedPreview(fold);
   await mkdir(dirname(options.out), { recursive: true });
   await writeFile(options.out, foldComparisonSvg({
-    title: "Strict pleat primitive: flat-foldable reference",
-    subtitle: "This is a certified accordion pleat field. It is intentionally sheet-spanning; the next step is local caps/hubs so strips can terminate inside realistic BP layouts.",
+    title: "Strict staircase cap primitive",
+    subtitle: "A diagonal ridge caps long alternating pleats with perpendicular partner creases at every endpoint.",
     leftTitle: "crease pattern",
     rightTitle: "Rabbit Ear folded coordinates",
     cp: fold,
@@ -49,8 +50,8 @@ async function main(): Promise<void> {
 
 function parseArgs(args: string[]): Options {
   const options: Options = {
-    out: "/tmp/bp-pleat-primitive-debug/pleat-primitive.svg",
-    laneCount: 9,
+    out: "/tmp/bp-staircase-cap-debug/staircase-cap.svg",
+    laneCount: 7,
   };
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];

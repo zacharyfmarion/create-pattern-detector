@@ -21,7 +21,8 @@ export type BPSubfamily =
   | "dense-molecule-tessellation"
   | "realistic-tree-base"
   | "bp-studio-export"
-  | "bp-studio-completed-uniaxial";
+  | "bp-studio-completed-uniaxial"
+  | "diagonal-staircase-cap-primitive";
 export type DenseNonBPSubfamily = "recursive-axiom" | "expanded-classic" | "radial-multi-vertex" | "tessellation-like";
 export type RealisticBPArchetype = "insect" | "quadruped" | "bird" | "object" | "abstract";
 export type BoxPleatMode = "simple" | "dense";
