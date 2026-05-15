@@ -8,6 +8,7 @@ import json
 import math
 import os
 from pathlib import Path
+from time import sleep
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -120,10 +121,12 @@ class GeminiCPClassifier:
         model: str = "gemini-2.5-flash-lite",
         api_key: str | None = None,
         timeout: float = 45.0,
+        retries: int = 2,
     ) -> None:
         self.model = model
         self.api_key = api_key or os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
         self.timeout = timeout
+        self.retries = retries
         if not self.api_key:
             raise ValueError("Set GEMINI_API_KEY or GOOGLE_API_KEY to use Gemini classification")
 
@@ -172,17 +175,26 @@ class GeminiCPClassifier:
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        try:
-            with urlopen(request, timeout=self.timeout) as response:
-                body = json.loads(response.read().decode("utf-8"))
-        except (HTTPError, URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
+        body: dict[str, Any] | None = None
+        last_error: Exception | None = None
+        for attempt in range(self.retries + 1):
+            try:
+                with urlopen(request, timeout=self.timeout) as response:
+                    body = json.loads(response.read().decode("utf-8"))
+                break
+            except (HTTPError, URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
+                last_error = exc
+                if attempt < self.retries:
+                    sleep(0.5 * (attempt + 1))
+                    continue
+        if body is None:
             return GeminiClassification(
                 status="error",
                 is_crease_pattern=None,
                 confidence=None,
                 label=None,
                 reason=None,
-                error=str(exc),
+                error=str(last_error),
             )
 
         try:
