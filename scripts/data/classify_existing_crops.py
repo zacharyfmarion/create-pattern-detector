@@ -24,6 +24,8 @@ def main() -> None:
     parser.add_argument("--confidence-threshold", type=float, default=0.70)
     parser.add_argument("--cost-only", action="store_true")
     parser.add_argument("--max-calls", type=int)
+    parser.add_argument("--workers", type=int, default=1)
+    parser.add_argument("--checkpoint-interval", type=int, default=25)
     parser.add_argument(
         "--api-key",
         default=os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"),
@@ -44,6 +46,8 @@ def main() -> None:
         cost_only=args.cost_only,
         max_calls=args.max_calls,
         api_key=args.api_key,
+        workers=args.workers,
+        checkpoint_interval=args.checkpoint_interval,
     )
     print(summary)
 

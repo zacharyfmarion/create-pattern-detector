@@ -1,3 +1,5 @@
+import json
+
 from PIL import Image
 
 from src.data.scraping.gemini_classifier import (
@@ -30,3 +32,49 @@ def test_gemini_prompt_rejects_step_diagrams():
     assert "numbered step diagrams" in prompt
     assert "sequence of folds" in prompt
     assert "standalone crease pattern" in prompt
+
+
+def test_gemini_classifier_accepts_single_object_list_response(monkeypatch, tmp_path):
+    image_path = tmp_path / "cp.png"
+    Image.new("RGB", (64, 64), "white").save(image_path)
+
+    response_body = {
+        "candidates": [
+            {
+                "content": {
+                    "parts": [
+                        {
+                            "text": json.dumps(
+                                [
+                                    {
+                                        "is_crease_pattern": True,
+                                        "confidence": 0.95,
+                                        "label": "clean",
+                                        "reason": "standalone crease pattern",
+                                    }
+                                ]
+                            )
+                        }
+                    ]
+                }
+            }
+        ]
+    }
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self):
+            return json.dumps(response_body).encode("utf-8")
+
+    monkeypatch.setattr("src.data.scraping.gemini_classifier.urlopen", lambda *args, **kwargs: FakeResponse())
+
+    classification = GeminiCPClassifier(api_key="fake-key").classify_image(image_path)
+
+    assert classification.status == "classified"
+    assert classification.is_crease_pattern is True
+    assert classification.confidence == 0.95

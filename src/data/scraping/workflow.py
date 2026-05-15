@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from time import perf_counter
@@ -9,6 +10,7 @@ from typing import Any, Iterable
 
 from .gemini_classifier import (
     GeminiCPClassifier,
+    GeminiClassification,
     GeminiCostEstimate,
     estimate_gemini_cost_for_images,
 )
@@ -201,6 +203,8 @@ class ExistingCropClassificationSummary:
     output_manifest: str
     model: str
     selected: int = 0
+    pending: int = 0
+    already_classified: int = 0
     classified: int = 0
     errors: int = 0
     promoted: int = 0
@@ -228,6 +232,50 @@ def _resolve_data_path(path_value: str | None, manifest_path: Path, scraped_root
     return path
 
 
+def _refresh_classification_summary(summary: ExistingCropClassificationSummary, rows: list[dict[str, Any]]) -> None:
+    gemini_rows = [row for row in rows if isinstance(row.get("gemini"), dict)]
+    summary.classified = sum(1 for row in gemini_rows if row["gemini"].get("status") == "classified")
+    summary.errors = sum(1 for row in gemini_rows if row["gemini"].get("status") != "classified")
+    summary.promoted = sum(1 for row in rows if "gemini_promoted" in set(row.get("reasons") or []))
+    summary.rejected = sum(1 for row in rows if "gemini_rejected" in set(row.get("reasons") or []))
+
+
+def _apply_gemini_classification(
+    row: dict[str, Any],
+    classification: GeminiClassification,
+    model: str,
+    confidence_threshold: float,
+) -> None:
+    row["gemini"] = {
+        "status": classification.status,
+        "is_crease_pattern": classification.is_crease_pattern,
+        "confidence": classification.confidence,
+        "label": classification.label,
+        "reason": classification.reason,
+        "error": classification.error,
+        "model": model,
+        "classified_at": utc_now(),
+    }
+    if classification.status != "classified":
+        return
+
+    confidence = classification.confidence or 0.0
+    reasons = list(row.get("reasons") or [])
+    if confidence < confidence_threshold:
+        row["needs_review"] = True
+        reasons.append("gemini_low_confidence")
+    elif classification.is_crease_pattern:
+        if row.get("status") == "review":
+            row["status"] = "accepted"
+            row["needs_review"] = False
+            reasons.append("gemini_promoted")
+    else:
+        row["status"] = "rejected"
+        row["needs_review"] = False
+        reasons.append("gemini_rejected")
+    row["reasons"] = reasons
+
+
 def classify_existing_crops(
     crop_manifest: str | Path,
     output_manifest: str | Path | None = None,
@@ -238,22 +286,36 @@ def classify_existing_crops(
     cost_only: bool = False,
     max_calls: int | None = None,
     api_key: str | None = None,
+    workers: int = 1,
+    checkpoint_interval: int = 25,
 ) -> ExistingCropClassificationSummary:
     """Classify an existing crop manifest with Gemini and write a merged manifest."""
     start = perf_counter()
     crop_manifest = Path(crop_manifest)
     rows = read_jsonl(crop_manifest)
+    if output_manifest is None:
+        output_manifest = crop_manifest.with_name(f"{crop_manifest.stem}_gemini_{make_run_id('classified')}.jsonl")
+    output_manifest = Path(output_manifest)
     status_set = set(statuses)
     selected_indices = [
         idx
         for idx, row in enumerate(rows)
         if row.get("status") in status_set and row.get("crop_path")
     ]
+    if output_manifest.exists() and not cost_only:
+        existing_rows = read_jsonl(output_manifest)
+        if len(existing_rows) == len(rows):
+            for idx, existing_row in enumerate(existing_rows):
+                if isinstance(existing_row.get("gemini"), dict):
+                    rows[idx] = existing_row
+
+    already_classified = sum(1 for idx in selected_indices if isinstance(rows[idx].get("gemini"), dict))
+    pending_indices = [idx for idx in selected_indices if not isinstance(rows[idx].get("gemini"), dict)]
     if max_calls is not None:
-        selected_indices = selected_indices[:max_calls]
+        pending_indices = pending_indices[:max_calls]
 
     image_paths: list[Path] = []
-    for idx in selected_indices:
+    for idx in pending_indices:
         image_path = _resolve_data_path(str(rows[idx].get("crop_path")), crop_manifest, scraped_root)
         if image_path is not None:
             image_paths.append(image_path)
@@ -264,57 +326,61 @@ def classify_existing_crops(
         output_manifest="",
         model=model,
         selected=len(selected_indices),
+        pending=len(pending_indices),
+        already_classified=already_classified,
         cost_only=cost_only,
         estimate=estimate,
     )
 
-    if not cost_only and selected_indices:
+    def write_checkpoint() -> None:
+        write_jsonl(output_manifest, rows)
+        summary.output_manifest = output_manifest.as_posix()
+        summary.elapsed_seconds = perf_counter() - start
+        _refresh_classification_summary(summary, rows)
+        write_json(output_manifest.with_suffix(".summary.json"), summary)
+
+    if not cost_only and pending_indices:
         classifier = GeminiCPClassifier(model=model, api_key=api_key)
-        for idx in selected_indices:
+
+        def classify_index(idx: int) -> tuple[int, GeminiClassification]:
             row = rows[idx]
             image_path = _resolve_data_path(str(row.get("crop_path")), crop_manifest, scraped_root)
             if image_path is None:
-                continue
-            classification = classifier.classify_image(image_path)
-            row["gemini"] = {
-                "status": classification.status,
-                "is_crease_pattern": classification.is_crease_pattern,
-                "confidence": classification.confidence,
-                "label": classification.label,
-                "reason": classification.reason,
-                "error": classification.error,
-                "model": model,
-                "classified_at": utc_now(),
-            }
-            if classification.status != "classified":
-                summary.errors += 1
-                continue
-            summary.classified += 1
-            confidence = classification.confidence or 0.0
-            reasons = list(row.get("reasons") or [])
-            if confidence < confidence_threshold:
-                row["needs_review"] = True
-                reasons.append("gemini_low_confidence")
-            elif classification.is_crease_pattern:
-                if row.get("status") == "review":
-                    row["status"] = "accepted"
-                    row["needs_review"] = False
-                    reasons.append("gemini_promoted")
-                    summary.promoted += 1
-            else:
-                row["status"] = "rejected"
-                row["needs_review"] = False
-                reasons.append("gemini_rejected")
-                summary.rejected += 1
-            row["reasons"] = reasons
+                return idx, GeminiClassification(
+                    status="error",
+                    is_crease_pattern=None,
+                    confidence=None,
+                    label=None,
+                    reason=None,
+                    error="crop_path_missing",
+                )
+            try:
+                return idx, classifier.classify_image(image_path)
+            except Exception as exc:
+                return idx, GeminiClassification(
+                    status="error",
+                    is_crease_pattern=None,
+                    confidence=None,
+                    label=None,
+                    reason=None,
+                    error=f"classify_failed: {exc}",
+                )
 
-    if output_manifest is None:
-        output_manifest = crop_manifest.with_name(f"{crop_manifest.stem}_gemini_{make_run_id('classified')}.jsonl")
-    output_manifest = Path(output_manifest)
-    write_jsonl(output_manifest, rows)
-    summary.output_manifest = output_manifest.as_posix()
-    summary.elapsed_seconds = perf_counter() - start
-    write_json(output_manifest.with_suffix(".summary.json"), summary)
+        processed = 0
+        try:
+            with ThreadPoolExecutor(max_workers=max(1, workers)) as executor:
+                futures = [executor.submit(classify_index, idx) for idx in pending_indices]
+                for future in as_completed(futures):
+                    idx, classification = future.result()
+                    _apply_gemini_classification(rows[idx], classification, model, confidence_threshold)
+                    processed += 1
+                    if checkpoint_interval > 0 and processed % checkpoint_interval == 0:
+                        write_checkpoint()
+        except KeyboardInterrupt:
+            write_checkpoint()
+            raise
+
+    write_checkpoint()
     return summary
 
 

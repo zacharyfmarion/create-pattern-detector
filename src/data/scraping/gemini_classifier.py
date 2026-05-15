@@ -188,6 +188,10 @@ class GeminiCPClassifier:
         try:
             text = body["candidates"][0]["content"]["parts"][0]["text"]
             data = json.loads(text)
+            if isinstance(data, list) and len(data) == 1 and isinstance(data[0], dict):
+                data = data[0]
+            if not isinstance(data, dict):
+                raise ValueError(f"expected JSON object, got {type(data).__name__}")
             return GeminiClassification(
                 status="classified",
                 is_crease_pattern=bool(data.get("is_crease_pattern")),

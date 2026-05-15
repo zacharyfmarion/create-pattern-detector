@@ -106,6 +106,87 @@ def test_classify_existing_crops_writes_merged_manifest(monkeypatch, tmp_path):
     assert rows[0]["gemini"]["confidence"] == 0.92
 
 
+def test_classify_existing_crops_resumes_existing_output(monkeypatch, tmp_path):
+    image_path = tmp_path / "crop.png"
+    Image.new("RGB", (512, 512), "white").save(image_path)
+    crop_manifest = tmp_path / "crops.jsonl"
+    output_manifest = tmp_path / "classified.jsonl"
+    write_jsonl(
+        crop_manifest,
+        [
+            {
+                "asset_id": "asset-1",
+                "crop_path": image_path.as_posix(),
+                "status": "review",
+                "needs_review": True,
+                "reasons": [],
+            },
+            {
+                "asset_id": "asset-2",
+                "crop_path": image_path.as_posix(),
+                "status": "review",
+                "needs_review": True,
+                "reasons": [],
+            },
+        ],
+    )
+    write_jsonl(
+        output_manifest,
+        [
+            {
+                "asset_id": "asset-1",
+                "crop_path": image_path.as_posix(),
+                "status": "accepted",
+                "needs_review": False,
+                "reasons": ["gemini_promoted"],
+                "gemini": {"status": "classified", "confidence": 0.9},
+            },
+            {
+                "asset_id": "asset-2",
+                "crop_path": image_path.as_posix(),
+                "status": "review",
+                "needs_review": True,
+                "reasons": [],
+            },
+        ],
+    )
+    calls = []
+
+    class FakeClassifier:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def classify_image(self, path: Path) -> GeminiClassification:
+            calls.append(path)
+            return GeminiClassification(
+                status="classified",
+                is_crease_pattern=False,
+                confidence=0.97,
+                label="folded-model",
+                reason="not a crease pattern",
+            )
+
+    monkeypatch.setattr("src.data.scraping.workflow.GeminiCPClassifier", FakeClassifier)
+
+    summary = classify_existing_crops(
+        crop_manifest,
+        output_manifest=output_manifest,
+        workers=2,
+        checkpoint_interval=1,
+    )
+    rows = read_jsonl(output_manifest)
+
+    assert len(calls) == 1
+    assert summary.selected == 2
+    assert summary.pending == 1
+    assert summary.already_classified == 1
+    assert summary.classified == 2
+    assert summary.promoted == 1
+    assert summary.rejected == 1
+    assert rows[0]["status"] == "accepted"
+    assert rows[1]["status"] == "rejected"
+
+
 def test_build_final_dataset_prefers_originals_and_records_duplicates(tmp_path):
     scraped_root = tmp_path / "scraped"
     manifests = scraped_root / "manifests"

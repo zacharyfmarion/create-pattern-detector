@@ -54,6 +54,8 @@ def main() -> None:
     parser.add_argument("--gemini-confidence-threshold", type=float, default=0.70)
     parser.add_argument("--gemini-cost-only", action="store_true")
     parser.add_argument("--gemini-max-calls", type=int)
+    parser.add_argument("--gemini-workers", type=int, default=1)
+    parser.add_argument("--gemini-checkpoint-interval", type=int, default=25)
     parser.add_argument(
         "--drive-api-key",
         default=os.environ.get("GOOGLE_DRIVE_API_KEY") or os.environ.get("GOOGLE_API_KEY"),
@@ -169,6 +171,8 @@ def main() -> None:
             cost_only=args.gemini_cost_only,
             max_calls=args.gemini_max_calls,
             api_key=args.gemini_api_key,
+            workers=args.gemini_workers,
+            checkpoint_interval=args.gemini_checkpoint_interval,
         )
         args.classified_crop_manifest = Path(summary.output_manifest)
         state["classified_crop_manifest"] = relative_to_root(args.classified_crop_manifest, output_root)
