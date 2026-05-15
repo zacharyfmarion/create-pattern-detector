@@ -63,5 +63,15 @@ test("three-flap relay receives certified body relay hubs instead of pleat strip
   expect(completion.ok).toBe(true);
   expect(completion.fold?.molecule_metadata?.molecules["body-panel"]).toBeGreaterThanOrEqual(3);
   expect(completion.fold?.molecule_metadata?.molecules["diagonal-staircase"] ?? 0).toBe(0);
+  expect(completion.fold?.molecule_metadata?.molecules["diamond-connector"]).toBe(1);
   expect(completion.fold?.edges_assignment.filter((assignment) => assignment === "M" || assignment === "V").length).toBeGreaterThanOrEqual(150);
+});
+
+test("five-plus terminal fixtures receive one certified bounded corridor diamond", () => {
+  for (const fixture of ["five-flap-uniaxial", "insect-lite"] as const) {
+    const completion = completeBoxPleatLayout(fixtureCompletionLayout(fixture));
+    expect(completion.ok).toBe(true);
+    expect(completion.fold?.molecule_metadata?.molecules["diamond-connector"]).toBe(2);
+    expect(completion.fold?.molecule_metadata?.portChecks.checked).toBeGreaterThanOrEqual(6);
+  }
 });

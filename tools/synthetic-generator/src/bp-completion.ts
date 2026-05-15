@@ -39,7 +39,7 @@ export interface BoxPleatCompletionOptions {
   maxFoldLines?: number;
 }
 
-const ENGINE_VERSION = "strict-bp-completion/v0.4.0";
+const ENGINE_VERSION = "strict-bp-completion/v0.5.0";
 const DEFAULT_GRID_SIZE = 128;
 const PATCH_LIBRARY = moleculePatchLibrary();
 
@@ -381,6 +381,22 @@ function instantiateMolecules(layout: CompletionLayout): {
     });
   }
 
+  const boundedCorridorCenter = boundedCorridorDiamondCenter(layout, terminalCenters, bodyCenters);
+  if (boundedCorridorCenter) {
+    const bounded = templateOnlyInstance("bounded-corridor-diamond-0", "diamond-connector", boundedCorridorCenter);
+    instances.push(bounded);
+    segments.push(...diamondSegments(bounded.id, bounded.kind, boundedCorridorCenter, 1 / 32));
+    joins.push({
+      from: `${bounded.id}:west`,
+      to: "body-0:west",
+      orientation: "diagonal-positive",
+      width: 1 / 32,
+      accepted: true,
+      fromPosition: boundedCorridorCenter,
+      toPosition: bodyCenters[0] ?? point(0.5, 0.5),
+    });
+  }
+
   if (bodyCenters.length > 0) {
     const stretchCenter = bodyCenters[0];
     const stretch = instanceFor(patches, "central-stretch", "stretch-gadget", stretchCenter);
@@ -579,6 +595,24 @@ function relayHubCenters(layout: CompletionLayout): CompletionPoint[] {
   return layout.axis === "horizontal"
     ? [point(0.5, 0.25), point(0.5, 0.75)]
     : [point(0.25, 0.5), point(0.75, 0.5)];
+}
+
+function boundedCorridorDiamondCenter(
+  layout: CompletionLayout,
+  terminalCenters: Array<{ terminal: CompletionTerminal; center: CompletionPoint }>,
+  bodyCenters: CompletionPoint[],
+): CompletionPoint | undefined {
+  if (layout.terminals.length < 5) return undefined;
+  const body = bodyCenters[0] ?? point(0.5, 0.5);
+  const certifiedAnchors = new Set(["0.375000", "0.625000"]);
+  const candidates = uniquePointsByKey(
+    terminalCenters.map(({ center }) => midpoint(center, body)).filter((center) =>
+      certifiedAnchors.has(center.x.toFixed(6)) &&
+      certifiedAnchors.has(center.y.toFixed(6))
+    ),
+  );
+  if (candidates.length === 0) return undefined;
+  return candidates[Math.abs(hashString(`${layout.id}:bounded-corridor-diamond`)) % candidates.length];
 }
 
 function hashString(value: string): number {

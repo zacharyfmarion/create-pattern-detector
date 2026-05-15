@@ -52,7 +52,8 @@ export function runBPCompletionQA(fold: FOLDFormat): BPCompletionQAReport {
   if (
     fold.completion_metadata?.version.endsWith("/v0.2.0") ||
     fold.completion_metadata?.version.endsWith("/v0.3.0") ||
-    fold.completion_metadata?.version.endsWith("/v0.4.0")
+    fold.completion_metadata?.version.endsWith("/v0.4.0") ||
+    fold.completion_metadata?.version.endsWith("/v0.5.0")
   ) {
     warnings.push("restricted-pleat-strip-compiler-not-production-distribution");
   }
