@@ -131,11 +131,16 @@ class GeminiCPClassifier:
     def prompt() -> str:
         return (
             "You are filtering a dataset of origami crease-pattern examples. "
-            "Classify the image crop. A positive example is a clean, non-hand-drawn "
-            "origami crease pattern: straight line network on a square or near-square "
-            "sheet, either light or dark mode. Reject folded-model photos, diagrams "
-            "with mostly text, sketches, hand-drawn patterns, noisy photos, logos, or "
-            "non-crease-pattern images. Return only JSON with keys: "
+            "Classify the image crop. A positive example must be one clean, "
+            "non-hand-drawn origami crease pattern only: a complete straight-line "
+            "network on a square or near-square sheet, either light or dark mode. "
+            "Reject folded-model photos, finished models, multi-panel folding "
+            "instructions, numbered step diagrams, transition diagrams, partial "
+            "fold diagrams, CP-adjacent explanatory diagrams, images where text or "
+            "legends dominate, sketches, hand-drawn patterns, noisy photos, logos, "
+            "or any image that is not itself a standalone crease pattern. "
+            "If the image shows several panels or a sequence of folds, reject it "
+            "even if some panels contain crease lines. Return only JSON with keys: "
             "is_crease_pattern boolean, label string, confidence number 0-1, reason string."
         )
 

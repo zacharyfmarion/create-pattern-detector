@@ -1,6 +1,7 @@
 from PIL import Image
 
 from src.data.scraping.gemini_classifier import (
+    GeminiCPClassifier,
     estimate_gemini_cost_for_images,
     estimate_image_tokens,
 )
@@ -21,3 +22,11 @@ def test_estimate_gemini_cost_for_images(tmp_path):
     assert estimate.images == 1
     assert estimate.input_tokens > 0
     assert 0 < estimate.estimated_cost_usd < 0.001
+
+
+def test_gemini_prompt_rejects_step_diagrams():
+    prompt = GeminiCPClassifier.prompt()
+
+    assert "numbered step diagrams" in prompt
+    assert "sequence of folds" in prompt
+    assert "standalone crease pattern" in prompt
