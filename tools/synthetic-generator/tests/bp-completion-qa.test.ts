@@ -10,7 +10,8 @@ test("completion QA separates strict label readiness from production distributio
   expect(report.strictLabelReady).toBe(true);
   expect(report.productionDistributionReady).toBe(false);
   expect(report.errors).toEqual([]);
-  expect(report.warnings).toContain("baseline-compiler-version-not-production");
+  expect(report.warnings).toContain("restricted-corner-fan-compiler-not-production-distribution");
+  expect(report.metrics.globalLineGroupRatio).toBeLessThan(0.55);
 });
 
 test("completion QA rejects raw or ambiguous label provenance", () => {

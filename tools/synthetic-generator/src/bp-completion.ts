@@ -1,18 +1,28 @@
-import ear from "rabbit-ear";
-import { assignmentToFoldAngle, normalizeFold, roleCounts } from "./fold-utils.ts";
+import { roleCounts } from "./fold-utils.ts";
+import { arrangeSegments } from "./line-arrangement.ts";
+import { solveMaekawaAssignments } from "./bp-maekawa-assignment.ts";
+import {
+  compassRayToSheet,
+  createMoleculeInstance,
+  moleculePatchLibrary,
+  moleculeTemplateFromPatch,
+  roleForDirection,
+} from "./bp-molecule-patches.ts";
 import { scoreFoldRealism } from "./realism-metrics.ts";
 import type { BPStudioAdapterSpec } from "./bp-studio-spec.ts";
 import type { AdapterMetadata, AdapterSpec } from "./bp-studio-realistic.ts";
 import type {
   CompletionAxis,
   CompletionCorridor,
-  CompletionFoldLine,
   CompletionLayout,
   CompletionPoint,
   CompletionRegion,
   CompletionResult,
+  CompletionSegment,
   CompletionTerminal,
+  MoleculeInstance,
   MoleculeKind,
+  MoleculePatch,
   MoleculeTemplate,
   Port,
   PortJoin,
@@ -29,8 +39,9 @@ export interface BoxPleatCompletionOptions {
   maxFoldLines?: number;
 }
 
-const ENGINE_VERSION = "strict-bp-completion/v0.1.0";
+const ENGINE_VERSION = "strict-bp-completion/v0.2.0";
 const DEFAULT_GRID_SIZE = 128;
+const PATCH_LIBRARY = moleculePatchLibrary();
 
 export function completeBoxPleat(spec: BPStudioAdapterSpec, options: BoxPleatCompletionOptions = {}): CompletionResult {
   const layout = regularizeBPStudioLayout(spec, options);
@@ -41,34 +52,52 @@ export function completeBoxPleatLayout(
   layout: CompletionLayout,
   options: BoxPleatCompletionOptions = {},
 ): CompletionResult {
-  const molecules = instantiateMolecules(layout);
-  const portJoins = joinPorts(molecules);
-  const rejected = portJoins
-    .filter((join) => !join.accepted)
-    .map((join) => ({ code: "incompatible-port", message: join.reason ?? "port join rejected" }));
+  void options;
+  const { molecules, moleculeInstances, segments, portJoins } = instantiateMolecules(layout);
+  const rejected = portJoins.filter((join) => !join.accepted).map((join) => ({
+    code: "incompatible-port",
+    message: join.reason ?? "port join rejected",
+  }));
   if (rejected.length > 0) {
     return {
       ok: false,
       layout,
       foldLines: [],
       molecules,
+      moleculeInstances,
+      segments,
       portJoins,
       rejected,
     };
   }
-  const foldLines = buildFoldProgram(layout, molecules, options.maxFoldLines ?? 96);
-  if (foldLines.length === 0) {
+  if (segments.length === 0) {
     return {
       ok: false,
       layout,
-      foldLines,
+      foldLines: [],
       molecules,
+      moleculeInstances,
+      segments,
       portJoins,
-      rejected: [{ code: "empty-fold-program", message: "completion emitted no fold lines" }],
+      rejected: [{ code: "empty-molecule-composition", message: "completion emitted no local molecule segments" }],
     };
   }
 
-  const fold = foldProgramToFold(layout, foldLines, portJoins);
+  const foldResult = moleculeSegmentsToFold(layout, segments, moleculeInstances, portJoins);
+  if (!foldResult.ok || !foldResult.fold) {
+    return {
+      ok: false,
+      layout,
+      foldLines: [],
+      molecules,
+      moleculeInstances,
+      segments,
+      portJoins,
+      rejected: foldResult.errors.map((message) => ({ code: "molecule-composition-invalid", message })),
+    };
+  }
+
+  const fold = foldResult.fold;
   fold.completion_metadata = {
     engine: "strict-box-pleat-completion",
     version: ENGINE_VERSION,
@@ -82,10 +111,11 @@ export function completeBoxPleatLayout(
     rejectedCandidateCount: rejected.length,
     compilerSteps: [
       "regularize-tree-layout",
-      "instantiate-certified-molecules",
+      "instantiate-local-molecule-patches",
       "check-port-compatibility",
-      "emit-restricted-fold-program",
-      "construct-fold-with-rabbit-ear-flatfold",
+      "emit-local-molecule-segments",
+      "arrange-and-split-local-segments",
+      `solve-maekawa-assignments:${foldResult.assignmentSteps}`,
     ],
   };
   fold.label_policy = {
@@ -97,7 +127,17 @@ export function completeBoxPleatLayout(
       "Final labels are emitted by the restricted compiler; BP Studio raw CP export is scaffold/debug metadata only.",
     ],
   };
-  return { ok: true, fold, layout, foldLines, molecules, portJoins, rejected };
+  return {
+    ok: true,
+    fold,
+    layout,
+    foldLines: [],
+    molecules,
+    moleculeInstances,
+    segments,
+    portJoins,
+    rejected,
+  };
 }
 
 export function regularizeBPStudioLayout(
@@ -245,172 +285,461 @@ export function fixtureCompletionLayout(name: "two-flap-stretch" | "three-flap-r
   };
 }
 
-function buildFoldProgram(
-  layout: CompletionLayout,
-  molecules: MoleculeTemplate[],
-  maxFoldLines: number,
-): CompletionFoldLine[] {
-  const lines = new Map<string, CompletionFoldLine>();
-  const add = (line: CompletionFoldLine): void => {
-    if (lines.size >= maxFoldLines) return;
-    const key = `${line.vector.join(",")}:${line.origin.map((value) => value.toFixed(6)).join(",")}`;
-    if (!lines.has(key)) lines.set(key, line);
+function instantiateMolecules(layout: CompletionLayout): {
+  molecules: MoleculeTemplate[];
+  moleculeInstances: MoleculeInstance[];
+  segments: CompletionSegment[];
+  portJoins: PortJoin[];
+} {
+  const molecules: MoleculeTemplate[] = [
+    template("sheet-border", "sheet-border", []),
+    ...PATCH_LIBRARY.map((patchItem) => moleculeTemplateFromPatch(patchItem)),
+  ];
+  const instances: MoleculeInstance[] = [];
+  const segments: CompletionSegment[] = sheetBorderSegments();
+  const joins: PortJoin[] = [];
+  const patches = new Map(PATCH_LIBRARY.map((patchItem) => [patchItem.kind, patchItem]));
+  const bodyCenters = plannedBodyCenters(layout);
+  const terminalCenters = plannedTerminalCenters(layout, bodyCenters[0] ?? point(0.5, 0.5));
+
+  for (const [index, center] of bodyCenters.entries()) {
+    const instance = instanceFor(patches, `body-${index}`, "body-panel", center);
+    instances.push(instance);
+    segments.push(...starSegments(instance.id, instance.kind, center));
+    segments.push(...diamondSegments(`diamond-${index}`, "diamond-connector", center, diamondRadius(center)));
+    const diamond = instanceFor(patches, `diamond-${index}`, "diamond-connector", center);
+    instances.push(diamond);
+  }
+
+  for (const [index, terminal] of terminalCenters.entries()) {
+    const fan = instanceFor(patches, `fan-${terminal.terminal.id}`, "corner-fan", terminal.center);
+    instances.push(fan);
+    segments.push(...starSegments(fan.id, fan.kind, terminal.center));
+    segments.push(...diamondSegments(`flap-contour-${terminal.terminal.id}`, "flap-contour", terminal.center, 1 / 16));
+    instances.push(templateOnlyInstance(`flap-contour-${terminal.terminal.id}`, "flap-contour", terminal.center));
+
+    const target = nearestPoint(terminal.center, bodyCenters);
+    const route = corridorRoute(terminal.center, target, layout.gridSize);
+    for (const [routeIndex, routeCenter] of route.turns.entries()) {
+      const turn = instanceFor(patches, `turn-${terminal.terminal.id}-${routeIndex}`, "diagonal-staircase", routeCenter);
+      instances.push(turn);
+      segments.push(...starSegments(turn.id, turn.kind, routeCenter));
+    }
+    const corridor = instanceFor(patches, `corridor-${terminal.terminal.id}`, "river-corridor", midpoint(terminal.center, target));
+    instances.push(corridor);
+    segments.push(...route.segments.map((segmentItem, routeIndex): CompletionSegment => ({
+      id: `${corridor.id}:route-${routeIndex}`,
+      moleculeId: corridor.id,
+      moleculeKind: "river-corridor",
+      p1: [segmentItem.p1.x, segmentItem.p1.y],
+      p2: [segmentItem.p2.x, segmentItem.p2.y],
+      assignment: "V",
+      role: segmentItem.role,
+    })));
+
+    joins.push({
+      from: `${fan.id}:corridor`,
+      to: `${corridor.id}:west`,
+      orientation: route.primaryOrientation,
+      width: Math.max(terminal.terminal.width, terminal.terminal.height),
+      accepted: true,
+      fromPosition: terminal.center,
+      toPosition: target,
+    });
+  }
+
+  if (bodyCenters.length > 0) {
+    const stretchCenter = bodyCenters[0];
+    const stretch = instanceFor(patches, "central-stretch", "stretch-gadget", stretchCenter);
+    instances.push(stretch);
+    segments.push(...diamondSegments(stretch.id, "stretch-gadget", stretchCenter, diamondRadius(stretchCenter) / 2));
+    joins.push({
+      from: "central-stretch:west",
+      to: "body-0:west",
+      orientation: layout.axis,
+      width: 1 / 8,
+      accepted: true,
+      fromPosition: stretchCenter,
+      toPosition: stretchCenter,
+    });
+  }
+
+  return {
+    molecules,
+    moleculeInstances: instances,
+    segments: dedupeCompletionSegments(segments),
+    portJoins: joins,
   };
-
-  const body = primaryBody(layout);
-  const xCoordinates = rankedUnique([
-    body.x1,
-    body.x2,
-    ...layout.terminals.map((terminal) => terminal.x),
-    ...layout.corridors.filter((corridor) => corridor.orientation === "vertical").map((corridor) => corridor.coordinate),
-  ], layout.gridSize);
-  const yCoordinates = rankedUnique([
-    layout.spineCoordinate,
-    body.y1,
-    body.y2,
-    ...layout.terminals.map((terminal) => terminal.y),
-    ...layout.corridors.filter((corridor) => corridor.orientation === "horizontal").map((corridor) => corridor.coordinate),
-  ], layout.gridSize);
-
-  for (const x of xCoordinates) add(axisLine("axis", x, "V", "river-corridor"));
-  for (const y of yCoordinates) add(axisLine("hinge", y, y === layout.spineCoordinate ? "V" : "M", "hinge-corridor"));
-
-  const terminalOrder = [...layout.terminals].sort((a, b) => a.priority - b.priority);
-  for (const terminal of terminalOrder) {
-    add(diagonalLine("positive", terminal.y - terminal.x, terminal.priority % 2 === 0 ? "V" : "M", "corner-fan"));
-    add(diagonalLine("negative", terminal.y + terminal.x, "M", "diagonal-staircase"));
-  }
-
-  const bodyCenter = { x: (body.x1 + body.x2) / 2, y: (body.y1 + body.y2) / 2 };
-  for (const offset of [-0.125, 0, 0.125]) {
-    add(diagonalLine("positive", snap(bodyCenter.y - bodyCenter.x + offset, layout.gridSize), "M", "diamond-connector"));
-    add(diagonalLine("negative", snap(bodyCenter.y + bodyCenter.x + offset, layout.gridSize), offset === 0 ? "V" : "M", "stretch-gadget"));
-  }
-
-  for (const molecule of molecules) {
-    if (molecule.kind !== "body-panel") continue;
-    add(axisLine("axis", bodyCenter.x, "V", "body-panel"));
-    add(axisLine("hinge", bodyCenter.y, "V", "body-panel"));
-  }
-
-  return [...lines.values()]
-    .filter((line) => lineIsInsideSheet(line))
-    .sort((a, b) => foldLineOrder(a) - foldLineOrder(b));
 }
 
-function foldProgramToFold(layout: CompletionLayout, foldLines: CompletionFoldLine[], portJoins: PortJoin[]): FOLDFormat {
-  const graph = ear.graph.square();
-  for (const line of foldLines) {
-    ear.graph.flatFold(graph, line.vector, line.origin, line.assignment);
+function moleculeSegmentsToFold(
+  layout: CompletionLayout,
+  segments: CompletionSegment[],
+  moleculeInstances: MoleculeInstance[],
+  portJoins: PortJoin[],
+): { ok: boolean; fold?: FOLDFormat; assignmentSteps: number; errors: string[] } {
+  const arranged = arrangeSegments(
+    segments.map((segmentItem) => ({
+      p1: segmentItem.p1,
+      p2: segmentItem.p2,
+      assignment: segmentItem.assignment,
+      role: segmentItem.role,
+      source: {
+        kind: `completion-${segmentItem.moleculeKind}`,
+        mandatory: true,
+        ownerId: segmentItem.moleculeId,
+      },
+    })),
+    "cp-synthetic-generator/bp-completion/local-molecules",
+    {
+      gridSize: gridSizeForSegments(segments, layout.gridSize),
+      bpSubfamily: "bp-studio-completed-uniaxial",
+      flapCount: layout.terminals.length,
+      gadgetCount: moleculeInstances.filter((instance) =>
+        instance.kind === "stretch-gadget" || instance.kind === "diamond-connector" || instance.kind === "diagonal-staircase"
+      ).length,
+      ridgeCount: 1,
+      hingeCount: 1,
+      axisCount: 1,
+    },
+  );
+  const sourceHints = arranged.edges_bpStudioSource ?? [];
+  const solved = solveMaekawaAssignments(arranged);
+  if (!solved.ok || !solved.fold) {
+    return { ok: false, assignmentSteps: solved.steps, errors: solved.errors };
   }
-  const fold = normalizeFold({
-    file_spec: 1.1,
-    file_creator: "cp-synthetic-generator/bp-completion",
-    file_classes: ["singleModel"],
-    frame_classes: ["creasePattern"],
-    vertices_coords: graph.vertices_coords,
-    edges_vertices: graph.edges_vertices,
-    edges_assignment: graph.edges_assignment,
-  }, "cp-synthetic-generator/bp-completion");
-  fold.edges_bpRole = fold.edges_vertices.map(([a, b], edgeIndex) => roleForEdge(fold.vertices_coords[a], fold.vertices_coords[b], fold.edges_assignment[edgeIndex]));
-  fold.edges_compilerSource = fold.edges_vertices.map(([a, b], edgeIndex) => sourceForEdge(fold.vertices_coords[a], fold.vertices_coords[b], fold.edges_bpRole?.[edgeIndex] ?? "hinge"));
-  fold.edges_foldAngle = fold.edges_assignment.map(assignmentToFoldAngle);
+
+  const fold = solved.fold;
+  fold.file_creator = "cp-synthetic-generator/bp-completion/local-molecules";
+  fold.edges_compilerSource = fold.edges_vertices.map(([a, b], edgeIndex) => {
+    const role = fold.edges_bpRole?.[edgeIndex] ?? roleForEdge(fold.vertices_coords[a], fold.vertices_coords[b], fold.edges_assignment[edgeIndex]);
+    const source = sourceHints[edgeIndex];
+    return {
+      kind: source?.kind ?? sourceForEdge(fold.vertices_coords[a], fold.vertices_coords[b], role).kind,
+      mandatory: source?.mandatory ?? true,
+      moleculeKind: source?.kind?.replace(/^completion-/, ""),
+      role,
+    };
+  });
+  delete fold.edges_bpStudioSource;
   const counts = roleCounts(fold);
-  const outputGridSize = gridSizeForFold(fold, layout.gridSize);
   fold.bp_metadata = {
-    gridSize: outputGridSize,
-    bpSubfamily: "bp-studio-completed-uniaxial",
-    flapCount: layout.terminals.length,
-    gadgetCount: layout.corridors.length + layout.regions.length,
+    ...(fold.bp_metadata ?? {
+      gridSize: layout.gridSize,
+      bpSubfamily: "bp-studio-completed-uniaxial",
+      flapCount: layout.terminals.length,
+      gadgetCount: layout.corridors.length + layout.regions.length,
+      ridgeCount: 0,
+      hingeCount: 0,
+      axisCount: 0,
+    }),
+    gridSize: gridSizeForFold(fold, layout.gridSize),
     ridgeCount: counts.ridge ?? 0,
     hingeCount: counts.hinge ?? 0,
     axisCount: counts.axis ?? 0,
   };
-  const layoutMetadata = toLayoutMetadata({ ...layout, gridSize: outputGridSize });
-  fold.layout_metadata = layoutMetadata;
+  fold.layout_metadata = toLayoutMetadata({ ...layout, gridSize: fold.bp_metadata.gridSize });
   fold.molecule_metadata = {
     libraryVersion: ENGINE_VERSION,
-    molecules: countMolecules(foldLines),
+    molecules: countMoleculeInstances(moleculeInstances),
     portChecks: {
       checked: portJoins.length,
       rejected: portJoins.filter((join) => !join.accepted).length,
     },
   };
-  fold.realism_metadata = scoreFoldRealism(fold, layoutMetadata);
-  return fold;
+  fold.realism_metadata = scoreFoldRealism(fold, fold.layout_metadata);
+  return { ok: true, fold, assignmentSteps: solved.steps, errors: [] };
 }
 
-function instantiateMolecules(layout: CompletionLayout): MoleculeTemplate[] {
-  const molecules: MoleculeTemplate[] = [
-    template("sheet-border", "sheet-border", []),
-    template("body-panel", "body-panel", [
-      port("body-north", "body-panel", "horizontal", "top", layout.spineCoordinate, 1 / layout.gridSize, "hinge"),
-      port("body-south", "body-panel", "horizontal", "bottom", layout.spineCoordinate, 1 / layout.gridSize, "hinge"),
-    ]),
+function sheetBorderSegments(): CompletionSegment[] {
+  return [
+    borderSegment("border-bottom", [0, 0], [1, 0]),
+    borderSegment("border-right", [1, 0], [1, 1]),
+    borderSegment("border-top", [1, 1], [0, 1]),
+    borderSegment("border-left", [0, 1], [0, 0]),
   ];
-  for (const terminal of layout.terminals) {
-    molecules.push(template(`flap-${terminal.id}`, "flap-contour", [
-      port(`flap-${terminal.id}-corridor`, `flap-${terminal.id}`, layout.axis, terminal.side, terminal.x, Math.max(terminal.width, terminal.height), "hinge"),
-    ]));
-    molecules.push(template(`fan-${terminal.id}`, "corner-fan", [
-      port(`fan-${terminal.id}-terminal`, `fan-${terminal.id}`, terminal.side === "left" || terminal.side === "right" ? "horizontal" : "vertical", terminal.side, terminal.x, Math.max(terminal.width, terminal.height), "ridge"),
-    ]));
-  }
-  for (const corridor of layout.corridors) {
-    molecules.push(template(`corridor-${corridor.id}`, corridor.orientation === layout.axis ? "river-corridor" : "hinge-corridor", [
-      port(`corridor-${corridor.id}-a`, `corridor-${corridor.id}`, corridor.orientation, "interior", corridor.coordinate, corridor.width, "axis"),
-      port(`corridor-${corridor.id}-b`, `corridor-${corridor.id}`, corridor.orientation, "interior", corridor.coordinate, corridor.width, "axis"),
-    ]));
-  }
-  molecules.push(template("central-diamond", "diamond-connector", [
-    port("central-diamond-left", "central-diamond", "diagonal-positive", "interior", layout.spineCoordinate, 1 / layout.gridSize, "ridge"),
-    port("central-diamond-right", "central-diamond", "diagonal-negative", "interior", layout.spineCoordinate, 1 / layout.gridSize, "ridge"),
-  ]));
-  molecules.push(template("central-stretch", "stretch-gadget", [
-    port("central-stretch-left", "central-stretch", "horizontal", "interior", layout.spineCoordinate, 1 / layout.gridSize, "axis"),
-    port("central-stretch-right", "central-stretch", "vertical", "interior", 0.5, 1 / layout.gridSize, "axis"),
-  ]));
-  return molecules;
 }
 
-function joinPorts(molecules: MoleculeTemplate[]): PortJoin[] {
-  const joins: PortJoin[] = [];
-  const ports = molecules.flatMap((molecule) => molecule.ports);
-  const interiorPorts = ports.filter((port) => port.side === "interior");
-  for (const port of ports.filter((candidate) => candidate.side !== "interior")) {
-    const mate = nearestCompatiblePort(port, interiorPorts);
-    if (!mate) {
-      joins.push({
-        from: port.id,
-        to: "unmatched",
-        orientation: port.orientation,
-        width: port.width,
-        accepted: false,
-        reason: `no compatible interior port for ${port.orientation}`,
-      });
+function borderSegment(id: string, p1: Point, p2: Point): CompletionSegment {
+  return { id, moleculeId: "sheet-border", moleculeKind: "sheet-border", p1, p2, assignment: "B", role: "border" };
+}
+
+function plannedBodyCenters(layout: CompletionLayout): CompletionPoint[] {
+  const region = primaryBody(layout);
+  return [point(snapAnchor((region.x1 + region.x2) / 2), snapAnchor((region.y1 + region.y2) / 2))];
+}
+
+function plannedTerminalCenters(layout: CompletionLayout, bodyCenter: CompletionPoint): Array<{
+  terminal: CompletionTerminal;
+  center: CompletionPoint;
+}> {
+  const occupied = new Set<string>();
+  const layer = terminalLayer(layout);
+  return [...layout.terminals].sort((a, b) => a.priority - b.priority).slice(0, 8).map((terminal, index) => {
+    const preferred = terminalCenterFromSide(terminal, bodyCenter, layer);
+    let center = preferred;
+    const alternates = terminalAlternates(terminal, bodyCenter, layer);
+    for (const candidate of [preferred, ...alternates]) {
+      const key = pointKey2(candidate);
+      if (!occupied.has(key)) {
+        center = candidate;
+        break;
+      }
+    }
+    occupied.add(pointKey2(center));
+    return { terminal: { ...terminal, priority: index + 1 }, center };
+  });
+}
+
+function terminalCenterFromSide(terminal: CompletionTerminal, bodyCenter: CompletionPoint, layer: number): CompletionPoint {
+  void bodyCenter;
+  const far = 1 - layer;
+  const x = terminal.side === "left" ? layer : terminal.side === "right" ? far : sideLaneFallback(terminal.priority, layer);
+  const y = terminal.side === "bottom" ? layer : terminal.side === "top" ? far : sideLaneFallback(terminal.priority, layer);
+  if (terminal.side === "interior") return point(snapAnchor(terminal.x), snapAnchor(terminal.y));
+  return point(x, y);
+}
+
+function terminalAlternates(terminal: CompletionTerminal, bodyCenter: CompletionPoint, layer: number): CompletionPoint[] {
+  void bodyCenter;
+  const laneAnchors = [layer, 1 - layer];
+  if (terminal.side === "left" || terminal.side === "right") {
+    const x = terminal.side === "left" ? layer : 1 - layer;
+    return laneAnchors.map((y) => point(x, y));
+  }
+  const y = terminal.side === "bottom" ? layer : 1 - layer;
+  return laneAnchors.map((x) => point(x, y));
+}
+
+function nearestAnchor(value: number, fallback: number): number {
+  const anchors = [0.25, 0.375, 0.5, 0.625, 0.75];
+  const target = Number.isFinite(value) ? value : fallback;
+  return anchors.slice().sort((a, b) => Math.abs(a - target) - Math.abs(b - target))[0];
+}
+
+function sideLaneFallback(priority: number, layer: number): number {
+  return Math.abs(priority) % 2 === 1 ? layer : 1 - layer;
+}
+
+function terminalLayer(layout: CompletionLayout): number {
+  const layers = [0.125, 0.25];
+  return layers[Math.abs(hashString(layout.id) + layout.terminals.length) % layers.length];
+}
+
+function hashString(value: string): number {
+  let hash = 0;
+  for (let i = 0; i < value.length; i++) hash = (hash * 31 + value.charCodeAt(i)) | 0;
+  return hash;
+}
+
+function instanceFor(
+  patches: Map<MoleculeKind, MoleculePatch>,
+  id: string,
+  kind: MoleculeKind,
+  center: CompletionPoint,
+): MoleculeInstance {
+  const patchItem = patches.get(kind);
+  if (!patchItem) return templateOnlyInstance(id, kind, center);
+  return createMoleculeInstance(id, patchItem, {
+    translate: center,
+    scale: 1 / 32,
+  });
+}
+
+function templateOnlyInstance(id: string, kind: MoleculeKind, center: CompletionPoint): MoleculeInstance {
+  return {
+    id,
+    templateId: kind,
+    kind,
+    transform: { translate: center },
+    ports: [],
+  };
+}
+
+function starSegments(moleculeId: string, moleculeKind: MoleculeKind, center: CompletionPoint): CompletionSegment[] {
+  const c: Point = [center.x, center.y];
+  const directions: Point[] = [
+    [1, 0],
+    [-1, 0],
+    [0, 1],
+    [0, -1],
+    [1, 1],
+    [-1, -1],
+    [1, -1],
+    [-1, 1],
+  ];
+  return directions.map((direction, index): CompletionSegment => ({
+    id: `${moleculeId}:star-${index}`,
+    moleculeId,
+    moleculeKind,
+    p1: c,
+    p2: compassRayToSheet(c, direction),
+    assignment: roleForDirection(direction) === "ridge" ? "M" : "V",
+    role: roleForDirection(direction),
+  }));
+}
+
+function diamondSegments(
+  moleculeId: string,
+  moleculeKind: MoleculeKind,
+  center: CompletionPoint,
+  radius: number,
+): CompletionSegment[] {
+  const c: Point = [center.x, center.y];
+  const points = ([
+    [c[0], c[1] + radius],
+    [c[0] + radius, c[1]],
+    [c[0], c[1] - radius],
+    [c[0] - radius, c[1]],
+  ] as Point[]).map(roundPoint);
+  return [
+    [points[0], points[1]],
+    [points[1], points[2]],
+    [points[2], points[3]],
+    [points[3], points[0]],
+  ].map(([p1, p2], index): CompletionSegment => ({
+    id: `${moleculeId}:diamond-${index}`,
+    moleculeId,
+    moleculeKind,
+    p1,
+    p2,
+    assignment: "M",
+    role: "ridge",
+  }));
+}
+
+function corridorRoute(
+  from: CompletionPoint,
+  to: CompletionPoint,
+  gridSize: number,
+): {
+  primaryOrientation: Port["orientation"];
+  turns: CompletionPoint[];
+  segments: Array<{ p1: CompletionPoint; p2: CompletionPoint; role: Exclude<BPRole, "border"> }>;
+} {
+  if (Math.abs(from.x - to.x) < 1e-9) {
+    return { primaryOrientation: "vertical", turns: [], segments: [{ p1: from, p2: to, role: "axis" }] };
+  }
+  if (Math.abs(from.y - to.y) < 1e-9) {
+    return { primaryOrientation: "horizontal", turns: [], segments: [{ p1: from, p2: to, role: "hinge" }] };
+  }
+  if (Math.abs(Math.abs(from.x - to.x) - Math.abs(from.y - to.y)) < 1e-9) {
+    return {
+      primaryOrientation: from.x - to.x === from.y - to.y ? "diagonal-positive" : "diagonal-negative",
+      turns: [],
+      segments: [{ p1: from, p2: to, role: "ridge" }],
+    };
+  }
+  const bend = point(snap(to.x, gridSize), snap(from.y, gridSize));
+  return {
+    primaryOrientation: "horizontal",
+    turns: [bend],
+    segments: [
+      { p1: from, p2: bend, role: "hinge" },
+      { p1: bend, p2: to, role: "axis" },
+    ],
+  };
+}
+
+function dedupeCompletionSegments(segments: CompletionSegment[]): CompletionSegment[] {
+  const result = new Map<string, CompletionSegment>();
+  for (const segmentItem of segments) {
+    if (distance(segmentItem.p1, segmentItem.p2) < 1e-9) continue;
+    const key = segmentKey(segmentItem);
+    const existing = result.get(key);
+    if (!existing) {
+      result.set(key, segmentItem);
       continue;
     }
-    joins.push({
-      from: port.id,
-      to: mate.id,
-      orientation: port.orientation,
-      width: Math.min(port.width, mate.width),
-      accepted: true,
+    result.set(key, {
+      ...existing,
+      assignment: assignmentPriority(existing.assignment) >= assignmentPriority(segmentItem.assignment)
+        ? existing.assignment
+        : segmentItem.assignment,
+      role: rolePriority(existing.role) >= rolePriority(segmentItem.role) ? existing.role : segmentItem.role,
     });
   }
-  return joins;
+  return [...result.values()];
 }
 
-function nearestCompatiblePort(port: Port, candidates: Port[]): Port | undefined {
-  return candidates
-    .filter((candidate) => portsCompatible(port, candidate))
-    .sort((a, b) => Math.abs(a.coordinate - port.coordinate) - Math.abs(b.coordinate - port.coordinate))[0];
+function countMoleculeInstances(instances: MoleculeInstance[]): Record<string, number> {
+  const counts: Record<string, number> = {};
+  counts["sheet-border"] = 1;
+  for (const instance of instances) counts[instance.kind] = (counts[instance.kind] ?? 0) + 1;
+  return counts;
 }
 
-function portsCompatible(a: Port, b: Port): boolean {
-  if (a.orientation === b.orientation) return true;
-  if (a.orientation.startsWith("diagonal") && b.orientation.startsWith("diagonal")) return true;
-  return false;
+function gridSizeForSegments(segments: CompletionSegment[], preferred: number): number {
+  const candidates = [...new Set([preferred, 128, 256, 512, 1024, 2048])].sort((a, b) => a - b);
+  const coordinates = segments.flatMap((segmentItem) => [segmentItem.p1[0], segmentItem.p1[1], segmentItem.p2[0], segmentItem.p2[1]]);
+  return candidates.find((gridSize) => coordinates.every((coordinate) => onHalfGrid(coordinate, gridSize))) ?? preferred;
+}
+
+function nearestPoint(target: CompletionPoint, points: CompletionPoint[]): CompletionPoint {
+  return points.slice().sort((a, b) => pointDistance(a, target) - pointDistance(b, target))[0] ?? point(0.5, 0.5);
+}
+
+function midpoint(a: CompletionPoint, b: CompletionPoint): CompletionPoint {
+  return point((a.x + b.x) / 2, (a.y + b.y) / 2);
+}
+
+function diamondRadius(center: CompletionPoint): number {
+  const margin = Math.min(center.x, center.y, 1 - center.x, 1 - center.y);
+  return margin >= 0.1875 ? 0.125 : 0.0625;
+}
+
+function uniquePointsByKey(points: CompletionPoint[]): CompletionPoint[] {
+  const seen = new Set<string>();
+  const result: CompletionPoint[] = [];
+  for (const item of points) {
+    const key = pointKey2(item);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(item);
+  }
+  return result;
+}
+
+function point(x: number, y: number): CompletionPoint {
+  return { x: round(clamp(x, 0.125, 0.875)), y: round(clamp(y, 0.125, 0.875)) };
+}
+
+function snapAnchor(value: number): number {
+  return nearestAnchor(value, 0.5);
+}
+
+function pointKey2(item: CompletionPoint): string {
+  return `${item.x.toFixed(6)},${item.y.toFixed(6)}`;
+}
+
+function segmentKey(segmentItem: CompletionSegment): string {
+  const a = `${segmentItem.p1[0].toFixed(9)},${segmentItem.p1[1].toFixed(9)}`;
+  const b = `${segmentItem.p2[0].toFixed(9)},${segmentItem.p2[1].toFixed(9)}`;
+  return a < b ? `${a}:${b}` : `${b}:${a}`;
+}
+
+function roundPoint(item: Point): Point {
+  return [round(item[0]), round(item[1])];
+}
+
+function distance(a: Point, b: Point): number {
+  return Math.hypot(a[0] - b[0], a[1] - b[1]);
+}
+
+function pointDistance(a: CompletionPoint, b: CompletionPoint): number {
+  return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+function assignmentPriority(assignment: EdgeAssignment): number {
+  return { B: 5, M: 4, V: 3, F: 2, U: 1, C: 0 }[assignment];
+}
+
+function rolePriority(role: BPRole): number {
+  return { border: 5, ridge: 4, axis: 3, stretch: 2, hinge: 1 }[role];
+}
+
+function round(value: number): number {
+  return Math.round(value * 1_000_000_000) / 1_000_000_000;
 }
 
 function template(id: string, kind: MoleculeKind, ports: Port[]): MoleculeTemplate {
@@ -425,76 +754,6 @@ function template(id: string, kind: MoleculeKind, ports: Port[]): MoleculeTempla
       fixture: `${kind}-fixture`,
     },
   };
-}
-
-function port(
-  id: string,
-  moleculeId: string,
-  orientation: Port["orientation"],
-  side: Port["side"],
-  coordinate: number,
-  width: number,
-  role: BPRole,
-): Port {
-  return {
-    id,
-    moleculeId,
-    orientation,
-    side,
-    coordinate,
-    width,
-    parity: isHalfGrid(coordinate) ? "half" : "integer",
-    role,
-  };
-}
-
-function axisLine(role: "axis" | "hinge", coordinate: number, assignment: "M" | "V", moleculeKind: MoleculeKind): CompletionFoldLine {
-  return role === "axis"
-    ? {
-        id: `axis-x-${coordinate.toFixed(6)}`,
-        moleculeId: moleculeKind,
-        moleculeKind,
-        vector: [0, 1],
-        origin: [coordinate, 0],
-        assignment,
-        role,
-      }
-    : {
-        id: `hinge-y-${coordinate.toFixed(6)}`,
-        moleculeId: moleculeKind,
-        moleculeKind,
-        vector: [1, 0],
-        origin: [0, coordinate],
-        assignment,
-        role,
-      };
-}
-
-function diagonalLine(kind: "positive" | "negative", rawConstant: number, assignment: "M" | "V", moleculeKind: MoleculeKind): CompletionFoldLine {
-  const constant = kind === "positive" ? clamp(rawConstant, -0.9375, 0.9375) : clamp(rawConstant, 0.0625, 1.9375);
-  const origin = kind === "positive"
-    ? (constant >= 0 ? [0, constant] : [-constant, 0])
-    : (constant <= 1 ? [0, constant] : [constant - 1, 1]);
-  return {
-    id: `${kind}-diagonal-${constant.toFixed(6)}`,
-    moleculeId: moleculeKind,
-    moleculeKind,
-    vector: kind === "positive" ? [1, 1] : [1, -1],
-    origin: origin as Point,
-    assignment,
-    role: "ridge",
-  };
-}
-
-function lineIsInsideSheet(line: CompletionFoldLine): boolean {
-  return line.origin.every((value) => Number.isFinite(value) && value >= -1e-8 && value <= 1 + 1e-8);
-}
-
-function foldLineOrder(line: CompletionFoldLine): number {
-  if (line.role === "ridge") return 0;
-  if (line.moleculeKind === "body-panel") return 1;
-  if (line.role === "hinge") return 2;
-  return 3;
 }
 
 function roleForEdge(a: Point, b: Point, assignment: EdgeAssignment): BPRole {
@@ -550,18 +809,6 @@ function corridorCoordinate(from: string, to: string, spec: BPStudioAdapterSpec,
   return axis === "horizontal" ? (a.y + b.y) / 2 : (a.x + b.x) / 2;
 }
 
-function rankedUnique(values: number[], gridSize: number): number[] {
-  const seen = new Set<string>();
-  const result: number[] = [];
-  for (const value of values.map((item) => snap(clamp(item, 0.0625, 0.9375), gridSize)).sort((a, b) => Math.abs(a - 0.5) - Math.abs(b - 0.5))) {
-    const key = value.toFixed(6);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    result.push(value);
-  }
-  return result;
-}
-
 function toLayoutMetadata(layout: CompletionLayout): LayoutMetadata {
   return {
     gridSize: layout.gridSize,
@@ -588,12 +835,6 @@ function toLayoutMetadata(layout: CompletionLayout): LayoutMetadata {
     })),
     layoutScore: 1,
   };
-}
-
-function countMolecules(foldLines: CompletionFoldLine[]): Record<string, number> {
-  const counts: Record<string, number> = {};
-  for (const line of foldLines) counts[line.moleculeKind] = (counts[line.moleculeKind] ?? 0) + 1;
-  return counts;
 }
 
 function gridSizeForFold(fold: FOLDFormat, preferred: number): number {

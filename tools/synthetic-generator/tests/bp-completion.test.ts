@@ -23,9 +23,12 @@ for (const fixture of ["two-flap-stretch", "three-flap-relay", "five-flap-uniaxi
     expect(result.portJoins.length).toBeGreaterThan(0);
     expect(result.portJoins.every((join) => join.accepted)).toBe(true);
     expect(result.molecules.length).toBeGreaterThan(3);
-    expect(result.foldLines.length).toBeGreaterThan(6);
+    expect(result.foldLines).toHaveLength(0);
+    expect(result.segments?.length).toBeGreaterThan(12);
+    expect(result.moleculeInstances?.length).toBeGreaterThan(3);
     expect(result.fold?.completion_metadata?.engine).toBe("strict-box-pleat-completion");
     expect(result.fold?.completion_metadata?.source).toBe("fixture");
+    expect(result.fold?.completion_metadata?.compilerSteps).toContain("emit-local-molecule-segments");
     expect(result.fold?.label_policy?.labelSource).toBe("compiler");
     expect(result.fold?.label_policy?.trainingEligible).toBe(true);
     expect(result.fold?.edges_bpStudioSource).toBeUndefined();

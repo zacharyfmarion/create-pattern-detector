@@ -49,6 +49,9 @@ export function runBPCompletionQA(fold: FOLDFormat): BPCompletionQAReport {
   if (metrics.dominantOrientationShare > 0.62) warnings.push("orientation-distribution-too-uniform");
   if (metrics.maxInteriorVertexDegree >= 16) warnings.push("high-degree-global-line-junctions");
   if (fold.completion_metadata?.version.endsWith("/v0.1.0")) warnings.push("baseline-compiler-version-not-production");
+  if (fold.completion_metadata?.version.endsWith("/v0.2.0")) {
+    warnings.push("restricted-corner-fan-compiler-not-production-distribution");
+  }
 
   return {
     strictLabelReady: errors.length === 0,

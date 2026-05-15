@@ -74,6 +74,8 @@ export interface Port {
   width: number;
   parity: "integer" | "half";
   role: BPRole;
+  position?: CompletionPoint;
+  expectedPartnerRole?: BPRole;
 }
 
 export interface PortJoin {
@@ -83,6 +85,8 @@ export interface PortJoin {
   width: number;
   accepted: boolean;
   reason?: string;
+  fromPosition?: CompletionPoint;
+  toPosition?: CompletionPoint;
 }
 
 export interface MoleculeTemplate {
@@ -95,6 +99,80 @@ export interface MoleculeTemplate {
     maekawa: boolean;
     fixture: string;
   };
+}
+
+export interface MoleculePatchVertex {
+  id: string;
+  x: number;
+  y: number;
+}
+
+export interface MoleculePatchSegment {
+  id: string;
+  from: string;
+  to: string;
+  assignment: Extract<EdgeAssignment, "M" | "V">;
+  role: Exclude<BPRole, "border">;
+}
+
+export interface MoleculePatch {
+  id: string;
+  kind: MoleculeKind;
+  version: string;
+  vertices: MoleculePatchVertex[];
+  segments: MoleculePatchSegment[];
+  ports: Port[];
+  bounds: {
+    x1: number;
+    y1: number;
+    x2: number;
+    y2: number;
+  };
+}
+
+export interface MoleculeTransform {
+  translate: CompletionPoint;
+  rotateQuarterTurns?: 0 | 1 | 2 | 3;
+  mirrorX?: boolean;
+  mirrorY?: boolean;
+  scale?: number;
+}
+
+export interface MoleculeInstance {
+  id: string;
+  templateId: string;
+  kind: MoleculeKind;
+  transform: MoleculeTransform;
+  ports: Port[];
+  patch?: MoleculePatch;
+}
+
+export interface CompletionSegment {
+  id: string;
+  moleculeId: string;
+  moleculeKind: MoleculeKind;
+  p1: [number, number];
+  p2: [number, number];
+  assignment: Extract<EdgeAssignment, "M" | "V" | "B">;
+  role: BPRole;
+}
+
+export interface CompositionFixture {
+  id: string;
+  description: string;
+  requiredMoleculeKinds: MoleculeKind[];
+}
+
+export interface MoleculeCertificationReport {
+  fixtureId: string;
+  ok: boolean;
+  moleculeKinds: MoleculeKind[];
+  checkedPortJoins: number;
+  rejectedPortJoins: number;
+  danglingEndpointCount: number;
+  validationPassed: string[];
+  validationFailed: string[];
+  errors: string[];
 }
 
 export interface CompletionFoldLine {
@@ -119,6 +197,8 @@ export interface CompletionResult {
   layout: CompletionLayout;
   foldLines: CompletionFoldLine[];
   molecules: MoleculeTemplate[];
+  moleculeInstances?: MoleculeInstance[];
+  segments?: CompletionSegment[];
   portJoins: PortJoin[];
   rejected: CompletionRejection[];
 }

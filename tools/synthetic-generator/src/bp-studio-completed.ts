@@ -37,7 +37,6 @@ export function generateBPStudioCompletedFold(config: GenerationConfig): FOLDFor
         adapterSpec,
         adapterMetadata,
         layoutId: config.id,
-        maxFoldLines: bucket === "small" ? 96 : 128,
       });
       if (!completion.ok || !completion.fold) {
         throw new Error(`completion failed: ${completion.rejected.map((item) => `${item.code}:${item.message}`).join("; ")}`);
@@ -71,7 +70,8 @@ export function generateBPStudioCompletedFold(config: GenerationConfig): FOLDFor
           "bp-studio-spec-sampler",
           "bp-studio-adapter-optimizer",
           "regularize-layout",
-          "certified-molecule-fold-program",
+          "local-molecule-compiler",
+          "maekawa-assignment-solve",
           "pending-strict-validation",
         ],
         moleculeCounts: {
