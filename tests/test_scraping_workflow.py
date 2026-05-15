@@ -50,8 +50,8 @@ def test_select_refetch_candidates_keeps_screened_images_only(tmp_path):
     write_jsonl(
         manifests / f"cpoogle_crops_{run_id}.jsonl",
         [
-            {"asset_id": "cpoogle:image", "status": "accepted", "crop_path": "crop.png", "perceptual_hash": "aa"},
-            {"asset_id": "cpoogle:pdf", "status": "accepted", "crop_path": "pdf.png"},
+            {"asset_id": "cpoogle:image", "status": "review", "crop_path": "crop.png", "perceptual_hash": "aa"},
+            {"asset_id": "cpoogle:pdf", "status": "review", "crop_path": "pdf.png"},
             {"asset_id": "cpoogle:rejected", "status": "rejected"},
         ],
     )
@@ -60,7 +60,7 @@ def test_select_refetch_candidates_keeps_screened_images_only(tmp_path):
 
     assert [candidate.asset_id for candidate in candidates] == ["cpoogle:image"]
     assert candidates[0].metadata["screening_run_id"] == run_id
-    assert candidates[0].metadata["screening_statuses"] == ["accepted"]
+    assert candidates[0].metadata["screening_statuses"] == ["review"]
 
 
 def test_classify_existing_crops_writes_merged_manifest(monkeypatch, tmp_path):

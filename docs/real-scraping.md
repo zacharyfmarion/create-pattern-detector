@@ -11,7 +11,8 @@ Scrapes write under `data/output/scraped/`:
 - `raw_assets/`: downloaded images, PDFs, and native files. CPOogle image
   smoke/screening runs can store Drive thumbnails here; manifests mark those as
   `download_variant=drive_thumbnail`.
-- `crops/`: normalized CP-only image crops split into `accepted/` and `review/`.
+- `crops/`: normalized CP-only image crops split into `review/` and rejected manifest rows.
+  Heuristics do not auto-accept crops; Gemini promotes review crops later.
 - `native/`: preserved native assets plus converted geometry-only FOLD files.
 - `manifests/`: JSONL asset, crop, native, dedupe, and summary manifests.
 - `review/`: contact sheets for quick manual QA.
@@ -163,7 +164,7 @@ python scripts/data/scrape_cpoogle.py \
 ```bash
 python scripts/data/refetch_originals_from_manifest.py \
   --screening-run CPOOGLE_SCREENING_RUN_ID \
-  --statuses accepted review \
+  --statuses review \
   --image-download-size 0 \
   --workers 12 \
   --request-delay 0.10
@@ -190,7 +191,7 @@ python scripts/data/build_final_real_cp_dataset.py \
 Final outputs are written under `data/output/scraped/final/`:
 
 - `native_manifest.jsonl`: all preserved native files plus conversion status.
-- `final_usable_images.jsonl`: deduped accepted and unresolved-review crops.
+- `final_usable_images.jsonl`: deduped Gemini-accepted and unresolved-review crops.
 - `final_rejects.jsonl`: rejected crops and duplicate records.
 - `dedupe_groups.jsonl`: duplicate provenance groups.
 - `summary.json`: counts for acceptance, review, rejects, duplicates, and native rows.

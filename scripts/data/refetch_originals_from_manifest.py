@@ -17,7 +17,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-root", type=Path, default=Path("data/output/scraped"))
     parser.add_argument("--screening-run", required=True, help="CPOogle screening run id")
-    parser.add_argument("--statuses", nargs="+", default=["accepted", "review"])
+    parser.add_argument("--statuses", nargs="+", default=["review"])
     parser.add_argument(
         "--image-download-size",
         type=int,

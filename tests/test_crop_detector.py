@@ -23,7 +23,8 @@ def test_crop_detector_accepts_clean_light_mode_cp(tmp_path):
     results = process_asset_for_crops(image_path, "asset-1", tmp_path / "crops")
 
     assert len(results) == 1
-    assert results[0].status == "accepted"
+    assert results[0].status == "review"
+    assert results[0].needs_review is True
     assert results[0].cp_score >= 0.75
     assert results[0].crop_path is not None
 
@@ -36,7 +37,7 @@ def test_crop_detector_handles_dark_mode_cp(tmp_path):
 
     results = process_asset_for_crops(image_path, "asset-2", tmp_path / "crops")
 
-    assert results[0].status in {"accepted", "review"}
+    assert results[0].status == "review"
     assert results[0].crop_path is not None
 
 
@@ -53,7 +54,7 @@ def test_crop_detector_accepts_colored_line_art_cp(tmp_path):
 
     result = process_asset_for_crops(image_path, "asset-red", tmp_path / "crops")[0]
 
-    assert result.status == "accepted"
+    assert result.status == "review"
 
 
 def test_crop_detector_rejects_photo_like_noise(tmp_path):

@@ -70,7 +70,7 @@ def _candidate_from_manifest_record(record: dict[str, Any]) -> SourceAssetCandid
 def select_refetch_candidates(
     scraped_root: str | Path,
     screening_run: str,
-    statuses: Iterable[str] = ("accepted", "review"),
+    statuses: Iterable[str] = ("review",),
     source: str = "cpoogle",
     limit_assets: int | None = None,
 ) -> list[SourceAssetCandidate]:
@@ -131,7 +131,7 @@ def select_refetch_candidates(
 def refetch_cpoogle_originals_from_manifest(
     scraped_root: str | Path = "data/output/scraped",
     screening_run: str = "",
-    statuses: Iterable[str] = ("accepted", "review"),
+    statuses: Iterable[str] = ("review",),
     image_download_size: int = 0,
     workers: int = 12,
     request_delay: float = 0.10,

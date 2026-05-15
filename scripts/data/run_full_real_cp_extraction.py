@@ -139,7 +139,7 @@ def main() -> None:
         summary = refetch_cpoogle_originals_from_manifest(
             scraped_root=output_root,
             screening_run=args.screening_run,
-            statuses=("accepted", "review"),
+            statuses=("review",),
             image_download_size=0,
             workers=args.refetch_workers,
             request_delay=args.refetch_request_delay,

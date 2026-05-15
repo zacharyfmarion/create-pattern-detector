@@ -398,7 +398,7 @@ class CPCropDetector:
             and line_art_score >= 0.45
             and aspect_score >= 0.65
         ):
-            return "accepted", False
+            return "review", True
         if (
             analysis.cp_score >= self.review_threshold
             and min_side >= self.min_review_side
