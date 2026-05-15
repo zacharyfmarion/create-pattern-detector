@@ -337,15 +337,18 @@ function threePanelSvg(
 ): string {
   const gutter = Math.max(24, Math.round(panelSize * 0.035));
   const titleHeight = Math.max(74, Math.round(panelSize * 0.095));
+  const legendGap = Math.max(12, Math.round(panelSize * 0.018));
+  const legendHeight = Math.max(118, Math.round(panelSize * 0.17));
   const footerHeight = Math.max(44, Math.round(panelSize * 0.055));
   const width = panelSize * 3 + gutter * 4;
-  const height = panelSize + titleHeight + footerHeight + gutter;
+  const height = panelSize + titleHeight + legendGap + legendHeight + footerHeight + gutter;
   const panels = [
     {
       x: gutter,
       title: "1. Source Tree",
       subtitle: `${spec.archetype}, ${spec.tree.nodes.length} nodes, ${spec.tree.edges.length} edges`,
       body: sourceTreePanel(spec, panelSize),
+      legend: treeLegendOutside(panelSize),
     },
     {
       x: gutter * 2 + panelSize,
@@ -354,12 +357,14 @@ function threePanelSvg(
         ? `${adapterMetadata.spec?.optimizerLayout ?? "unknown"} optimizer${adapterMetadata.spec?.optimizerUseBH ? " + variations" : ""}, sheet ${formatSheetSize(chosenLayout(adapterMetadata)?.sheet)}`
         : "adapter did not report optimized layout",
       body: packingPanel(spec, adapterMetadata, panelSize),
+      legend: packingLegendOutside(panelSize),
     },
     {
       x: gutter * 3 + panelSize * 2,
       title: "3. Compiler Candidate Overlay",
       subtitle: `${candidate.validity}, ${candidate.layout.pleatStrips.length} pleat corridors`,
       body: candidateOverlayPanel(spec, adapterMetadata, candidate, panelSize),
+      legend: compilerLegendOutside(panelSize),
     },
   ];
   return [
@@ -370,6 +375,7 @@ function threePanelSvg(
       `<text x="0" y="24" font-family="Inter, Arial, sans-serif" font-size="22" font-weight="700" fill="#0f172a">${escapeXml(panel.title)}</text>`,
       `<text x="0" y="48" font-family="Inter, Arial, sans-serif" font-size="14" fill="#475569">${escapeXml(panel.subtitle)}</text>`,
       `<g transform="translate(0,${titleHeight})">${panel.body}</g>`,
+      `<g transform="translate(0,${titleHeight + panelSize + legendGap})">${panel.legend}</g>`,
       `</g>`,
     ].join("\n")),
     `<text x="${gutter}" y="${height - gutter * 0.85}" font-family="Inter, Arial, sans-serif" font-size="14" fill="#475569">Panel 3 overlays BP Studio's optimized flap targets and tree-length circles with our region compiler scaffold and candidate crease content. Fills/dashed outlines are debug layers, not final training labels.</text>`,
@@ -407,7 +413,6 @@ function sourceTreePanel(spec: BPStudioAdapterSpec, size: number): string {
   return panelFrame(size, [
     ...edgeItems,
     ...nodeItems,
-    treeLegend(size),
   ]);
 }
 
@@ -427,7 +432,6 @@ function packingPanel(spec: BPStudioAdapterSpec, adapterMetadata: AdapterMetadat
     ...edges,
     ...nodes,
     ...flaps,
-    packingLegend(size),
   ], true, "bp-packing-clip");
 }
 
@@ -446,7 +450,7 @@ function candidateOverlayPanel(
     .filter((node) => !node.isLeaf)
     .map((node) => adapterNodeBoundsMark(node, toPanel, String(node.id)));
   const optimizedFlaps = (layout?.flaps ?? []).map((flap) => adapterFlapMark(flap, toPanel, scale, terminalLengths.get(flap.id), "#22c55e", "#15803d", false));
-  const candidateSvg = regionCandidateToSvg(candidate, size)
+  const candidateSvg = stripRegionDebugLegend(regionCandidateToSvg(candidate, size))
     .replace(/<svg[^>]*>/, `<g>`)
     .replace(/<\/svg>\s*$/, `</g>`);
   return panelFrame(size, [
@@ -465,6 +469,10 @@ function panelFrame(size: number, body: string[], includeBorder = true, clipId?:
     clipId ? `</g>` : "",
     includeBorder ? `<rect x="0" y="0" width="${size}" height="${size}" fill="none" stroke="#0f172a" stroke-width="2"/>` : "",
   ].join("\n");
+}
+
+function stripRegionDebugLegend(svg: string): string {
+  return svg.replace(/<g data-debug-legend="bp-region">[\s\S]*?<\/g>/, "");
 }
 
 function packedTreeOverlay(
@@ -663,13 +671,24 @@ function adapterFlapMark(
   const p2 = project({ x: flap.x + (flap.width ?? 0), y: flap.y + (flap.height ?? 0) });
   const x = Math.min(p1.x, p2.x);
   const y = Math.min(p1.y, p2.y);
-  const width = Math.max(10, Math.abs(p2.x - p1.x));
-  const height = Math.max(10, Math.abs(p2.y - p1.y));
+  const rawWidth = Math.abs(p2.x - p1.x);
+  const rawHeight = Math.abs(p2.y - p1.y);
+  const hasArea = (flap.width ?? 0) > 1e-9 || (flap.height ?? 0) > 1e-9;
+  const width = Math.max(10, rawWidth);
+  const height = Math.max(10, rawHeight);
   const center = project(centerOfAdapterFlap(flap));
   const lengthRadius = Math.max(0, (flapLength ?? 0) * scale);
+  const pointRadius = 4.2;
+  const pointArm = 8;
   return [
-    `<rect x="${x}" y="${y}" width="${width}" height="${height}" fill="${fill}" fill-opacity="0.22" stroke="${stroke}" stroke-width="1.8" stroke-dasharray="5 4"/>`,
     lengthRadius > 0 ? `<circle cx="${center.x}" cy="${center.y}" r="${lengthRadius}" fill="none" stroke="${stroke}" stroke-width="1.6" stroke-opacity="0.78"/>` : "",
+    hasArea
+      ? `<rect x="${x}" y="${y}" width="${width}" height="${height}" fill="${fill}" fill-opacity="0.22" stroke="${stroke}" stroke-width="1.8" stroke-dasharray="5 4"/>`
+      : [
+        `<circle cx="${center.x}" cy="${center.y}" r="${pointRadius}" fill="${fill}" fill-opacity="0.9" stroke="${stroke}" stroke-width="1.6"/>`,
+        `<line x1="${center.x - pointArm}" y1="${center.y}" x2="${center.x + pointArm}" y2="${center.y}" stroke="${stroke}" stroke-width="1.4" stroke-linecap="round"/>`,
+        `<line x1="${center.x}" y1="${center.y - pointArm}" x2="${center.x}" y2="${center.y + pointArm}" stroke="${stroke}" stroke-width="1.4" stroke-linecap="round"/>`,
+      ].join("\n"),
     lengthRadius > 0 && showLabel ? `<text x="${center.x + lengthRadius + 4}" y="${center.y + 4}" font-family="Inter, Arial, sans-serif" font-size="10.5" fill="#064e3b">L ${flapLength}</text>` : "",
     showLabel ? `<text x="${center.x + 6}" y="${center.y - 6}" font-family="Inter, Arial, sans-serif" font-size="11" fill="#064e3b">id ${flap.id}</text>` : "",
   ].join("\n");
@@ -693,27 +712,49 @@ function adapterNodeBoundsMark(
   ].join("\n");
 }
 
-function treeLegend(size: number): string {
+function treeLegendOutside(size: number): string {
+  const y = 34;
   return [
-    `<g transform="translate(${size - 190},18)">`,
-    `<rect width="172" height="108" rx="8" fill="white" fill-opacity="0.9" stroke="#cbd5e1"/>`,
-    `<circle cx="18" cy="24" r="8" fill="#93c5fd" stroke="#2563eb" stroke-width="2"/><text x="34" y="28" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">body / hub node</text>`,
-    `<circle cx="18" cy="50" r="7" fill="#4ade80" stroke="#16a34a" stroke-width="2"/><text x="34" y="54" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">flap node</text>`,
-    `<line x1="10" y1="72" x2="27" y2="72" stroke="#64748b" stroke-width="2"/><text x="34" y="76" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">tree edge</text>`,
-    `<rect x="10" y="88" width="26" height="14" rx="4" fill="#ffffff" stroke="#cbd5e1"/><text x="42" y="99" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">edge length</text>`,
-    `</g>`,
+    legendBand(size, "Tree legend"),
+    `<circle cx="18" cy="${y}" r="8" fill="#93c5fd" stroke="#2563eb" stroke-width="2"/><text x="34" y="${y + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">body / hub node</text>`,
+    `<circle cx="190" cy="${y}" r="7" fill="#4ade80" stroke="#16a34a" stroke-width="2"/><text x="206" y="${y + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">flap node</text>`,
+    `<line x1="340" y1="${y}" x2="362" y2="${y}" stroke="#64748b" stroke-width="2"/><text x="372" y="${y + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">tree edge</text>`,
+    `<rect x="486" y="${y - 8}" width="28" height="16" rx="4" fill="#ffffff" stroke="#cbd5e1"/><text x="524" y="${y + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">edge length</text>`,
   ].join("\n");
 }
 
-function packingLegend(size: number): string {
+function packingLegendOutside(size: number): string {
+  const y1 = 34;
+  const y2 = 72;
   return [
-    `<g transform="translate(${size - 248},18)">`,
-    `<rect width="230" height="116" rx="8" fill="white" fill-opacity="0.9" stroke="#cbd5e1"/>`,
-    `<rect x="12" y="16" width="22" height="18" fill="#4ade80" fill-opacity="0.22" stroke="#16a34a" stroke-dasharray="5 4"/><text x="44" y="30" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">optimized flap target</text>`,
-    `<circle cx="23" cy="52" r="15" fill="none" stroke="#16a34a" stroke-width="1.6"/><text x="44" y="56" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">flap length circle</text>`,
-    `<rect x="12" y="72" width="22" height="14" fill="#60a5fa" fill-opacity="0.10" stroke="#2563eb" stroke-dasharray="8 5"/><text x="44" y="84" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">BP Studio node bounds</text>`,
-    `<line x1="12" y1="98" x2="34" y2="98" stroke="#64748b" stroke-width="1.8"/><text x="44" y="102" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">inferred tree edge</text>`,
-    `</g>`,
+    legendBand(size, "Packing legend"),
+    `<circle cx="20" cy="${y1}" r="4.2" fill="#4ade80" fill-opacity="0.9" stroke="#16a34a" stroke-width="1.6"/><line x1="12" y1="${y1}" x2="28" y2="${y1}" stroke="#16a34a" stroke-width="1.4"/><line x1="20" y1="${y1 - 8}" x2="20" y2="${y1 + 8}" stroke="#16a34a" stroke-width="1.4"/><text x="42" y="${y1 + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">zero-size optimized flap point</text>`,
+    `<circle cx="274" cy="${y1}" r="17" fill="none" stroke="#16a34a" stroke-width="1.6"/><text x="302" y="${y1 + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">flap length circle</text>`,
+    `<rect x="468" y="${y1 - 10}" width="24" height="18" fill="#4ade80" fill-opacity="0.22" stroke="#16a34a" stroke-dasharray="5 4"/><text x="502" y="${y1 + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">nonzero flap target</text>`,
+    `<rect x="18" y="${y2 - 8}" width="24" height="16" fill="#60a5fa" fill-opacity="0.10" stroke="#2563eb" stroke-dasharray="8 5"/><text x="52" y="${y2 + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">BP Studio node bounds</text>`,
+    `<line x1="252" y1="${y2}" x2="280" y2="${y2}" stroke="#64748b" stroke-width="1.8"/><text x="292" y="${y2 + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">inferred tree edge</text>`,
+  ].join("\n");
+}
+
+function compilerLegendOutside(size: number): string {
+  const y1 = 34;
+  const y2 = 72;
+  return [
+    legendBand(size, "Compiler overlay legend"),
+    `<rect x="16" y="${y1 - 9}" width="22" height="18" fill="#ffdf4d" fill-opacity="0.72" stroke="#ca8a04" stroke-width="0.8"/><text x="48" y="${y1 + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">pleat corridor</text>`,
+    `<rect x="170" y="${y1 - 9}" width="22" height="18" fill="#bfdbfe" fill-opacity="0.76" stroke="#2563eb" stroke-width="0.8"/><text x="202" y="${y1 + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">body panel</text>`,
+    `<rect x="318" y="${y1 - 9}" width="22" height="18" fill="#bbf7d0" fill-opacity="0.76" stroke="#16a34a" stroke-width="0.8"/><text x="350" y="${y1 + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">compiler flap target</text>`,
+    `<line x1="506" y1="${y1}" x2="538" y2="${y1}" stroke="#ff1f1f" stroke-width="3" stroke-linecap="round"/><text x="548" y="${y1 + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">mountain</text>`,
+    `<line x1="16" y1="${y2}" x2="48" y2="${y2}" stroke="#0057ff" stroke-width="3" stroke-linecap="round"/><text x="58" y="${y2 + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">valley</text>`,
+    `<line x1="170" y1="${y2}" x2="202" y2="${y2}" stroke="#0057ff" stroke-width="2" stroke-dasharray="5 4" stroke-linecap="round"/><text x="212" y="${y2 + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">debug boundary</text>`,
+    `<text x="350" y="${y2 + 4}" font-family="Inter, Arial, sans-serif" font-size="11" fill="#64748b">Fills are scaffold/debug only</text>`,
+  ].join("\n");
+}
+
+function legendBand(size: number, title: string): string {
+  return [
+    `<rect x="0" y="0" width="${size}" height="100" rx="8" fill="#ffffff" fill-opacity="0.96" stroke="#cbd5e1"/>`,
+    `<text x="14" y="18" font-family="Inter, Arial, sans-serif" font-size="13" font-weight="700" fill="#0f172a">${escapeXml(title)}</text>`,
   ].join("\n");
 }
 
