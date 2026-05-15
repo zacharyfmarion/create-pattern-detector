@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { completeBoxPleatLayout, fixtureCompletionLayout } from "../src/bp-completion.ts";
 import { runBPCompletionQA } from "../src/bp-completion-qa.ts";
+import { buildStaircaseBridgePrimitive } from "../src/bp-staircase-bridge.ts";
 
 test("completion QA separates strict label readiness from production distribution readiness", () => {
   const result = completeBoxPleatLayout(fixtureCompletionLayout("insect-lite"));
@@ -30,4 +31,15 @@ test("completion QA rejects raw or ambiguous label provenance", () => {
   const report = runBPCompletionQA(fold);
   expect(report.strictLabelReady).toBe(false);
   expect(report.errors).toContain("labels-not-compiler-training-eligible");
+});
+
+test("completion QA rejects lab-only whole-sheet bridge fixtures", () => {
+  const result = buildStaircaseBridgePrimitive({ laneCount: 5, orientation: "diagonal-positive" });
+  expect(result.ok).toBe(true);
+
+  const report = runBPCompletionQA(result.fold!);
+  expect(report.strictLabelReady).toBe(false);
+  expect(report.productionDistributionReady).toBe(false);
+  expect(report.errors).toContain("labels-not-compiler-training-eligible");
+  expect(result.fold?.label_policy?.notes.join(" ")).toContain("BP Studio packing would reject");
 });

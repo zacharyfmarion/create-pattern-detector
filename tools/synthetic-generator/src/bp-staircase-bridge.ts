@@ -77,11 +77,22 @@ export function buildStaircaseBridgePrimitive(options: StaircaseBridgeOptions): 
 
   const counts = roleCounts(solved.fold);
   solved.fold.file_creator = "cp-synthetic-generator/bp-staircase-bridge";
+  solved.fold.file_description = "Lab-only whole-sheet bridge fixture. This is not a production BP Studio-style sample because the implied cap territories overlap like invalid flap allocations.";
   solved.fold.bp_metadata = {
     ...arranged.bp_metadata,
     ridgeCount: counts.ridge ?? 0,
     hingeCount: counts.hinge ?? 0,
     axisCount: counts.axis ?? 0,
+  };
+  solved.fold.label_policy = {
+    labelSource: "compiler",
+    geometrySource: "compiler",
+    assignmentSource: "compiler",
+    trainingEligible: false,
+    notes: [
+      "Lab-only composition proof for final M/V assignment solving.",
+      "Not production BP data: whole-sheet cap overlay resembles overlapping flap allocation regions, which BP Studio packing would reject unless represented as an explicit stretch/gadget region.",
+    ],
   };
   return {
     ok: true,

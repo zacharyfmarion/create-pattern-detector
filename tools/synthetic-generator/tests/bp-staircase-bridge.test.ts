@@ -25,6 +25,8 @@ test("staircase bridge composes two caps and solves final M/V assignments", asyn
 
   expect(result.ok, result.errors.join("\n")).toBe(true);
   expect(result.fold).toBeDefined();
+  expect(result.fold?.label_policy?.trainingEligible).toBe(false);
+  expect(result.fold?.label_policy?.notes.join(" ")).toContain("overlapping flap allocation");
   expect(result.assignmentSteps).toBeGreaterThan(0);
   expect(result.fold?.bp_metadata?.bpSubfamily).toBe("staircase-bridge-primitive");
   expect(result.fold?.edges_assignment.filter((assignment) => assignment === "M").length).toBeGreaterThan(0);
