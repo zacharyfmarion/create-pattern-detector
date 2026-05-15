@@ -62,11 +62,13 @@ export interface AdapterMetadata {
     sheet?: { width: number; height: number };
     edges?: Array<{ n1: number; n2: number; length: number }>;
     flaps?: Array<{ id: number; x: number; y: number; width?: number; height?: number }>;
+    nodes?: AdapterNodeLayout[];
   };
   inputLayout?: {
     sheet?: { width: number; height: number };
     edges?: Array<{ n1: number; n2: number; length: number }>;
     flaps?: Array<{ id: number; x: number; y: number; width?: number; height?: number }>;
+    nodes?: AdapterNodeLayout[];
   };
   optimizedLayout?: {
     optimized?: boolean;
@@ -74,6 +76,7 @@ export interface AdapterMetadata {
     sheet?: { width: number; height: number };
     edges?: Array<{ n1: number; n2: number; length: number }>;
     flaps?: Array<{ id: number; x: number; y: number; width?: number; height?: number }>;
+    nodes?: AdapterNodeLayout[];
   };
   cp?: { lineCount?: number; vertexCount?: number; edgeCount?: number; assignmentCounts?: Record<string, number> };
   stretches?: Array<{
@@ -91,6 +94,20 @@ export interface AdapterMetadata {
   }>;
   adapterTempDir?: string;
   [key: string]: unknown;
+}
+
+export interface AdapterNodeLayout {
+  id: number;
+  parentId?: number;
+  length: number;
+  dist: number;
+  isLeaf: boolean;
+  bounds: {
+    top: number;
+    right: number;
+    bottom: number;
+    left: number;
+  };
 }
 
 type Point = [number, number];

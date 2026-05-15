@@ -46,6 +46,28 @@ describe("BP Studio adapter", () => {
     expect(metadata.cp.roleCounts.hinge).toBeGreaterThan(0);
   });
 
+  test("keeps optimized dimensional flaps inside the exported sheet", async () => {
+    const fixture = JSON.parse(await readFile(new URL("../fixtures/two-flap.json", import.meta.url), "utf8"));
+    fixture.tree.flaps = [
+      { id: 1, x: 0, y: 0, width: 4, height: 4 },
+      { id: 2, x: 8, y: 9, width: 3, height: 5 },
+    ];
+    const { metadata } = await generate({
+      ...fixture,
+      optimizeLayout: true,
+      optimizerLayout: "random",
+      optimizerSeed: 4,
+      exportMode: "final",
+    });
+
+    for (const flap of metadata.optimizedLayout.flaps) {
+      expect(flap.x).toBeGreaterThanOrEqual(0);
+      expect(flap.y).toBeGreaterThanOrEqual(0);
+      expect(flap.x + (flap.width ?? 0)).toBeLessThanOrEqual(metadata.optimizedLayout.sheet.width);
+      expect(flap.y + (flap.height ?? 0)).toBeLessThanOrEqual(metadata.optimizedLayout.sheet.height);
+    }
+  });
+
   test("rejects unflapped leaves before BP Studio junction processing", async () => {
     await expect(generate({
       title: "bad dummy root",

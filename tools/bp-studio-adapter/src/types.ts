@@ -38,6 +38,20 @@ export interface FlapSpec {
   height?: number;
 }
 
+export interface NodeLayoutSpec {
+  id: number;
+  parentId?: number;
+  length: number;
+  dist: number;
+  isLeaf: boolean;
+  bounds: {
+    top: number;
+    right: number;
+    bottom: number;
+    left: number;
+  };
+}
+
 export interface FoldDocument {
   file_spec: 1.1;
   file_creator: string;
@@ -93,11 +107,13 @@ export interface AdapterMetadata {
     sheet: SheetSpec;
     edges: EdgeSpec[];
     flaps: FlapSpec[];
+    nodes?: NodeLayoutSpec[];
   };
   inputLayout: {
     sheet: SheetSpec;
     edges: EdgeSpec[];
     flaps: FlapSpec[];
+    nodes?: NodeLayoutSpec[];
   };
   optimizedLayout: {
     optimized: boolean;
@@ -105,6 +121,7 @@ export interface AdapterMetadata {
     sheet: SheetSpec;
     edges: EdgeSpec[];
     flaps: FlapSpec[];
+    nodes?: NodeLayoutSpec[];
   };
   cp: {
     lineCount: number;

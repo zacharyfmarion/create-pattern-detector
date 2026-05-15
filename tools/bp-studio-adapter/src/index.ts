@@ -28,6 +28,7 @@ import type {
   FlapSpec,
   FoldDocument,
   GenerationResult,
+  NodeLayoutSpec,
   SheetSpec,
   StretchMetadata
 } from "./types";
@@ -172,16 +173,28 @@ async function optimizeTreeLayout(
   const bridge = new Bridge(instance);
   const result = await bridge.solve(request, spec.optimizerSeed);
   const sizeById = new Map(flaps.map(flap => [flap.id, { width: flap.width ?? 0, height: flap.height ?? 0 }]));
+  const optimizedFlaps = result.flaps.map(flap => ({
+    id: flap.id,
+    x: flap.x,
+    y: flap.y,
+    width: sizeById.get(flap.id)?.width ?? 0,
+    height: sizeById.get(flap.id)?.height ?? 0,
+  }));
   return {
-    sheet: { width: result.width, height: result.height },
-    flaps: result.flaps.map(flap => ({
-      id: flap.id,
-      x: flap.x,
-      y: flap.y,
-      width: sizeById.get(flap.id)?.width ?? 0,
-      height: sizeById.get(flap.id)?.height ?? 0,
-    })),
+    sheet: sheetForOptimizedFlaps(result.width, result.height, optimizedFlaps),
+    flaps: optimizedFlaps,
   };
+}
+
+function sheetForOptimizedFlaps(width: number, height: number, flaps: FlapSpec[]): SheetSpec {
+  let maxX = width;
+  let maxY = height;
+  for(const flap of flaps) {
+    maxX = Math.max(maxX, flap.x + (flap.width ?? 0));
+    maxY = Math.max(maxY, flap.y + (flap.height ?? 0));
+  }
+  const squareSize = Math.max(Math.ceil(maxX), Math.ceil(maxY));
+  return { width: squareSize, height: squareSize };
 }
 
 function getCPByMode(borders: Path, useAuxiliary: boolean, exportMode: BPStudioExportMode): TaggedCPLine[] {
@@ -512,6 +525,7 @@ function collectMetadata(
   optimizerLayout: "view" | "random",
   optimizerSeed: number | null
 ): AdapterMetadata {
+  const nodes = collectNodeLayout();
   return {
     adapter: {
       name: ADAPTER_NAME,
@@ -538,7 +552,8 @@ function collectMetadata(
       optimizerLayout,
       sheet: spec.sheet,
       edges,
-      flaps
+      flaps,
+      nodes
     },
     inputLayout,
     optimizedLayout: {
@@ -546,7 +561,8 @@ function collectMetadata(
       optimizerLayout,
       sheet: spec.sheet,
       edges,
-      flaps
+      flaps,
+      nodes
     },
     cp: {
       lineCount: lines.length,
@@ -557,6 +573,24 @@ function collectMetadata(
     },
     stretches: collectStretchMetadata()
   };
+}
+
+function collectNodeLayout(): NodeLayoutSpec[] {
+  const tree = State.m.$tree;
+  const result: NodeLayoutSpec[] = [];
+  for(const node of tree.$nodes) {
+    if(!node) continue;
+    const [top, right, bottom, left] = node.$AABB.$toValues();
+    result.push({
+      id: node.id,
+      parentId: node.$parent?.id,
+      length: node.$length,
+      dist: node.$dist,
+      isLeaf: node.$isLeaf,
+      bounds: { top, right, bottom, left }
+    });
+  }
+  return result.sort((a, b) => a.id - b.id);
 }
 
 function cloneLayout(sheet: SheetSpec, edges: EdgeSpec[], flaps: FlapSpec[]): { sheet: SheetSpec; edges: EdgeSpec[]; flaps: FlapSpec[] } {
