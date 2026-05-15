@@ -1,13 +1,14 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { foldComparisonSvg } from "./bp-debug-svg.ts";
-import { buildDiagonalStaircaseCapPrimitive } from "./bp-staircase-cap.ts";
+import { buildDiagonalStaircaseCapPrimitive, type StaircaseCapCorner } from "./bp-staircase-cap.ts";
 import { makeFlatFoldedPreview } from "./folded-preview.ts";
 import { validateFold } from "./validate.ts";
 
 interface Options {
   out: string;
   laneCount: number;
+  corner: StaircaseCapCorner;
 }
 
 async function main(): Promise<void> {
@@ -15,6 +16,7 @@ async function main(): Promise<void> {
   const fold = buildDiagonalStaircaseCapPrimitive({
     laneCount: options.laneCount,
     startAxisAssignment: "V",
+    corner: options.corner,
   });
   const validation = await validateFold(fold, {
     strictGlobal: true,
@@ -52,6 +54,7 @@ function parseArgs(args: string[]): Options {
   const options: Options = {
     out: "/tmp/bp-staircase-cap-debug/staircase-cap.svg",
     laneCount: 7,
+    corner: "bottom-left",
   };
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
@@ -59,6 +62,8 @@ function parseArgs(args: string[]): Options {
       options.out = requiredValue(args[++index], "--out");
     } else if (arg === "--lane-count") {
       options.laneCount = Number(requiredValue(args[++index], "--lane-count"));
+    } else if (arg === "--corner") {
+      options.corner = parseCorner(requiredValue(args[++index], "--corner"));
     } else {
       throw new Error(`Unknown argument: ${arg}`);
     }
@@ -67,6 +72,13 @@ function parseArgs(args: string[]): Options {
     throw new Error("--lane-count must be a positive integer");
   }
   return options;
+}
+
+function parseCorner(value: string): StaircaseCapCorner {
+  if (value === "bottom-left" || value === "bottom-right" || value === "top-left" || value === "top-right") {
+    return value;
+  }
+  throw new Error(`--corner must be one of bottom-left, bottom-right, top-left, top-right; got ${value}`);
 }
 
 function requiredValue(value: string | undefined, flag: string): string {

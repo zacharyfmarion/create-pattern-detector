@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { buildDiagonalStaircaseCapPrimitive } from "../src/bp-staircase-cap.ts";
 import { makeFlatFoldedPreview } from "../src/folded-preview.ts";
 import { validateFold } from "../src/validate.ts";
+import type { StaircaseCapCorner } from "../src/bp-staircase-cap.ts";
 
 const strictDenseBPValidation = {
   strictGlobal: true,
@@ -34,8 +35,20 @@ test("diagonal staircase cap is locally and globally flat-foldable", async () =>
   expect(preview.faces).toBeGreaterThan(1);
 });
 
+test("diagonal staircase cap certifies every sheet-corner orientation", async () => {
+  for (const corner of ["bottom-left", "bottom-right", "top-left", "top-right"] as StaircaseCapCorner[]) {
+    const fold = buildDiagonalStaircaseCapPrimitive({
+      laneCount: 5,
+      startAxisAssignment: "V",
+      corner,
+    });
+    const validation = await validateFold(fold, strictDenseBPValidation);
+    expect(validation.valid, `${corner}: ${validation.errors.join("\n")}`).toBe(true);
+  }
+});
+
 test("diagonal staircase cap is deterministic", () => {
-  const a = buildDiagonalStaircaseCapPrimitive({ laneCount: 5, startAxisAssignment: "M" });
-  const b = buildDiagonalStaircaseCapPrimitive({ laneCount: 5, startAxisAssignment: "M" });
+  const a = buildDiagonalStaircaseCapPrimitive({ laneCount: 5, startAxisAssignment: "M", corner: "top-right" });
+  const b = buildDiagonalStaircaseCapPrimitive({ laneCount: 5, startAxisAssignment: "M", corner: "top-right" });
   expect(a).toEqual(b);
 });
