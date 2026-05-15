@@ -2,7 +2,10 @@ data/**/*.fold
 data/**/*.png
 data/**/*.json
 data/**/*.txt
+data/output/scraped/**
 data/ts-generation/node_modules
+.venv/
+configs/scraping.env
 */**/__pycache__/**
 .DS_Store
 checkpoints/

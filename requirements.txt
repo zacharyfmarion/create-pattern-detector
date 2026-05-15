@@ -23,3 +23,6 @@ hydra-core>=1.3.0
 
 # Visualization
 matplotlib>=3.7.0
+
+# Scraping / PDF preprocessing
+pypdfium2>=4.30.0
