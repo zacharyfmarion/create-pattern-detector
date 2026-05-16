@@ -105,6 +105,7 @@ export function compileRegionCandidate(layout: RegionLayout, options: CompileReg
     segments.push(...pleatSegments(strip));
   }
 
+  segments.push(...turnClosureSegmentsForKawasakiCorners(workingLayout, dedupeSegments(segments)));
   const arrangedSegments = dedupeSegments(segments);
   const rejectionReasons = [
     ...(phaseSolve && !phaseSolve.ok ? phaseSolve.errors : []),
@@ -128,7 +129,7 @@ export function probeRegionCandidateLocalFlatFoldability(
   layout: RegionLayout,
   segments: RegionCandidateSegment[],
 ): RegionLocalFlatFoldProbe {
-  const activeSegmentKinds: RegionCandidateSegment["kind"][] = ["border", "strip-pleat", "stair-boundary"];
+  const activeSegmentKinds: RegionCandidateSegment["kind"][] = ["border", "strip-pleat", "stair-boundary", "turn-closure"];
   const active = segments.filter((segmentItem) => activeSegmentKinds.includes(segmentItem.kind));
   const arranged = arrangeSegments(
     active.map((segmentItem) => ({
@@ -189,6 +190,129 @@ export function probeRegionCandidateLocalFlatFoldability(
     failureReasons,
     failurePoints,
   };
+}
+
+function turnClosureSegmentsForKawasakiCorners(
+  layout: RegionLayout,
+  segments: RegionCandidateSegment[],
+): RegionCandidateSegment[] {
+  const activeSegmentKinds: RegionCandidateSegment["kind"][] = ["border", "strip-pleat"];
+  const active = segments.filter((segmentItem) => activeSegmentKinds.includes(segmentItem.kind));
+  const arranged = arrangeSegments(
+    active.map((segmentItem) => ({
+      p1: segmentItem.p1,
+      p2: segmentItem.p2,
+      assignment: segmentItem.assignment,
+      role: segmentItem.role,
+      source: {
+        kind: `region-${segmentItem.kind}`,
+        mandatory: true,
+        ownerId: segmentItem.regionId,
+      },
+    })),
+    "cp-synthetic-generator/bp-region/turn-closure-probe",
+    {
+      gridSize: layout.gridSize,
+      bpSubfamily: "bp-studio-completed-uniaxial",
+      flapCount: layout.flaps.length,
+      gadgetCount: 0,
+      ridgeCount: 1,
+      hingeCount: 1,
+      axisCount: 1,
+    },
+  ) as ReturnType<typeof arrangeSegments> & { vertices_edges?: number[][] };
+  const kawasakiProbe = {
+    ...arranged,
+    edges_assignment: arranged.edges_assignment.map((assignment) => assignment === "B" ? "B" : "M"),
+  };
+  ear.graph.populate(kawasakiProbe);
+  ear.graph.populate(arranged);
+  const badVertices = sortedUnique(ear.singleVertex.validateKawasaki(kawasakiProbe) as number[]);
+  const result: RegionCandidateSegment[] = [];
+  const seen = new Set<string>();
+  const pitch = pleatPitchForGrid(layout.gridSize);
+
+  for (const vertex of badVertices) {
+    const pointItem = arranged.vertices_coords[vertex];
+    if (!pointItem || isSheetBoundaryPoint(pointItem)) continue;
+    const directions = activeDirectionsAtVertex(arranged, vertex);
+    const additions = turnClosureEndpoints(pointItem, directions, pitch);
+    for (const [index, endpoint] of additions.entries()) {
+      if (!pointInsideSheet(endpoint)) continue;
+      const p1 = roundPoint(pointItem);
+      const p2 = roundPoint(endpoint);
+      const key = segmentKey(p1, p2);
+      if (seen.has(key) || segments.some((segmentItem) => segmentKey(segmentItem.p1, segmentItem.p2) === key)) continue;
+      seen.add(key);
+      result.push({
+        id: `turn-closure-${vertex}-${index}`,
+        regionId: "turn-closure",
+        kind: "turn-closure",
+        p1,
+        p2,
+        assignment: "M",
+        role: roleForSegment(p1, p2),
+      });
+    }
+  }
+  return result;
+}
+
+function activeDirectionsAtVertex(
+  graph: ReturnType<typeof arrangeSegments> & { vertices_edges?: number[][] },
+  vertex: number,
+): Set<"R" | "L" | "U" | "D"> {
+  const result = new Set<"R" | "L" | "U" | "D">();
+  const pointItem = graph.vertices_coords[vertex];
+  for (const edge of graph.vertices_edges?.[vertex] ?? []) {
+    if (graph.edges_assignment[edge] === "B") continue;
+    const [a, b] = graph.edges_vertices[edge];
+    const other = graph.vertices_coords[a === vertex ? b : a];
+    const dx = other[0] - pointItem[0];
+    const dy = other[1] - pointItem[1];
+    if (Math.abs(dx) >= Math.abs(dy)) result.add(dx >= 0 ? "R" : "L");
+    else result.add(dy >= 0 ? "U" : "D");
+  }
+  return result;
+}
+
+function turnClosureEndpoints(
+  pointItem: Point,
+  directions: Set<"R" | "L" | "U" | "D">,
+  pitch: number,
+): Point[] {
+  const hasHorizontal = directions.has("R") || directions.has("L");
+  const hasVertical = directions.has("U") || directions.has("D");
+  if (directions.size === 2 && hasHorizontal && hasVertical) {
+    const verticalSign = directions.has("U") ? -1 : 1;
+    return [
+      [pointItem[0] - pitch, pointItem[1] + verticalSign * pitch],
+      [pointItem[0] + pitch, pointItem[1] + verticalSign * pitch],
+    ];
+  }
+  if (directions.size === 3) {
+    if (!directions.has("R")) return [[pointItem[0] + pitch, pointItem[1]]];
+    if (!directions.has("L")) return [[pointItem[0] - pitch, pointItem[1]]];
+    if (!directions.has("U")) return [[pointItem[0], pointItem[1] + pitch]];
+    if (!directions.has("D")) return [[pointItem[0], pointItem[1] - pitch]];
+  }
+  return [];
+}
+
+function isSheetBoundaryPoint(pointItem: Point): boolean {
+  return pointItem[0] < 1e-9 || pointItem[0] > 1 - 1e-9 || pointItem[1] < 1e-9 || pointItem[1] > 1 - 1e-9;
+}
+
+function pointInsideSheet(pointItem: Point): boolean {
+  return pointItem[0] >= -1e-9 && pointItem[0] <= 1 + 1e-9 && pointItem[1] >= -1e-9 && pointItem[1] <= 1 + 1e-9;
+}
+
+function roleForSegment(a: Point, b: Point): Exclude<RegionCandidateSegment["role"], "border"> {
+  const dx = Math.abs(a[0] - b[0]);
+  const dy = Math.abs(a[1] - b[1]);
+  if (dx > 1e-9 && dy > 1e-9) return "ridge";
+  if (dx < 1e-9) return "axis";
+  return "hinge";
 }
 
 function classifyLocalFailure(
@@ -271,7 +395,7 @@ export function regionCandidateToSvg(candidate: RegionCompletionCandidate, size 
     const [x1, y1] = toPx(segment.p1);
     const [x2, y2] = toPx(segment.p2);
     const color = segment.assignment === "M" ? colors.mountain : segment.assignment === "V" ? colors.valley : colors.border;
-    const width = segment.kind === "border" ? 3.4 : segment.kind === "strip-pleat" ? 3.6 : segment.kind === "stair-boundary" ? 3.5 : 1.8;
+    const width = segment.kind === "border" ? 3.4 : segment.kind === "strip-pleat" ? 3.6 : segment.kind === "stair-boundary" || segment.kind === "turn-closure" ? 3.5 : 1.8;
     const dash = segment.kind === "body-boundary" || segment.kind === "flap-boundary" ? " stroke-dasharray=\"5 4\"" : "";
     return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${color}" stroke-width="${round(width * strokeScale)}" stroke-linecap="round" stroke-opacity="0.98"${dash}/>`;
   };

@@ -67,6 +67,8 @@ test("regularized simple quadruped corridors avoid flap allocation interiors", (
 
   expect(candidate.validity).toBe("layout-valid");
   expect(candidate.localProbe?.locallyFlatFoldable).toBe(false);
+  expect(candidate.localProbe?.kawasakiBad).toBe(0);
+  expect(candidate.segments.filter((segment) => segment.kind === "turn-closure").length).toBeGreaterThan(0);
   expect(candidate.rejectionReasons.filter((reason) => reason.startsWith("flap-allocation-overlap"))).toHaveLength(0);
   expect(candidate.layout.pleatStrips.length).toBeGreaterThan(7);
   expect(candidate.layout.pleatStrips.every((strip) =>
