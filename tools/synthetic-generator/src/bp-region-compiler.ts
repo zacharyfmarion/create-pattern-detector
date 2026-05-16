@@ -459,25 +459,41 @@ function turnClosureSegmentsForKawasakiCorners(
     const pointItem = arranged.vertices_coords[vertex];
     if (!pointItem || isSheetBoundaryPoint(pointItem)) continue;
     const directions = activeDirectionsAtVertex(arranged, vertex);
-    const additions = turnClosureEndpoints(pointItem, directions, pitch);
-    for (const [index, endpoint] of additions.entries()) {
-      if (!pointInsideSheet(endpoint)) continue;
-      if (activeVertexKeys.has(pointKey(endpoint))) continue;
-      if (pointFallsOnActiveSegmentInterior(endpoint, active)) continue;
-      const p1 = roundPoint(pointItem);
-      const p2 = roundPoint(endpoint);
-      const key = segmentKey(p1, p2);
-      if (seen.has(key) || segments.some((segmentItem) => segmentKey(segmentItem.p1, segmentItem.p2) === key)) continue;
-      seen.add(key);
-      result.push({
-        id: `turn-closure-${vertex}-${index}`,
-        regionId: "turn-closure",
-        kind: "turn-closure",
-        p1,
-        p2,
-        assignment: "M",
-        role: roleForSegment(p1, p2),
-      });
+    for (let scale = 1; scale <= 4; scale += 1) {
+      const additions = turnClosureEndpoints(pointItem, directions, pitch * scale);
+      if (!additions.length) break;
+      if (!additions.every((endpoint) =>
+        pointInsideSheet(endpoint) &&
+        !activeVertexKeys.has(pointKey(endpoint)) &&
+        !pointFallsOnActiveSegmentInterior(endpoint, active) &&
+        !segmentCrossesActiveInterior(pointItem, endpoint, active)
+      )) continue;
+      let accepted = true;
+      const local: RegionCandidateSegment[] = [];
+      for (const [index, endpoint] of additions.entries()) {
+        const p1 = roundPoint(pointItem);
+        const p2 = roundPoint(endpoint);
+        const key = segmentKey(p1, p2);
+        if (seen.has(key) || segments.some((segmentItem) => segmentKey(segmentItem.p1, segmentItem.p2) === key)) {
+          accepted = false;
+          break;
+        }
+        local.push({
+          id: `turn-closure-${vertex}-${index}`,
+          regionId: "turn-closure",
+          kind: "turn-closure",
+          p1,
+          p2,
+          assignment: "M",
+          role: roleForSegment(p1, p2),
+        });
+      }
+      if (!accepted) continue;
+      for (const item of local) {
+        seen.add(segmentKey(item.p1, item.p2));
+        result.push(item);
+      }
+      break;
     }
   }
   return result;
@@ -489,6 +505,37 @@ function pointKey(pointItem: Point): string {
 
 function pointFallsOnActiveSegmentInterior(pointItem: Point, segments: RegionCandidateSegment[]): boolean {
   return segments.some((segmentItem) => pointOnSegmentInterior(pointItem, segmentItem.p1, segmentItem.p2));
+}
+
+function segmentCrossesActiveInterior(start: Point, end: Point, segments: RegionCandidateSegment[]): boolean {
+  return segments.some((segmentItem) => {
+    if (distance(start, segmentItem.p1) < 1e-9 || distance(start, segmentItem.p2) < 1e-9) return false;
+    return segmentsIntersectAwayFromEndpoints(start, end, segmentItem.p1, segmentItem.p2);
+  });
+}
+
+function segmentsIntersectAwayFromEndpoints(a: Point, b: Point, c: Point, d: Point): boolean {
+  const denominator = (a[0] - b[0]) * (c[1] - d[1]) - (a[1] - b[1]) * (c[0] - d[0]);
+  if (Math.abs(denominator) < 1e-12) {
+    return pointOnSegmentInterior(a, c, d) || pointOnSegmentInterior(b, c, d) ||
+      pointOnSegmentInterior(c, a, b) || pointOnSegmentInterior(d, a, b);
+  }
+  const detAB = a[0] * b[1] - a[1] * b[0];
+  const detCD = c[0] * d[1] - c[1] * d[0];
+  const px = (detAB * (c[0] - d[0]) - (a[0] - b[0]) * detCD) / denominator;
+  const py = (detAB * (c[1] - d[1]) - (a[1] - b[1]) * detCD) / denominator;
+  const pointItem: Point = [px, py];
+  if (!pointOnClosedSegment(pointItem, a, b) || !pointOnClosedSegment(pointItem, c, d)) return false;
+  return [a, b, c, d].every((endpoint) => distance(pointItem, endpoint) > 1e-9);
+}
+
+function pointOnClosedSegment(pointItem: Point, a: Point, b: Point): boolean {
+  const cross = (pointItem[0] - a[0]) * (b[1] - a[1]) - (pointItem[1] - a[1]) * (b[0] - a[0]);
+  if (Math.abs(cross) > 1e-9) return false;
+  return pointItem[0] >= Math.min(a[0], b[0]) - 1e-9 &&
+    pointItem[0] <= Math.max(a[0], b[0]) + 1e-9 &&
+    pointItem[1] >= Math.min(a[1], b[1]) - 1e-9 &&
+    pointItem[1] <= Math.max(a[1], b[1]) + 1e-9;
 }
 
 function pointOnSegmentInterior(pointItem: Point, a: Point, b: Point): boolean {
@@ -520,22 +567,22 @@ function activeDirectionsAtVertex(
 function turnClosureEndpoints(
   pointItem: Point,
   directions: Set<"R" | "L" | "U" | "D">,
-  pitch: number,
+  distance: number,
 ): Point[] {
   const hasHorizontal = directions.has("R") || directions.has("L");
   const hasVertical = directions.has("U") || directions.has("D");
   if (directions.size === 2 && hasHorizontal && hasVertical) {
     const verticalSign = directions.has("U") ? -1 : 1;
     return [
-      [pointItem[0] - pitch, pointItem[1] + verticalSign * pitch],
-      [pointItem[0] + pitch, pointItem[1] + verticalSign * pitch],
+      [pointItem[0] - distance, pointItem[1] + verticalSign * distance],
+      [pointItem[0] + distance, pointItem[1] + verticalSign * distance],
     ];
   }
   if (directions.size === 3) {
-    if (!directions.has("R")) return [[pointItem[0] + pitch, pointItem[1]]];
-    if (!directions.has("L")) return [[pointItem[0] - pitch, pointItem[1]]];
-    if (!directions.has("U")) return [[pointItem[0], pointItem[1] + pitch]];
-    if (!directions.has("D")) return [[pointItem[0], pointItem[1] - pitch]];
+    if (!directions.has("R")) return [[pointItem[0] + distance, pointItem[1]]];
+    if (!directions.has("L")) return [[pointItem[0] - distance, pointItem[1]]];
+    if (!directions.has("U")) return [[pointItem[0], pointItem[1] + distance]];
+    if (!directions.has("D")) return [[pointItem[0], pointItem[1] - distance]];
   }
   return [];
 }
