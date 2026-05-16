@@ -3,11 +3,11 @@
 Phase 2 is a deterministic baseline for turning clean crease-pattern label
 fields into a planar FOLD-style graph.
 
-It does not train or run an image model. It starts from real `.fold` files,
-renders very clean ground-truth labels, then asks:
+It does not train or run a learned image model. It starts from real `.fold`
+files, renders very clean ground-truth label maps, then asks:
 
 ```text
-clean rendered labels -> PlanarGraphBuilder -> predicted graph -> metrics + overlays
+clean rendered label maps -> PlanarGraphBuilder -> predicted graph -> metrics + overlays
 ```
 
 This isolates vectorization quality before adding real-image complications such
@@ -271,8 +271,9 @@ print(metrics.to_dict())
 
 ## Important Limitations
 
-- This is not an image detector. It uses clean rendered labels from FOLD
-  geometry.
+- This is a vectorizer benchmark, not a real-image detector. It does detect
+  lines and vertices in image space, but from clean rendered label maps generated
+  from FOLD geometry rather than from photos, scans, or model predictions.
 - It does not perform augmentation, stretching, perspective transforms, stroke
   noise, or photo simulation.
 - Downstream Rabbit Ear/base-computation validation is still recorded as skipped
