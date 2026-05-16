@@ -7,7 +7,7 @@ import numpy as np
 import torch
 
 from src.data.cpline_dataset import CplineFoldDataset, render_cpline_sample, render_input_image
-from src.data.cpline_augmentations import NON_IDENTITY_SQUARE_SYMMETRIES
+from src.data.cpline_augmentations import AUGMENT_MIXES, NON_IDENTITY_SQUARE_SYMMETRIES
 from src.data.fold_parser import CreasePattern, FOLDParser
 from src.models import CPLineNet
 from src.vectorization import cpline_outputs_to_evidence
@@ -175,6 +175,58 @@ def test_cpline_seeded_augmentation_is_reproducible():
     assert first.metadata["params"] == second.metadata["params"]
 
 
+def test_cpline_stage_light_samples_only_stage_one_profiles():
+    cp = simple_mv_cp()
+    allowed = {entry[0] for entry in AUGMENT_MIXES["stage-light"]}
+    seen = {
+        render_cpline_sample(
+            cp,
+            image_size=96,
+            padding=8,
+            line_width=2,
+            augment_profile="stage-light",
+            seed=seed,
+        ).metadata["selected_profile"]
+        for seed in range(40)
+    }
+
+    assert seen <= allowed
+    assert "dark-mode" not in seen
+    assert "print-medium" not in seen
+    assert "photo-light" not in seen
+
+
+def test_cpline_stage_dark_pins_dark_mode_without_grid():
+    cp = simple_mv_cp()
+    dark_sample = None
+    for seed in range(80):
+        sample = render_cpline_sample(
+            cp,
+            image_size=96,
+            padding=8,
+            line_width=2,
+            augment_profile="stage-dark",
+            seed=seed,
+        )
+        if sample.metadata["selected_profile"] == "dark-mode":
+            dark_sample = sample
+            break
+
+    assert dark_sample is not None
+    assert dark_sample.metadata["style_variant"] == "dark-no-grid"
+    assert dark_sample.metadata["grid_enabled"] is False
+
+
+def test_cpline_style_profiles_do_not_apply_square_symmetry_by_default():
+    cp = asymmetric_mv_cp()
+    clean = render_cpline_sample(cp, image_size=96, padding=8, line_width=2, augment_profile="clean")
+    styled = render_cpline_sample(cp, image_size=96, padding=8, line_width=2, augment_profile="line-style", seed=2)
+
+    assert styled.metadata["square_symmetry"] == "identity"
+    assert styled.metadata["geometry_applied"] is False
+    assert np.allclose(styled.pixel_vertices, clean.pixel_vertices)
+
+
 def test_cpline_monochrome_style_does_not_hallucinate_mv_targets():
     cp = simple_mv_cp()
     sample = render_cpline_sample(
@@ -282,6 +334,7 @@ def test_cpline_square_symmetry_visualization_script_smoke(tmp_path):
 def test_cpline_training_script_dark_mode_smoke(tmp_path):
     manifest = _write_manifest(tmp_path, count=2)
     output_dir = tmp_path / "checkpoint"
+    init_output_dir = tmp_path / "checkpoint_init"
     env = {**os.environ, "TQDM_DISABLE": "1"}
     subprocess.run(
         [
@@ -319,6 +372,44 @@ def test_cpline_training_script_dark_mode_smoke(tmp_path):
     summary = json.loads((output_dir / "summary.json").read_text(encoding="utf-8"))
     assert summary["augment_profile"] == "dark-mode"
     assert (output_dir / "latest.pt").exists()
+
+    subprocess.run(
+        [
+            sys.executable,
+            "scripts/training/train_cpline_smoke.py",
+            "--manifest",
+            str(manifest),
+            "--output-dir",
+            str(init_output_dir),
+            "--device",
+            "cpu",
+            "--image-size",
+            "64",
+            "--train-count",
+            "1",
+            "--val-count",
+            "1",
+            "--max-edges",
+            "20",
+            "--max-steps",
+            "1",
+            "--batch-size",
+            "1",
+            "--hidden-channels",
+            "32",
+            "--augment-profile",
+            "stage-light",
+            "--eval-thresholds",
+            "0.8",
+            "--init-checkpoint",
+            str(output_dir / "latest.pt"),
+        ],
+        check=True,
+        env=env,
+    )
+    init_summary = json.loads((init_output_dir / "summary.json").read_text(encoding="utf-8"))
+    assert init_summary["augment_profile"] == "stage-light"
+    assert init_summary["init_checkpoint"] == str(output_dir / "latest.pt")
 
 
 def test_cpline_net_outputs_roadmap_fields():

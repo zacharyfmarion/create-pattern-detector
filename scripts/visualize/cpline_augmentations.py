@@ -16,7 +16,11 @@ import numpy as np
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 
-from src.data.cpline_augmentations import AUGMENT_PROFILES, NON_IDENTITY_SQUARE_SYMMETRIES
+from src.data.cpline_augmentations import (
+    AUGMENT_PROFILES,
+    BASE_AUGMENT_PROFILES,
+    NON_IDENTITY_SQUARE_SYMMETRIES,
+)
 from src.data.cpline_dataset import load_manifest_records, render_cpline_sample, resolve_fold_path
 from src.data.fold_parser import FOLDParser
 
@@ -104,7 +108,7 @@ def main() -> None:
 
 def _parse_profiles(value: str) -> list[str]:
     if value == "all":
-        return [profile for profile in AUGMENT_PROFILES if profile not in {"clean", "mixed"}]
+        return [profile for profile in BASE_AUGMENT_PROFILES if profile != "clean"]
     profiles = [profile.strip() for profile in value.split(",") if profile.strip()]
     unsupported = [profile for profile in profiles if profile not in AUGMENT_PROFILES]
     if unsupported:

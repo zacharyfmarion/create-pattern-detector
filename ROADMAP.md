@@ -336,7 +336,8 @@ Tasks:
 - Add visual augmentation contact sheets and JSON sidecars before scaling image size.
 - Run local visual/performance gates for augmentations before paid GPU training.
 - Add configurable augmentation mixes so curriculum stages can sample only the
-  approved profiles for that stage instead of jumping straight to full `mixed`.
+  approved profiles for that stage instead of jumping straight to full `mixed`:
+  `stage-light`, `stage-print`, `stage-dark`, and `stage-dark-grid`.
 - Evaluate through the full vectorizer, not only pixel IoU.
 - Cache predictions and graph-builder intermediate artifacts for reproducibility.
 
@@ -348,19 +349,38 @@ Current local finding:
   F1 ~= 0.709 after 800 local MPS steps, with 100% structural validity.
 - The main failure mode is line overproduction, especially when dark grid
   backgrounds are introduced before the line head is stable.
+- A 384px tiny-backbone `stage-light` gate passes after keeping square symmetry
+  as its own sampled profile instead of stacking rotations/flips onto every
+  style profile. After 800 local MPS steps, clean validation reached edge F1
+  ~= 0.963 at threshold 0.65 and augmented `stage-light` validation reached
+  edge F1 ~= 0.823 at threshold 0.50, both with 100% structural validity.
+- Continuing the curriculum from checkpoint works better than restarting each
+  stage. Local 384px MPS continuation reached:
+  `stage-print` clean/aug edge F1 ~= 0.977 / 0.790,
+  `stage-dark` clean/aug edge F1 ~= 0.987 / 0.712,
+  `stage-dark-grid` clean/aug edge F1 ~= 0.983 / 0.637, and a short `mixed`
+  check clean/aug edge F1 ~= 0.971 / 0.826. All reported clean/aug structural
+  validity was 100% except the intentionally tiny 1024 preflight.
+- Dark-grid remains the hardest slice for the tiny local model. Faint grid
+  rendering reduced grid-edge overproduction, but RunPod runs should monitor
+  dark-grid examples separately before enabling long full-`mixed` training.
+- A 1024px `hrnet_w18` preflight with batch size 1 ran locally for two MPS
+  steps. That proves the full-size path and memory shape, not quality.
 
 Augmentation curriculum before larger sizes:
 
-1. `clean + square-symmetry + line-style + print-light`: establish robustness
-   to the square dihedral symmetries, line weight, color, antialiasing, mild
-   blur/noise, and paper tone.
-2. Add `print-medium` and `photo-light`: introduce stronger print/photo
-   variation and mild geometric perturbation after clean validation remains
-   stable.
-3. Add `dark-mode` without grid: teach dark backgrounds and bright M/V colors.
-4. Add `dark-mode` with grid at low probability: grid is background noise and
-   must not produce line or junction targets.
+1. `stage-light`: establish robustness to the square dihedral symmetries, line
+   weight, color, antialiasing, mild blur/noise, and paper tone.
+2. `stage-print`: introduce stronger print/photo variation and mild geometric
+   perturbation after clean validation remains stable.
+3. `stage-dark`: teach dark backgrounds and bright M/V colors without grid.
+4. `stage-dark-grid`: add dark-mode grid at low probability; grid is background
+   noise and must not produce line or junction targets.
 5. Only then use the full `mixed` profile for longer local or RunPod training.
+
+Run stages as a curriculum by initializing each stage from the previous passing
+checkpoint with `--init-checkpoint`; restarting every stage from random weights
+is only useful as an extra stress test.
 
 Do not add occlusion augmentation for V1. It requires an explicit completion
 contract and confidence reporting so the model does not learn to hallucinate

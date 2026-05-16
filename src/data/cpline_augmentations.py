@@ -19,7 +19,7 @@ from src.data.fold_parser import CreasePattern, transform_coords
 from src.vectorization.evidence import render_vectorizer_evidence_from_pixels
 
 
-AUGMENT_PROFILES = (
+BASE_AUGMENT_PROFILES = (
     "clean",
     "square-symmetry",
     "line-style",
@@ -27,7 +27,57 @@ AUGMENT_PROFILES = (
     "print-light",
     "print-medium",
     "photo-light",
-    "mixed",
+)
+AUGMENT_MIXES: dict[str, tuple[tuple[str, float, str | None], ...]] = {
+    "stage-light": (
+        ("clean", 0.20, None),
+        ("square-symmetry", 0.20, None),
+        ("line-style", 0.25, None),
+        ("print-light", 0.35, None),
+    ),
+    "stage-print": (
+        ("clean", 0.10, None),
+        ("square-symmetry", 0.15, None),
+        ("line-style", 0.20, None),
+        ("print-light", 0.25, None),
+        ("print-medium", 0.20, None),
+        ("photo-light", 0.10, None),
+    ),
+    "stage-dark": (
+        ("clean", 0.08, None),
+        ("square-symmetry", 0.12, None),
+        ("line-style", 0.18, None),
+        ("print-light", 0.24, None),
+        ("print-medium", 0.16, None),
+        ("photo-light", 0.08, None),
+        ("dark-mode", 0.14, "dark-no-grid"),
+    ),
+    "stage-dark-grid": (
+        ("clean", 0.06, None),
+        ("square-symmetry", 0.10, None),
+        ("line-style", 0.16, None),
+        ("print-light", 0.22, None),
+        ("print-medium", 0.15, None),
+        ("photo-light", 0.07, None),
+        ("dark-mode", 0.14, "dark-no-grid"),
+        ("dark-mode", 0.05, "dark-grid"),
+        ("dark-mode", 0.03, "dark-gray"),
+        ("dark-mode", 0.02, "dark-bright"),
+    ),
+}
+MIXED_PROFILE_ENTRIES: tuple[tuple[str, float, str | None], ...] = (
+    ("clean", 0.08, None),
+    ("square-symmetry", 0.10, None),
+    ("line-style", 0.20, None),
+    ("dark-mode", 0.14, None),
+    ("print-light", 0.24, None),
+    ("print-medium", 0.18, None),
+    ("photo-light", 0.06, None),
+)
+MIXED_AUGMENT_PROFILES = tuple(AUGMENT_MIXES) + ("mixed",)
+AUGMENT_PROFILES = (
+    *BASE_AUGMENT_PROFILES,
+    *MIXED_AUGMENT_PROFILES,
 )
 SQUARE_SYMMETRIES = (
     "identity",
@@ -104,13 +154,15 @@ def render_augmented_cpline_sample(
     local_rng = np.random.default_rng(seed) if rng is None else rng
     start = perf_counter()
 
-    selected_profile = _select_profile(profile, local_rng)
+    selected_profile, selected_style_variant = _select_profile(profile, local_rng)
+    if style_variant is not None:
+        selected_style_variant = style_variant
     params = _sample_render_params(
         selected_profile,
         image_size=image_size,
         line_width=line_width,
         rng=local_rng,
-        style_variant=style_variant,
+        style_variant=selected_style_variant,
         square_symmetry=square_symmetry,
     )
     if base_pixel_vertices is None:
@@ -157,7 +209,7 @@ def render_augmented_cpline_sample(
     metadata = {
         "profile": profile,
         "selected_profile": selected_profile,
-        "style_variant": style_variant,
+        "style_variant": selected_style_variant,
         "square_symmetry": params["square_symmetry"],
         "seed": seed,
         "render_ms": (perf_counter() - start) * 1000.0,
@@ -186,22 +238,22 @@ def render_augmented_cpline_sample(
     )
 
 
-def _select_profile(profile: str, rng: np.random.Generator) -> str:
-    if profile != "mixed":
-        return profile
-    profiles = np.array(
-        [
-            "clean",
-            "square-symmetry",
-            "line-style",
-            "dark-mode",
-            "print-light",
-            "print-medium",
-            "photo-light",
-        ]
-    )
-    weights = np.array([0.08, 0.10, 0.20, 0.14, 0.24, 0.18, 0.06], dtype=np.float64)
-    return str(rng.choice(profiles, p=weights / weights.sum()))
+def _select_profile(profile: str, rng: np.random.Generator) -> tuple[str, str | None]:
+    if profile == "mixed":
+        return _sample_mix_entry(MIXED_PROFILE_ENTRIES, rng)
+    if profile in AUGMENT_MIXES:
+        return _sample_mix_entry(AUGMENT_MIXES[profile], rng)
+    return profile, None
+
+
+def _sample_mix_entry(
+    entries: tuple[tuple[str, float, str | None], ...],
+    rng: np.random.Generator,
+) -> tuple[str, str | None]:
+    weights = np.array([entry[1] for entry in entries], dtype=np.float64)
+    index = int(rng.choice(len(entries), p=weights / weights.sum()))
+    selected_profile, _, style_variant = entries[index]
+    return selected_profile, style_variant
 
 
 def _sample_render_params(
@@ -338,12 +390,12 @@ def _select_square_symmetry(
     rng: np.random.Generator,
     requested: str | None,
 ) -> str:
-    if profile == "clean":
-        return "identity"
     if requested is not None:
         if requested not in SQUARE_SYMMETRIES:
             raise ValueError(f"Unsupported square_symmetry: {requested}")
         return requested
+    if profile != "square-symmetry":
+        return "identity"
     return str(rng.choice(NON_IDENTITY_SQUARE_SYMMETRIES))
 
 
@@ -363,7 +415,8 @@ def _apply_dark_mode_params(
     params["line_alpha"] = float(rng.uniform(0.88, 1.0))
     params["grid_enabled"] = variant in ("dark-grid", "dark-gray", "dark-bright")
     params["grid_spacing"] = int(rng.choice([max(10, image_size // 36), max(12, image_size // 28), max(16, image_size // 20)]))
-    grid = int(rng.integers(44, 70))
+    grid_boost = rng.integers(10, 22) if variant != "dark-bright" else rng.integers(14, 28)
+    grid = min(76, bg + int(grid_boost))
     params["grid_color"] = (grid, grid, grid)
     params["grid_thickness"] = 1
     red_base = (250, 92, 104) if variant != "dark-bright" else (255, 115, 126)

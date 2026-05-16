@@ -22,6 +22,11 @@ applied only to the input image.
   blur, noise, and compression.
 - `photo-light`: mild residual affine/perspective perturbation, lens/defocus
   blur, lighting gradients, and photo-like compression.
+- `stage-light`: first curriculum mix, sampling only `clean`,
+  `square-symmetry`, `line-style`, and `print-light`.
+- `stage-print`: adds `print-medium` and `photo-light`.
+- `stage-dark`: adds `dark-mode` pinned to no-grid renders.
+- `stage-dark-grid`: adds dark-mode grid variants at low probability.
 - `mixed`: profile sampler for later staged training. It should only be used
   after the individual profiles pass visual QA and local graph-eval gates.
 
@@ -33,6 +38,9 @@ flag remains only as a compatibility alias.
 - Square symmetries and photo geometry transform vertices before rendering
   `line_prob`, `angle`, `junction_heatmap`, `junction_offset`, and assignment
   labels.
+- Style-only profiles such as `line-style`, `print-light`, `print-medium`, and
+  `dark-mode` do not rotate or flip geometry by default. Curriculum mixes add
+  orientation coverage by sampling `square-symmetry` as a separate profile.
 - Assignment labels move with the graph. M/V are preserved under rotations and
   flips because the diagram colors are also rendered after the same transform.
 - Dark-mode grid pixels are background noise. They must never appear in line or
@@ -89,12 +97,19 @@ Recommended local-first curriculum:
 2. Tiny local smoke at 384px with `print-light`.
 3. Tiny local smoke at 384px with `dark-mode`.
 4. Robustness gate with staged profile mixes, starting with
-   `clean + square-symmetry + line-style + print-light`.
-5. Add `print-medium` and `photo-light`.
-6. Add `dark-mode` without grid.
-7. Add `dark-mode` with grid at low probability.
+   `stage-light`.
+5. Move to `stage-print` to add `print-medium` and `photo-light`.
+6. Move to `stage-dark` to add `dark-mode` without grid.
+7. Move to `stage-dark-grid` to add dark-mode grid at low probability.
 8. Use full `mixed` only after the staged gates are stable.
 9. Run a short 1024px local feasibility pass before moving to RunPod.
+
+After `stage-light`, each stage should initialize from the previous passing
+checkpoint with `--init-checkpoint`. Restarting each stage from random weights
+is a stress test, not the intended curriculum.
+
+The RunPod handoff and staged GPU script are documented in
+`docs/runpod-phase-3.md`.
 
 When synthetic M/V-rich examples land, run them through the same profiles and
 evaluate assignment accuracy separately from geometry.

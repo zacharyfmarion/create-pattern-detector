@@ -55,6 +55,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--backbone", type=str, default="tiny")
     parser.add_argument("--hidden-channels", type=int, default=128)
+    parser.add_argument(
+        "--init-checkpoint",
+        type=Path,
+        default=None,
+        help="Optional checkpoint whose model weights initialize this run; optimizer starts fresh.",
+    )
     parser.add_argument("--augment-profile", choices=AUGMENT_PROFILES, default="clean")
     parser.add_argument(
         "--render-noise",
@@ -199,6 +205,11 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         pretrained=False,
         hidden_channels=args.hidden_channels,
     ).to(device)
+    init_checkpoint = args.init_checkpoint
+    if init_checkpoint is not None:
+        init_checkpoint = init_checkpoint if init_checkpoint.is_absolute() else REPO_ROOT / init_checkpoint
+        loaded = torch.load(init_checkpoint, map_location=device, weights_only=False)
+        model.load_state_dict(loaded["model_state_dict"])
     criterion = CPLineLoss()
     optimizer = torch.optim.AdamW(model.get_param_groups(args.lr), lr=args.lr, weight_decay=1e-4)
 
@@ -212,6 +223,7 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         "max_steps": args.max_steps,
         "backbone": args.backbone,
         "hidden_channels": args.hidden_channels,
+        "init_checkpoint": init_checkpoint.as_posix() if init_checkpoint is not None else None,
         "augment_profile": augment_profile,
         "eval_augment_profile": args.eval_augment_profile,
         "render_noise": args.render_noise,
