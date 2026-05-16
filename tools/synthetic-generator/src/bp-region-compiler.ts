@@ -862,11 +862,43 @@ function expandBodyPanelsForCorridorPorts(
     if (!record) return body;
     const verticalPorts = Math.max(record.left, record.right, 1);
     const horizontalPorts = Math.max(record.top, record.bottom, 1);
-    const width = Math.max(body.rect.x2 - body.rect.x1, horizontalPorts * corridorWidth);
-    const height = Math.max(body.rect.y2 - body.rect.y1, verticalPorts * corridorWidth);
+    const width = Math.max(body.rect.x2 - body.rect.x1, (horizontalPorts + 1) * corridorWidth);
+    const height = Math.max(body.rect.y2 - body.rect.y1, (verticalPorts + 1) * corridorWidth);
     const rect = snapRectToStep(rectAround(body.center, width, height), pitch);
-    return { ...body, rect, center: rectCenter(rect) };
+    const clamped = clampBodyRectAwayFromFlapAllocations(rect, flaps, pitch);
+    return { ...body, rect: clamped, center: rectCenter(clamped) };
   });
+}
+
+function clampBodyRectAwayFromFlapAllocations(rect: RegionRect, flaps: FlapRegion[], pitch: number): RegionRect {
+  let result = rect;
+  const tolerance = pitch / 4;
+  for (const flap of flaps) {
+    if (!flap.allocationRadius) continue;
+    let attempts = 0;
+    while (rectCircleInteriorOverlap(result, flap.center, flap.allocationRadius, tolerance) && attempts < 8) {
+      const center = rectCenter(result);
+      const dx = center.x - flap.center.x;
+      const dy = center.y - flap.center.y;
+      const shiftX = Math.abs(dx) > Math.abs(dy) ? (dx >= 0 ? pitch : -pitch) : 0;
+      const shiftY = Math.abs(dx) > Math.abs(dy) ? 0 : (dy >= 0 ? pitch : -pitch);
+      const shifted = clampRect({
+        x1: result.x1 + shiftX,
+        y1: result.y1 + shiftY,
+        x2: result.x2 + shiftX,
+        y2: result.y2 + shiftY,
+      });
+      if (rectArea(shifted) < 1e-12 || (
+        Math.abs(shifted.x1 - result.x1) < 1e-12 &&
+        Math.abs(shifted.y1 - result.y1) < 1e-12 &&
+        Math.abs(shifted.x2 - result.x2) < 1e-12 &&
+        Math.abs(shifted.y2 - result.y2) < 1e-12
+      )) break;
+      result = shifted;
+      attempts += 1;
+    }
+  }
+  return result;
 }
 
 function endpointMap(flaps: FlapRegion[], bodies: BodyPanelRegion[]): Map<string, CorridorEndpoint> {
