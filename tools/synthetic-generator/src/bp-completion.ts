@@ -218,7 +218,7 @@ export function regularizeBPStudioLayout(
   const corridors: CompletionCorridor[] = graphEdges.map((edge) => {
     const width = snap(Math.max(2 / gridSize, 0.5 / Math.max(sheetWidth, sheetHeight)), gridSize);
     const preferredOrientation = orientationForPoints(layoutPoints.get(edge.from), layoutPoints.get(edge.to), axis);
-    const route = corridorRouteAvoidingAllocations(edge.from, edge.to, layoutPoints, preferredOrientation, terminalIds, terminals, gridSize, width);
+    const route = corridorRouteAvoidingAllocations(edge.from, edge.to, layoutPoints, preferredOrientation, terminalIds, terminals, bodies, gridSize, width);
     return {
       id: edge.id,
       from: edge.from,
@@ -271,7 +271,10 @@ export function fixtureCompletionLayout(name: "two-flap-stretch" | "three-flap-r
         { id: "left-flap", nodeId: "1", x: 0.125, y: 0.5, side: "left", width: 0.0625, height: 0.125, priority: 1 },
         { id: "right-flap", nodeId: "2", x: 0.875, y: 0.5, side: "right", width: 0.0625, height: 0.125, priority: 2 },
       ],
-      corridors: [{ id: "river-left-right", from: "left-flap", to: "right-flap", orientation: "horizontal", coordinate: 0.5, width: 0.125 }],
+      corridors: [
+        { id: "river-left", from: "left-flap", to: "body", orientation: "horizontal", coordinate: 0.5, width: 0.125 },
+        { id: "river-right", from: "body", to: "right-flap", orientation: "horizontal", coordinate: 0.5, width: 0.125 },
+      ],
     };
   }
   if (name === "three-flap-relay") {
@@ -977,13 +980,14 @@ function corridorRouteAvoidingAllocations(
   preferredAxis: CompletionAxis,
   terminalIds: Set<string>,
   terminals: CompletionTerminal[],
+  bodies: CompletionRegion[],
   gridSize: number,
   width: number,
 ): { orientation: CompletionAxis; coordinate: number } {
-  const preferred = corridorCoordinateAvoidingAllocations(from, to, points, preferredAxis, terminalIds, terminals, gridSize, width);
+  const preferred = corridorCoordinateAvoidingAllocations(from, to, points, preferredAxis, terminalIds, terminals, bodies, gridSize, width);
   if (preferred.ok) return { orientation: preferredAxis, coordinate: preferred.coordinate };
   const alternateAxis = preferredAxis === "horizontal" ? "vertical" : "horizontal";
-  const alternate = corridorCoordinateAvoidingAllocations(from, to, points, alternateAxis, terminalIds, terminals, gridSize, width);
+  const alternate = corridorCoordinateAvoidingAllocations(from, to, points, alternateAxis, terminalIds, terminals, bodies, gridSize, width);
   if (alternate.ok) return { orientation: alternateAxis, coordinate: alternate.coordinate };
   return { orientation: preferredAxis, coordinate: preferred.coordinate };
 }
@@ -995,6 +999,7 @@ function corridorCoordinateAvoidingAllocations(
   axis: CompletionAxis,
   terminalIds: Set<string>,
   terminals: CompletionTerminal[],
+  bodies: CompletionRegion[],
   gridSize: number,
   width: number,
 ): { coordinate: number; ok: boolean } {
@@ -1012,7 +1017,9 @@ function corridorCoordinateAvoidingAllocations(
   for (const candidate of viable.length ? viable : candidates) {
     const rect = corridorRectForCoordinate(a, b, fromTerminal, toTerminal, axis, candidate, width);
     if (!rect) continue;
-    if (!terminals.some((terminal) => terminal.allocationRadius && rectOverlapsTerminalAllocation(rect, terminal, step / 4))) {
+    const overlapsTerminal = terminals.some((terminal) => terminal.allocationRadius && rectOverlapsTerminalAllocation(rect, terminal, step / 4));
+    const overlapsBody = bodies.some((body) => body.id !== from && body.id !== to && rectOverlapsBodyRegion(rect, body, step / 4));
+    if (!overlapsTerminal && !overlapsBody) {
       return { coordinate: snap(candidate, gridSize), ok: true };
     }
   }
@@ -1086,6 +1093,16 @@ function rectOverlapsTerminalAllocation(
   const closestY = clamp(terminal.y, rect.y1, rect.y2);
   const distanceToRect = Math.hypot(terminal.x - closestX, terminal.y - closestY);
   return distanceToRect < terminal.allocationRadius - tolerance;
+}
+
+function rectOverlapsBodyRegion(
+  rect: { x1: number; y1: number; x2: number; y2: number },
+  body: CompletionRegion,
+  tolerance: number,
+): boolean {
+  const overlapWidth = Math.min(rect.x2, body.x2) - Math.max(rect.x1, body.x1);
+  const overlapHeight = Math.min(rect.y2, body.y2) - Math.max(rect.y1, body.y1);
+  return overlapWidth > tolerance && overlapHeight > tolerance;
 }
 
 function normalizeRect(rect: { x1: number; y1: number; x2: number; y2: number }): { x1: number; y1: number; x2: number; y2: number } {

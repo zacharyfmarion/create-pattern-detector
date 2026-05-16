@@ -439,13 +439,15 @@ function routePortDot(point: { x: number; y: number }, kind: "body" | "flap"): s
 
 function compilerLocalFailureOverlay(candidate: RegionCompletionCandidate, size: number): string {
   const arranged = arrangeSegments(
-    candidate.segments.map((segment) => ({
-      p1: segment.p1,
-      p2: segment.p2,
-      assignment: segment.assignment,
-      role: segment.role,
-      source: { kind: `region-${segment.kind}`, mandatory: true, ownerId: segment.regionId },
-    })),
+    candidate.segments
+      .filter((segment) => segment.kind === "border" || segment.kind === "strip-pleat" || segment.kind === "stair-boundary")
+      .map((segment) => ({
+        p1: segment.p1,
+        p2: segment.p2,
+        assignment: segment.assignment,
+        role: segment.role,
+        source: { kind: `region-${segment.kind}`, mandatory: true, ownerId: segment.regionId },
+      })),
     "cp-synthetic-generator/bp-region-debug/local-probe",
     {
       gridSize: candidate.layout.gridSize,
@@ -723,7 +725,7 @@ function compilerLegendOutside(size: number): string {
     `<line x1="16" y1="${y3}" x2="48" y2="${y3}" stroke="#7c3aed" stroke-width="2.2" stroke-dasharray="7 5" stroke-linecap="round"/><text x="58" y="${y3 + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">selected route lane</text>`,
     `<circle cx="184" cy="${y3}" r="4.4" fill="#f97316" stroke="#ffffff" stroke-width="1.2"/><text x="198" y="${y3 + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">circle contact</text>`,
     `<line x1="310" y1="${y3}" x2="340" y2="${y3}" stroke="#64748b" stroke-width="1.2" stroke-dasharray="3 4"/><text x="350" y="${y3 + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">center-to-port guide</text>`,
-    `<circle cx="498" cy="${y3}" r="5.8" fill="#d946ef" fill-opacity="0.22" stroke="#a21caf" stroke-width="1.5"/><line x1="494" y1="${y3 - 4}" x2="502" y2="${y3 + 4}" stroke="#a21caf" stroke-width="1.2"/><line x1="494" y1="${y3 + 4}" x2="502" y2="${y3 - 4}" stroke="#a21caf" stroke-width="1.2"/><text x="512" y="${y3 + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">local failure</text>`,
+    `<circle cx="498" cy="${y3}" r="5.8" fill="#d946ef" fill-opacity="0.22" stroke="#a21caf" stroke-width="1.5"/><line x1="494" y1="${y3 - 4}" x2="502" y2="${y3 + 4}" stroke="#a21caf" stroke-width="1.2"/><line x1="494" y1="${y3 + 4}" x2="502" y2="${y3 - 4}" stroke="#a21caf" stroke-width="1.2"/><text x="512" y="${y3 + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">active local failure</text>`,
   ].join("\n");
 }
 

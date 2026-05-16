@@ -407,7 +407,7 @@ function corridorPleatStripRegions(
   bodies: BodyPanelRegion[],
 ): PleatStripRegion[] {
   const endpoints = endpointMap(flaps, bodies);
-  const bodyPorts = bodyPortMapForCorridors(layout, endpoints);
+  const bodyPorts = bodyPortMapForCorridors(layout, endpoints, bodies);
 
   return layout.corridors.flatMap((corridor, index) => {
     const from = endpoints.get(corridor.from);
@@ -417,7 +417,7 @@ function corridorPleatStripRegions(
   });
 }
 
-function bodyPortMapForCorridors(layout: CompletionLayout, endpoints: Map<string, CorridorEndpoint>): BodyPortMap {
+function bodyPortMapForCorridors(layout: CompletionLayout, endpoints: Map<string, CorridorEndpoint>, bodies: BodyPanelRegion[]): BodyPortMap {
   const pitch = pleatPitchForGrid(layout.gridSize);
   const grouped = new Map<string, Array<{
     key: string;
@@ -446,7 +446,8 @@ function bodyPortMapForCorridors(layout: CompletionLayout, endpoints: Map<string
       a.key.localeCompare(b.key));
     for (const [index, item] of list.entries()) {
       const basePort = bodyPortPoint(item.body, item.side, index, list.length, pitch);
-      result.set(item.key, clampBodyPortAwayFromFlapAllocation(basePort, item.corridor, item.other, pitch));
+      const flapClamped = clampBodyPortAwayFromFlapAllocation(basePort, item.corridor, item.other, pitch);
+      result.set(item.key, clampBodyPortAwayFromBodyRegions(flapClamped, item.corridor, item.body, item.other, bodies, pitch));
     }
   }
   return result;
@@ -513,6 +514,53 @@ function clampBodyPortAwayFromFlapAllocation(
   const along = Math.sqrt(Math.max(0, other.allocationRadius ** 2 - perpendicular ** 2));
   if (other.center.x >= port.x) return point(Math.min(port.x, other.center.x - along - halfWidth), port.y);
   return point(Math.max(port.x, other.center.x + along + halfWidth), port.y);
+}
+
+function clampBodyPortAwayFromBodyRegions(
+  port: CompletionPoint,
+  corridor: CompletionCorridor,
+  body: CorridorEndpoint,
+  other: CorridorEndpoint,
+  bodies: BodyPanelRegion[],
+  pitch: number,
+): CompletionPoint {
+  let result = port;
+  for (const obstacle of bodies) {
+    if (obstacle.id === body.id || obstacle.id === other.id) continue;
+    const approach = bodyApproachRectForPort(result, corridor, pitch);
+    const overlap = rectIntersection(approach, obstacle.rect);
+    if (!overlap || rectArea(overlap) < 1e-9) continue;
+    if (corridor.orientation === "vertical") {
+      const y = other.center.y <= result.y ? obstacle.rect.y1 - pitch : obstacle.rect.y2 + pitch;
+      result = point(result.x, y);
+    } else {
+      const x = other.center.x <= result.x ? obstacle.rect.x1 - pitch : obstacle.rect.x2 + pitch;
+      result = point(x, result.y);
+    }
+  }
+  return result;
+}
+
+function bodyApproachRectForPort(
+  port: CompletionPoint,
+  corridor: CompletionCorridor,
+  pitch: number,
+): RegionRect {
+  const lane = snapToStep(corridor.coordinate, pitch);
+  if (corridor.orientation === "vertical") {
+    return normalizeRect({
+      x1: port.x,
+      x2: lane,
+      y1: port.y - pitch,
+      y2: port.y + pitch,
+    });
+  }
+  return normalizeRect({
+    x1: port.x - pitch,
+    x2: port.x + pitch,
+    y1: port.y,
+    y2: lane,
+  });
 }
 
 function corridorPleatStripRegionsForCorridor(
@@ -897,13 +945,26 @@ function offGridRejections(segments: RegionCandidateSegment[], gridSize: number)
 
 function overlapRejections(layout: RegionLayout): string[] {
   const result: string[] = [];
+  for (const strip of layout.pleatStrips) {
+    for (const body of layout.bodies) {
+      if (stripTouchesBody(strip, body.id)) continue;
+      const overlap = rectIntersection(strip.rect, body.rect);
+      if (!overlap || rectArea(overlap) < 1e-9) continue;
+      result.push(`pleat-strip-body-overlap:${strip.id}:${body.id}`);
+    }
+  }
   for (let aIndex = 0; aIndex < layout.pleatStrips.length; aIndex += 1) {
     for (let bIndex = aIndex + 1; bIndex < layout.pleatStrips.length; bIndex += 1) {
       const a = layout.pleatStrips[aIndex];
       const b = layout.pleatStrips[bIndex];
       const overlap = rectIntersection(a.rect, b.rect);
       if (!overlap || rectArea(overlap) < 1e-9) continue;
-      if (layout.bodies.some((body) => rectContainsPoint(body.rect, rectCenter(overlap)))) continue;
+      const bodyOwner = layout.bodies.find((body) => rectContainsPoint(body.rect, rectCenter(overlap)));
+      if (bodyOwner) {
+        if (stripTouchesBody(a, bodyOwner.id) && stripTouchesBody(b, bodyOwner.id)) continue;
+        result.push(`pleat-strip-body-overlap:${a.id}:${b.id}:${bodyOwner.id}`);
+        continue;
+      }
       if (a.treeEdgeId && a.treeEdgeId === b.treeEdgeId) {
         const turnArea = Math.max(a.pitch, b.pitch) ** 2 * 4 + 1e-9;
         if (rectArea(overlap) <= turnArea) continue;
@@ -917,6 +978,10 @@ function overlapRejections(layout: RegionLayout): string[] {
   }
   result.push(...flapAllocationOverlapRejections(layout));
   return result;
+}
+
+function stripTouchesBody(strip: PleatStripRegion, bodyId: string): boolean {
+  return strip.from === bodyId || strip.to === bodyId;
 }
 
 function flapAllocationOverlapRejections(layout: RegionLayout): string[] {
