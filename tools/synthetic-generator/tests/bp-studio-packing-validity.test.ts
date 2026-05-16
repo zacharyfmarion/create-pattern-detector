@@ -107,6 +107,7 @@ test("regularized simple quadruped uses tangent lanes and downgrades inferred-bo
   expect(candidate.rejectionReasons.filter((reason) => reason.startsWith("pleat-strip-body-overlap"))).toHaveLength(0);
   expect(candidate.warnings?.filter((reason) => reason.startsWith("inferred-pleat-strip-body-overlap"))).not.toHaveLength(0);
   expect(candidate.layout.pleatStrips.length).toBeGreaterThan(7);
+  expect(candidate.layout.pleatStrips.some((strip) => strip.id.includes("body-connector"))).toBe(true);
   expect(candidate.layout.pleatStrips.every((strip) =>
     (strip.rect.x2 - strip.rect.x1) > 0 && (strip.rect.y2 - strip.rect.y1) > 0
   )).toBe(true);

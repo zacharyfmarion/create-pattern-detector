@@ -1252,8 +1252,12 @@ function corridorPleatStripRegionsForCorridor(
   const strips: PleatStripRegion[] = [];
   const fromApproach = bodyApproachStripRegion(corridor, from, to, gridSize, index, width, pitch, "from", fromPort);
   const toApproach = bodyApproachStripRegion(corridor, to, from, gridSize, index, width, pitch, "to", toPort);
+  const fromConnector = fromApproach ? undefined : bodyCoreConnectorStripRegion(corridor, from, core, gridSize, index, pitch, "from");
+  const toConnector = toApproach ? undefined : bodyCoreConnectorStripRegion(corridor, to, core, gridSize, index, pitch, "to");
   if (fromApproach) strips.push(fromApproach);
+  if (fromConnector) strips.push(fromConnector);
   if (rectLongEnough(core.rect, corridor.orientation, pitch)) strips.push(core);
+  if (toConnector) strips.push(toConnector);
   if (toApproach) strips.push(toApproach);
   return strips;
 }
@@ -1352,6 +1356,52 @@ function bodyApproachStripRegion(
     approachOrientation,
     pitch,
     index + (side === "from" ? 1000 : 2000),
+    corridor.id,
+  );
+}
+
+function bodyCoreConnectorStripRegion(
+  corridor: CompletionCorridor,
+  body: CorridorEndpoint,
+  core: PleatStripRegion,
+  gridSize: number,
+  index: number,
+  pitch: number,
+  side: "from" | "to",
+): PleatStripRegion | undefined {
+  if (body.kind !== "body" || !body.rect) return undefined;
+  if (rectsTouchOrOverlap(core.rect, body.rect)) return undefined;
+  const coreCenter = rectCenter(core.rect);
+  let rect: RegionRect;
+  if (corridor.orientation === "horizontal") {
+    const bodyX = coreCenter.x >= body.center.x ? body.rect.x2 : body.rect.x1;
+    const coreX = coreCenter.x >= body.center.x ? core.rect.x1 : core.rect.x2;
+    rect = normalizeRect({
+      x1: snapToStep(bodyX, pitch),
+      x2: snapToStep(coreX, pitch),
+      y1: core.rect.y1,
+      y2: core.rect.y2,
+    });
+  } else {
+    const bodyY = coreCenter.y >= body.center.y ? body.rect.y2 : body.rect.y1;
+    const coreY = coreCenter.y >= body.center.y ? core.rect.y1 : core.rect.y2;
+    rect = normalizeRect({
+      x1: core.rect.x1,
+      x2: core.rect.x2,
+      y1: snapToStep(bodyY, pitch),
+      y2: snapToStep(coreY, pitch),
+    });
+  }
+  const clamped = clampRect(rect);
+  if (!rectLongEnough(clamped, corridor.orientation, pitch)) return undefined;
+  return pleatStripFromRect(
+    `strip-${index}-${corridor.id}-${side}-body-connector`,
+    corridor.from,
+    corridor.to,
+    clamped,
+    corridor.orientation,
+    pitch,
+    index + (side === "from" ? 3000 : 4000),
     corridor.id,
   );
 }
@@ -1710,6 +1760,12 @@ function rectIntersection(a: RegionRect, b: RegionRect): RegionRect | undefined 
     y2: Math.min(a.y2, b.y2),
   };
   return rect.x2 > rect.x1 && rect.y2 > rect.y1 ? rect : undefined;
+}
+
+function rectsTouchOrOverlap(a: RegionRect, b: RegionRect): boolean {
+  const xOverlapOrTouch = a.x1 <= b.x2 + 1e-9 && a.x2 >= b.x1 - 1e-9;
+  const yOverlapOrTouch = a.y1 <= b.y2 + 1e-9 && a.y2 >= b.y1 - 1e-9;
+  return xOverlapOrTouch && yOverlapOrTouch;
 }
 
 function rectContainsPoint(container: RegionRect, inner: CompletionPoint): boolean {
