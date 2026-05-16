@@ -175,7 +175,13 @@ export function probeRegionCandidateLocalFlatFoldability(
   const kawasakiBadVertices = sortedUnique(ear.singleVertex.validateKawasaki(kawasakiProbe) as number[]);
   const maekawaBadVertices = sortedUnique(ear.singleVertex.validateMaekawa(arranged) as number[]);
   const badVertexSet = new Set([...kawasakiBadVertices, ...maekawaBadVertices]);
-  const failurePoints = [...badVertexSet].sort((a, b) => a - b).slice(0, 240).flatMap((vertex) => {
+  const failureReasons: Record<string, number> = {};
+  const badVertices = [...badVertexSet].sort((a, b) => a - b);
+  for (const vertex of badVertices) {
+    const reason = classifyLocalFailure(arranged, vertex, kawasakiBadVertices.includes(vertex));
+    failureReasons[reason] = (failureReasons[reason] ?? 0) + 1;
+  }
+  const failurePoints = badVertices.slice(0, 240).flatMap((vertex) => {
     const pointItem = arranged.vertices_coords[vertex];
     if (!pointItem) return [];
     return [{
@@ -193,8 +199,22 @@ export function probeRegionCandidateLocalFlatFoldability(
     maekawaBad: maekawaBadVertices.length,
     badVertices: badVertexSet.size,
     locallyFlatFoldable: badVertexSet.size === 0,
+    failureReasons,
     failurePoints,
   };
+}
+
+function classifyLocalFailure(
+  graph: ReturnType<typeof arrangeSegments> & { vertices_edges?: number[][] },
+  vertex: number,
+  kawasakiFailed: boolean,
+): string {
+  if (kawasakiFailed) return "kawasaki-geometry";
+  const incidentEdges = graph.vertices_edges?.[vertex] ?? [];
+  const foldedDegree = incidentEdges.filter((edge) => graph.edges_assignment[edge] !== "B").length;
+  if (foldedDegree <= 1) return "dangling-active-endpoint";
+  if (foldedDegree % 2 === 1) return "odd-active-degree";
+  return "maekawa-assignment";
 }
 
 export function solveRegionPleatStripPhases(layout: RegionLayout): RegionPhaseSolveResult {

@@ -270,7 +270,7 @@ function threePanelSvg(
     {
       x: gutter * 3 + panelSize * 2,
       title: "3. Compiler Candidate Overlay",
-      subtitle: `${candidate.validity}, ${candidate.layout.pleatStrips.length} pleat corridors, active K/M ${candidate.localProbe?.kawasakiBad ?? "?"}/${candidate.localProbe?.maekawaBad ?? "?"}`,
+      subtitle: `${candidate.validity}, ${candidate.layout.pleatStrips.length} pleat corridors, active K/M ${candidate.localProbe?.kawasakiBad ?? "?"}/${candidate.localProbe?.maekawaBad ?? "?"}, ${dominantLocalFailure(candidate)}`,
       body: candidateOverlayPanel(spec, adapterMetadata, candidate, panelSize),
       legend: compilerLegendOutside(panelSize),
     },
@@ -455,6 +455,13 @@ function compilerLocalFailureOverlay(candidate: RegionCompletionCandidate, size:
   });
   if (dots.length === 0) return "";
   return `<g data-debug-overlay="local-failures">${dots.join("\n")}</g>`;
+}
+
+function dominantLocalFailure(candidate: RegionCompletionCandidate): string {
+  const entries = Object.entries(candidate.localProbe?.failureReasons ?? {}).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  if (!entries.length) return "no active local failures";
+  const [reason, count] = entries[0];
+  return `${reason.replaceAll("-", " ")} ${count}`;
 }
 
 function shortRouteLabel(label: string): string {

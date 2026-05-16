@@ -26,6 +26,8 @@ test("region compiler emits alternating M/V pleat strips on the compiler grid", 
   expect(candidate.rejectionReasons).toHaveLength(0);
   expect(candidate.localProbe?.locallyFlatFoldable).toBe(false);
   expect(candidate.localProbe?.badVertices).toBeGreaterThan(0);
+  expect(candidate.localProbe?.failureReasons["dangling-active-endpoint"]).toBeGreaterThan(0);
+  expect(candidate.localProbe?.failureReasons["kawasaki-geometry"]).toBeGreaterThan(0);
   expect(pleats.length).toBeGreaterThan(8);
   expect(pleats.some((segment) => segment.assignment === "M")).toBe(true);
   expect(pleats.some((segment) => segment.assignment === "V")).toBe(true);

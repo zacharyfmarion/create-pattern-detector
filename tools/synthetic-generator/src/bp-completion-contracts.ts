@@ -316,6 +316,7 @@ export interface RegionLocalFlatFoldProbe {
   maekawaBad: number;
   badVertices: number;
   locallyFlatFoldable: boolean;
+  failureReasons: Record<string, number>;
   failurePoints: RegionLocalFailurePoint[];
 }
 
