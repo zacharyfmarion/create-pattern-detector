@@ -453,6 +453,7 @@ function turnClosureSegmentsForKawasakiCorners(
   const result: RegionCandidateSegment[] = [];
   const seen = new Set<string>();
   const pitch = pleatPitchForGrid(layout.gridSize);
+  const activeVertexKeys = new Set(arranged.vertices_coords.map((coord) => pointKey(coord)));
 
   for (const vertex of badVertices) {
     const pointItem = arranged.vertices_coords[vertex];
@@ -461,6 +462,8 @@ function turnClosureSegmentsForKawasakiCorners(
     const additions = turnClosureEndpoints(pointItem, directions, pitch);
     for (const [index, endpoint] of additions.entries()) {
       if (!pointInsideSheet(endpoint)) continue;
+      if (activeVertexKeys.has(pointKey(endpoint))) continue;
+      if (pointFallsOnActiveSegmentInterior(endpoint, active)) continue;
       const p1 = roundPoint(pointItem);
       const p2 = roundPoint(endpoint);
       const key = segmentKey(p1, p2);
@@ -478,6 +481,22 @@ function turnClosureSegmentsForKawasakiCorners(
     }
   }
   return result;
+}
+
+function pointKey(pointItem: Point): string {
+  return `${pointItem[0].toFixed(9)},${pointItem[1].toFixed(9)}`;
+}
+
+function pointFallsOnActiveSegmentInterior(pointItem: Point, segments: RegionCandidateSegment[]): boolean {
+  return segments.some((segmentItem) => pointOnSegmentInterior(pointItem, segmentItem.p1, segmentItem.p2));
+}
+
+function pointOnSegmentInterior(pointItem: Point, a: Point, b: Point): boolean {
+  if (distance(pointItem, a) < 1e-9 || distance(pointItem, b) < 1e-9) return false;
+  const cross = (pointItem[0] - a[0]) * (b[1] - a[1]) - (pointItem[1] - a[1]) * (b[0] - a[0]);
+  if (Math.abs(cross) > 1e-9) return false;
+  const dot = (pointItem[0] - a[0]) * (pointItem[0] - b[0]) + (pointItem[1] - a[1]) * (pointItem[1] - b[1]);
+  return dot < -1e-12;
 }
 
 function activeDirectionsAtVertex(
@@ -1112,15 +1131,14 @@ function pleatStripFromRect(
   index: number,
   treeEdgeId?: string,
 ): PleatStripRegion {
-  void corridorOrientation;
   const clamped = clampRect(rect);
-  const longAxis: PleatStripOrientation = (clamped.x2 - clamped.x1) >= (clamped.y2 - clamped.y1) ? "horizontal" : "vertical";
+  const laneOrientation: PleatStripOrientation = corridorOrientation;
   return {
     id,
     from,
     to,
     rect: clamped,
-    orientation: longAxis,
+    orientation: laneOrientation,
     pitch,
     phase: 0,
     startAssignment: index % 2 === 0 ? "M" : "V",
