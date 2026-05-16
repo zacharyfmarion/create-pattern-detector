@@ -1012,9 +1012,7 @@ function corridorCoordinateAvoidingAllocations(
     .sort((left, right) => Math.abs(left - base) - Math.abs(right - base) || left - right);
   const fromTerminal = terminals.find((terminal) => terminal.id === from || terminal.nodeId === from);
   const toTerminal = terminals.find((terminal) => terminal.id === to || terminal.nodeId === to);
-  const endpointTerminals = [fromTerminal, toTerminal].filter((terminal): terminal is CompletionTerminal => Boolean(terminal));
-  const viable = candidates.filter((coordinate) => endpointTerminals.every((terminal) => terminalCanMeetLane(terminal, coordinate, axis, width)));
-  for (const candidate of viable.length ? viable : candidates) {
+  for (const candidate of candidates) {
     const rect = corridorRectForCoordinate(a, b, fromTerminal, toTerminal, axis, candidate, width);
     if (!rect) continue;
     const overlapsTerminal = terminals.some((terminal) => terminal.allocationRadius && rectOverlapsTerminalAllocation(rect, terminal, step / 4));
@@ -1024,17 +1022,6 @@ function corridorCoordinateAvoidingAllocations(
     }
   }
   return { coordinate: base, ok: false };
-}
-
-function terminalCanMeetLane(
-  terminal: CompletionTerminal,
-  coordinate: number,
-  axis: CompletionAxis,
-  width: number,
-): boolean {
-  if (!terminal.allocationRadius) return true;
-  const delta = axis === "horizontal" ? coordinate - terminal.y : coordinate - terminal.x;
-  return Math.abs(delta) <= Math.max(0, terminal.allocationRadius - width / 2) + 1e-9;
 }
 
 function corridorRectForCoordinate(

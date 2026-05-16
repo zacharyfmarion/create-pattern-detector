@@ -923,14 +923,120 @@ function corridorPleatStripRegions(
   bodies: BodyPanelRegion[],
 ): PleatStripRegion[] {
   const endpoints = endpointMap(flaps, bodies);
-  const bodyPorts = bodyPortMapForCorridors(layout, endpoints, bodies);
+  const routedCorridors = layout.corridors.map((corridor) =>
+    rerouteCorridorAgainstExpandedRegions(corridor, endpoints, flaps, bodies, layout.gridSize)
+  );
+  const routedLayout = { ...layout, corridors: routedCorridors };
+  const bodyPorts = bodyPortMapForCorridors(routedLayout, endpoints, bodies);
 
-  return layout.corridors.flatMap((corridor, index) => {
+  return routedCorridors.flatMap((corridor, index) => {
     const from = endpoints.get(corridor.from);
     const to = endpoints.get(corridor.to);
     if (!from || !to) return [];
     return corridorPleatStripRegionsForCorridor(corridor, from, to, layout.gridSize, index, bodyPorts);
   });
+}
+
+function rerouteCorridorAgainstExpandedRegions(
+  corridor: CompletionCorridor,
+  endpoints: Map<string, CorridorEndpoint>,
+  flaps: FlapRegion[],
+  bodies: BodyPanelRegion[],
+  gridSize: number,
+): CompletionCorridor {
+  const from = endpoints.get(corridor.from);
+  const to = endpoints.get(corridor.to);
+  if (!from || !to) return corridor;
+
+  const pitch = pleatPitchForGrid(gridSize);
+  const unit = 1 / gridSize;
+  const width = Math.max(snapEvenDistanceToStep(corridor.width, pitch), pitch * 2, unit * 2);
+  const axes = [
+    corridor.orientation,
+    corridor.orientation === "horizontal" ? "vertical" : "horizontal",
+  ] as const;
+
+  for (const axis of axes) {
+    const base = axis === corridor.orientation
+      ? snapToStep(corridor.coordinate, pitch)
+      : corridorBaseCoordinateForEndpoints(from, to, axis);
+    const candidates = latticeCandidatesByDistance(base, pitch);
+    for (const coordinate of candidates) {
+      const rect = corridorRectForExpandedRegions(from, to, axis, coordinate, width, pitch);
+      if (!rect || !rectLongEnough(rect, axis, pitch)) continue;
+      if (routeRectHasRegionConflict(rect, corridor, flaps, bodies, pitch)) continue;
+      return {
+        ...corridor,
+        orientation: axis,
+        coordinate: snapToStep(coordinate, pitch),
+      };
+    }
+  }
+
+  return corridor;
+}
+
+function corridorBaseCoordinateForEndpoints(
+  from: CorridorEndpoint,
+  to: CorridorEndpoint,
+  axis: CompletionCorridor["orientation"],
+): number {
+  if (from.kind === "flap") return axis === "horizontal" ? from.center.y : from.center.x;
+  if (to.kind === "flap") return axis === "horizontal" ? to.center.y : to.center.x;
+  return axis === "horizontal"
+    ? (from.center.y + to.center.y) / 2
+    : (from.center.x + to.center.x) / 2;
+}
+
+function latticeCandidatesByDistance(base: number, pitch: number): number[] {
+  const count = Math.max(1, Math.round(1 / pitch));
+  return Array.from({ length: count + 1 }, (_, index) => round(index * pitch))
+    .sort((left, right) => Math.abs(left - base) - Math.abs(right - base) || left - right);
+}
+
+function corridorRectForExpandedRegions(
+  from: CorridorEndpoint,
+  to: CorridorEndpoint,
+  axis: CompletionCorridor["orientation"],
+  coordinate: number,
+  width: number,
+  pitch: number,
+): RegionRect | undefined {
+  const half = width / 2;
+  if (axis === "horizontal") {
+    const x1 = endpointBoundaryCoordinate(from, to.center, axis, coordinate);
+    const x2 = endpointBoundaryCoordinate(to, from.center, axis, coordinate);
+    const rect = normalizeRect({
+      x1: snapToStep(x1, pitch),
+      x2: snapToStep(x2, pitch),
+      y1: snapToStep(coordinate - half, pitch),
+      y2: snapToStep(coordinate + half, pitch),
+    });
+    return rectArea(rect) > 1e-12 ? clampRect(rect) : undefined;
+  }
+  const y1 = endpointBoundaryCoordinate(from, to.center, axis, coordinate);
+  const y2 = endpointBoundaryCoordinate(to, from.center, axis, coordinate);
+  const rect = normalizeRect({
+    x1: snapToStep(coordinate - half, pitch),
+    x2: snapToStep(coordinate + half, pitch),
+    y1: snapToStep(y1, pitch),
+    y2: snapToStep(y2, pitch),
+  });
+  return rectArea(rect) > 1e-12 ? clampRect(rect) : undefined;
+}
+
+function routeRectHasRegionConflict(
+  rect: RegionRect,
+  _corridor: CompletionCorridor,
+  flaps: FlapRegion[],
+  _bodies: BodyPanelRegion[],
+  pitch: number,
+): boolean {
+  const tolerance = pitch / 4;
+  return flaps.some((flap) =>
+    flap.allocationRadius &&
+    rectCircleInteriorOverlap(rect, flap.center, flap.allocationRadius, tolerance)
+  );
 }
 
 function bodyPortMapForCorridors(layout: CompletionLayout, endpoints: Map<string, CorridorEndpoint>, bodies: BodyPanelRegion[]): BodyPortMap {
@@ -965,7 +1071,8 @@ function bodyPortMapForCorridors(layout: CompletionLayout, endpoints: Map<string
       const basePort = bodyPortPoint(item.body, item.side, index, list.length, pitch);
       const flapClamped = clampBodyPortAwayFromFlapAllocation(basePort, item.corridor, item.other, pitch);
       const bodyClamped = clampBodyPortAwayFromBodyRegions(flapClamped, item.corridor, item.body, item.other, bodies, pitch);
-      const separated = separateBodySidePort(bodyClamped, item.body.rect!, item.side, occupied, pitch);
+      const reclamped = clampBodyPortAwayFromFlapAllocation(bodyClamped, item.corridor, item.other, pitch);
+      const separated = separateBodySidePort(reclamped, item.body.rect!, item.side, occupied, pitch);
       occupied.push(separated);
       result.set(item.key, separated);
     }
