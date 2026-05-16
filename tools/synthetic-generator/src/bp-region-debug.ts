@@ -52,6 +52,7 @@ interface RenderedCandidate {
   stripCount: number;
   validity: string;
   rejectionReasons: string[];
+  warnings: string[];
 }
 
 async function main(): Promise<void> {
@@ -90,6 +91,7 @@ async function main(): Promise<void> {
       stripCount: candidate.layout.pleatStrips.length,
       validity: candidate.validity,
       rejectionReasons: candidate.rejectionReasons,
+      warnings: candidate.warnings ?? [],
     });
     await writeFile(join(options.out, `${label}.svg`), svg);
     await writeFile(join(options.out, `${label}.json`), JSON.stringify(candidate, null, 2));
@@ -111,6 +113,7 @@ async function main(): Promise<void> {
         stripCount: candidate.layout.pleatStrips.length,
         validity: candidate.validity,
         rejectionReasons: candidate.rejectionReasons,
+        warnings: candidate.warnings ?? [],
       });
       await writeFile(join(options.out, `${fixture}.svg`), svg);
       await writeFile(join(options.out, `${fixture}.json`), JSON.stringify(candidate, null, 2));
@@ -126,6 +129,7 @@ async function main(): Promise<void> {
       stripCount: item.stripCount,
       validity: item.validity,
       rejectionReasons: item.rejectionReasons,
+      warnings: item.warnings,
     })),
   }, null, 2));
 }
@@ -267,7 +271,7 @@ function contactSheetSvg(items: RenderedCandidate[], size: number): string {
       `<rect x="${x}" y="${y}" width="${tileWidth}" height="${tileHeight}" fill="#ffffff" stroke="#d1d5db" stroke-width="1"/>`,
       `<image href="data:image/svg+xml;base64,${data}" x="${x}" y="${y}" width="${tileWidth}" height="${tileWidth}"/>`,
       `<text x="${x + 12}" y="${y + tileWidth + 24}" font-family="Inter, Arial, sans-serif" font-size="17" fill="#111827">${escapeXml(item.label)}</text>`,
-      `<text x="${x + 12}" y="${y + tileWidth + 46}" font-family="Inter, Arial, sans-serif" font-size="13" fill="#4b5563">${item.validity}, ${item.stripCount} strips, ${item.segmentCount} candidate segments</text>`,
+      `<text x="${x + 12}" y="${y + tileWidth + 46}" font-family="Inter, Arial, sans-serif" font-size="13" fill="#4b5563">${item.validity}, ${item.stripCount} strips, ${item.segmentCount} candidate segments, ${item.rejectionReasons.length}/${item.warnings.length} hard/warn</text>`,
     ].join("\n");
   });
   return [
@@ -312,7 +316,7 @@ function threePanelSvg(
     {
       x: gutter * 3 + panelSize * 2,
       title: "3. Compiler Candidate Overlay",
-      subtitle: `${candidate.validity}, ${candidate.layout.pleatStrips.length} pleat corridors, active K/M ${candidate.localProbe?.kawasakiBad ?? "?"}/${candidate.localProbe?.maekawaBad ?? "?"}, ${dominantLocalFailure(candidate)}`,
+      subtitle: `${candidate.validity}, ${candidate.layout.pleatStrips.length} pleat corridors, ${candidate.rejectionReasons.length} hard / ${candidate.warnings?.length ?? 0} warning, active K/M ${candidate.localProbe?.kawasakiBad ?? "?"}/${candidate.localProbe?.maekawaBad ?? "?"}`,
       body: candidateOverlayPanel(spec, adapterMetadata, candidate, panelSize),
       legend: compilerLegendOutside(panelSize),
     },

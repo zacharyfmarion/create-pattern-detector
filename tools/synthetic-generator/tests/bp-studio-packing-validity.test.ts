@@ -53,7 +53,7 @@ test("regularized compiler grid is a multiple of BP Studio optimized sheet units
   expect(layout.regions.find((body) => body.id === "front-hub")?.x1).not.toBe(15 / 32);
 });
 
-test("regularized simple quadruped uses tangent lanes before reporting unresolved inferred-body overlaps", () => {
+test("regularized simple quadruped uses tangent lanes and downgrades inferred-body overlap", () => {
   const spec = simpleQuadrupedBPStudioSpec(7);
   const adapterSpec = toAdapterSpec(spec);
   adapterSpec.optimizeLayout = true;
@@ -65,12 +65,13 @@ test("regularized simple quadruped uses tangent lanes before reporting unresolve
   const completionLayout = regularizeBPStudioLayout(spec, { adapterSpec, adapterMetadata: metadata });
   const candidate = compileRegionCandidate(regionLayoutFromCompletionLayout(completionLayout));
 
-  expect(candidate.validity).toBe("rejected");
+  expect(candidate.validity).toBe("layout-valid");
   expect(candidate.localProbe?.locallyFlatFoldable).toBe(false);
   expect(candidate.localProbe?.kawasakiBad).toBe(0);
   expect(candidate.segments.filter((segment) => segment.kind === "turn-closure").length).toBeGreaterThan(0);
   expect(candidate.rejectionReasons.filter((reason) => reason.startsWith("flap-allocation-overlap"))).toHaveLength(0);
-  expect(candidate.rejectionReasons.filter((reason) => reason.startsWith("pleat-strip-body-overlap"))).not.toHaveLength(0);
+  expect(candidate.rejectionReasons.filter((reason) => reason.startsWith("pleat-strip-body-overlap"))).toHaveLength(0);
+  expect(candidate.warnings?.filter((reason) => reason.startsWith("inferred-pleat-strip-body-overlap"))).not.toHaveLength(0);
   expect(candidate.layout.pleatStrips.length).toBeGreaterThan(7);
   expect(candidate.layout.pleatStrips.every((strip) =>
     (strip.rect.x2 - strip.rect.x1) > 0 && (strip.rect.y2 - strip.rect.y1) > 0

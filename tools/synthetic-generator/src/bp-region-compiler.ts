@@ -65,12 +65,13 @@ export function regionLayoutFromCompletionLayout(layout: CompletionLayout): Regi
   const pitch = pleatPitchForGrid(layout.gridSize);
   const baseBodies = layout.regions.filter((region) => region.kind === "body").map((region): BodyPanelRegion => {
     const rect = snapRectToStep({ x1: region.x1, y1: region.y1, x2: region.x2, y2: region.y2 }, pitch);
-    return { id: region.id, rect, center: rectCenter(rect) };
+    return { id: region.id, rect, center: rectCenter(rect), source: layout.source === "fixture" ? "fixture" : "compiler-inferred" };
   });
   const primaryBody = baseBodies[0] ?? {
     id: "implicit-body",
     rect: { x1: 0.375, y1: 0.375, x2: 0.625, y2: 0.625 },
     center: { x: 0.5, y: 0.5 },
+    source: layout.source === "fixture" ? "fixture" as const : "compiler-inferred" as const,
   };
   const flaps = layout.terminals.map((terminal) => flapRegion(terminal, layout.gridSize));
   const bodies = expandBodyPanelsForCorridorPorts(layout, flaps, baseBodies.length ? baseBodies : [primaryBody]);
@@ -109,10 +110,11 @@ export function compileRegionCandidate(layout: RegionLayout, options: CompileReg
   segments.push(...terminalBorderContinuationSegments(workingLayout, dedupeSegments(segments)));
   segments.push(...turnClosureSegmentsForKawasakiCorners(workingLayout, dedupeSegments(segments)));
   const arrangedSegments = dedupeSegments(segments);
+  const overlaps = overlapDiagnostics(workingLayout);
   const rejectionReasons = [
     ...(phaseSolve && !phaseSolve.ok ? phaseSolve.errors : []),
     ...offGridRejections(arrangedSegments, layout.gridSize),
-    ...overlapRejections(workingLayout),
+    ...overlaps.rejections,
   ];
   const localProbe = probeRegionCandidateLocalFlatFoldability(workingLayout, arrangedSegments);
 
@@ -124,6 +126,7 @@ export function compileRegionCandidate(layout: RegionLayout, options: CompileReg
     stairBoundaries,
     localProbe,
     rejectionReasons,
+    warnings: overlaps.warnings,
   };
 }
 
@@ -1594,14 +1597,17 @@ function offGridRejections(segments: RegionCandidateSegment[], gridSize: number)
   return result;
 }
 
-function overlapRejections(layout: RegionLayout): string[] {
-  const result: string[] = [];
+function overlapDiagnostics(layout: RegionLayout): { rejections: string[]; warnings: string[] } {
+  const rejections: string[] = [];
+  const warnings: string[] = [];
   for (const strip of layout.pleatStrips) {
     for (const body of layout.bodies) {
       if (stripTouchesBody(strip, body.id)) continue;
       const overlap = rectIntersection(strip.rect, body.rect);
       if (!overlap || rectArea(overlap) < 1e-9) continue;
-      result.push(`pleat-strip-body-overlap:${strip.id}:${body.id}`);
+      const code = `pleat-strip-body-overlap:${strip.id}:${body.id}`;
+      if (body.source === "compiler-inferred") warnings.push(`inferred-${code}`);
+      else rejections.push(code);
     }
   }
   for (let aIndex = 0; aIndex < layout.pleatStrips.length; aIndex += 1) {
@@ -1613,18 +1619,20 @@ function overlapRejections(layout: RegionLayout): string[] {
       const bodyOwner = layout.bodies.find((body) => rectContainsPoint(body.rect, rectCenter(overlap)));
       if (bodyOwner) {
         if (stripTouchesBody(a, bodyOwner.id) && stripTouchesBody(b, bodyOwner.id)) continue;
-        result.push(`pleat-strip-body-overlap:${a.id}:${b.id}:${bodyOwner.id}`);
+        const code = `pleat-strip-body-overlap:${a.id}:${b.id}:${bodyOwner.id}`;
+        if (bodyOwner.source === "compiler-inferred") warnings.push(`inferred-${code}`);
+        else rejections.push(code);
         continue;
       }
       if (a.treeEdgeId && a.treeEdgeId === b.treeEdgeId) {
         const turnArea = Math.max(a.pitch, b.pitch) ** 2 * 4 + 1e-9;
         if (rectArea(overlap) <= turnArea) continue;
       }
-      result.push(`pleat-strip-overlap:${a.id}:${b.id}`);
+      rejections.push(`pleat-strip-overlap:${a.id}:${b.id}`);
     }
   }
-  result.push(...flapAllocationOverlapRejections(layout));
-  return result;
+  rejections.push(...flapAllocationOverlapRejections(layout));
+  return { rejections, warnings };
 }
 
 function stripTouchesBody(strip: PleatStripRegion, bodyId: string): boolean {

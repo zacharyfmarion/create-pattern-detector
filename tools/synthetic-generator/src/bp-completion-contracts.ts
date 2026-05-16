@@ -227,6 +227,7 @@ export interface BodyPanelRegion {
   id: string;
   rect: RegionRect;
   center: CompletionPoint;
+  source?: "fixture" | "compiler-inferred" | "bp-studio-contour";
 }
 
 export interface PleatStripRegion {
@@ -336,4 +337,5 @@ export interface RegionCompletionCandidate {
   stairBoundaries: StairBoundary[];
   localProbe?: RegionLocalFlatFoldProbe;
   rejectionReasons: string[];
+  warnings?: string[];
 }
