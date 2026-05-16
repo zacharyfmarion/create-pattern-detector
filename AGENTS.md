@@ -75,26 +75,37 @@ pip install -e ".[dev,graph]"
 
 The maintained TypeScript generator is a Bun package under `tools/synthetic-generator/`. It targets `rabbit-ear@0.9.32`; do not port new work back into `data/ts-generation` unless explicitly asked.
 
-## Shared Scraped Dataset
+## Shared External Datasets
 
 Do not copy the scraped real-world crease pattern dataset into each git worktree.
+Do not copy large generated synthetic datasets into each git worktree either.
 
-The shared dataset lives outside the repo at:
+The shared dataset root lives outside the repo at:
+
+```text
+/Users/zacharymarion/Documents/datasets/create-pattern-detector
+```
+
+Current shared datasets:
 
 ```text
 /Users/zacharymarion/Documents/datasets/create-pattern-detector/scraped
+/Users/zacharymarion/Documents/datasets/create-pattern-detector/synthetic/treemaker_tree_v1
 ```
 
-Each worktree should access it through this ignored symlink:
+Each worktree should access them through ignored symlinks:
 
 ```text
 data/output/scraped -> /Users/zacharymarion/Documents/datasets/create-pattern-detector/scraped
+data/generated/synthetic/treemaker_tree_v1 -> /Users/zacharymarion/Documents/datasets/create-pattern-detector/synthetic/treemaker_tree_v1
 ```
 
 For a new worktree, run:
 
 ```bash
 scripts/data/link_shared_scraped_data.sh
+scripts/data/link_shared_synthetic_data.sh treemaker_tree_v1
+PYTHONPATH=. python3.10 scripts/data/smoke_shared_synthetic_data.py
 ```
 
 If the dataset lives somewhere else on a machine, set one of:
@@ -102,15 +113,17 @@ If the dataset lives somewhere else on a machine, set one of:
 ```bash
 export CP_SHARED_DATA_ROOT=/path/to/create-pattern-detector-datasets
 export CP_SCRAPED_DATASET=/path/to/create-pattern-detector-datasets/scraped
+export CP_SYNTHETIC_DATASET=/path/to/create-pattern-detector-datasets/synthetic/treemaker_tree_v1
 ```
 
 Then rerun:
 
 ```bash
 scripts/data/link_shared_scraped_data.sh
+scripts/data/link_shared_synthetic_data.sh treemaker_tree_v1
 ```
 
-The script refuses to replace a non-empty `data/output/scraped` directory unless it only contains metadata such as `.DS_Store`.
+The linker scripts refuse to replace a non-empty data path unless it only contains metadata such as `.DS_Store`.
 
 Keep raw dataset files, crops, manifests, and generated reports out of git. Commit small code, docs, config examples, tests, and deterministic fixture manifests instead.
 

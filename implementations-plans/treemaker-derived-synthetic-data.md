@@ -146,14 +146,39 @@ The report tracks vertices, edges, assignments, degree histogram, active-degree
 histogram, angle histogram, border intersections, archetype, symmetry, topology,
 branch depth, and terminal count.
 
+## Current 12k Release
+
+The durable fold-only TreeMaker V1 release lives outside the repo at:
+
+```text
+/Users/zacharymarion/Documents/datasets/create-pattern-detector/synthetic/treemaker_tree_v1
+```
+
+It contains 12,000 accepted FOLD samples generated from 12 shards. The split is
+10,200 train / 1,200 val / 600 test. All accepted samples report TreeMaker
+optimization success and folded-form success.
+
+Future worktrees should link it with:
+
+```bash
+scripts/data/link_shared_synthetic_data.sh treemaker_tree_v1
+```
+
+Lightweight smoke, before installing torch:
+
+```bash
+PYTHONPATH=. python3.10 scripts/data/smoke_shared_synthetic_data.py
+```
+
 ## Next Work
 
-1. Run a 100-accepted-graph pilot and inspect the fold distribution report.
-2. Tune the sampler to reduce rejection rate while preserving the 85% symmetry
-   distribution.
-3. Generate a 1k accepted graph calibration set and verify topology/archetype
-   diversity before training.
-4. Add a manifest-loader smoke for rendered rows after clean rendering is
-   re-enabled for CPLineNet training.
-5. Decide whether `F`/unfolded hinge lines should be included in every render
+1. After installing the full ML dependencies, verify a `CreasePatternDataset`
+   train/val/test smoke can render labels from
+   `data/generated/synthetic/treemaker_tree_v1/folds` without pre-rendered
+   images.
+2. Use clean rendering for CPLineNet training first; image augmentation belongs
+   to Phase 3 and is intentionally not part of the fold-only release.
+3. Decide whether `F`/unfolded hinge lines should be included in every render
    or reserved for full-CP variants only.
+4. Keep the no-torch dataset smoke available for lightweight worktrees:
+   `PYTHONPATH=. python3.10 scripts/data/smoke_shared_synthetic_data.py`.
