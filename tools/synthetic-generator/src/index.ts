@@ -45,6 +45,7 @@ async function main(): Promise<void> {
   const treeMakerSymmetryCounts: Record<string, number> = {};
   const treeMakerVariantCounts: Record<string, number> = {};
   const treeMakerArchetypeCounts: Record<string, number> = {};
+  const treeMakerTopologyCounts: Record<string, number> = {};
   const maxAttempts = args.maxAttempts ?? args.count * 40;
   let attempts = 0;
 
@@ -134,6 +135,7 @@ async function main(): Promise<void> {
         treeMakerSymmetryCounts[fold.tree_metadata.symmetryClass] = (treeMakerSymmetryCounts[fold.tree_metadata.symmetryClass] ?? 0) + 1;
         treeMakerVariantCounts[fold.tree_metadata.symmetryVariant] = (treeMakerVariantCounts[fold.tree_metadata.symmetryVariant] ?? 0) + 1;
         treeMakerArchetypeCounts[fold.tree_metadata.archetype] = (treeMakerArchetypeCounts[fold.tree_metadata.archetype] ?? 0) + 1;
+        treeMakerTopologyCounts[fold.tree_metadata.topology] = (treeMakerTopologyCounts[fold.tree_metadata.topology] ?? 0) + 1;
       }
       if (fold.realism_metadata?.score !== undefined) realismScoreValues.push(fold.realism_metadata.score);
       if (validation.metrics?.solverMs !== undefined) solverMsValues.push(validation.metrics.solverMs);
@@ -170,6 +172,7 @@ async function main(): Promise<void> {
     treeMakerSymmetryCounts,
     treeMakerVariantCounts,
     treeMakerArchetypeCounts,
+    treeMakerTopologyCounts,
     realismScore: summarizeOrNull(realismScoreValues),
     roleCounts: aggregateRoleCounts,
     gridSizeCounts,

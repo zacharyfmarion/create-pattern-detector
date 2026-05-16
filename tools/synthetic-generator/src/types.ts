@@ -31,6 +31,7 @@ export type BoxPleatMode = "simple" | "dense" | "bp-studio-source";
 export type TreeMakerArchetype = "insect" | "quadruped" | "bird" | "creature" | "object" | "abstract";
 export type TreeMakerSymmetryClass = "diagonal" | "middle-axis" | "asymmetric";
 export type TreeMakerSymmetryVariant = "main-diagonal" | "anti-diagonal" | "vertical" | "horizontal" | "none";
+export type TreeMakerTopology = "radial-star" | "hubbed-limbs" | "spine-chain" | "branched-hybrid";
 export type TreeMakerCreaseKind =
   | "BORDER"
   | "AXIAL"
@@ -115,6 +116,7 @@ export interface TreeMetadata {
   archetype: TreeMakerArchetype;
   symmetryClass: TreeMakerSymmetryClass;
   symmetryVariant: TreeMakerSymmetryVariant;
+  topology: TreeMakerTopology;
   rootId: string;
   nodeCount: number;
   terminalCount: number;
@@ -282,6 +284,7 @@ export interface TreeMakerSamplerConfig {
   middleAxisWeights?: Partial<Record<Extract<TreeMakerSymmetryVariant, "vertical" | "horizontal">, number>>;
   diagonalWeights?: Partial<Record<Extract<TreeMakerSymmetryVariant, "main-diagonal" | "anti-diagonal">, number>>;
   archetypeWeights?: Partial<Record<TreeMakerArchetype, number>>;
+  topologyWeights?: Partial<Record<TreeMakerTopology, number>>;
 }
 
 export interface ValidationResult {

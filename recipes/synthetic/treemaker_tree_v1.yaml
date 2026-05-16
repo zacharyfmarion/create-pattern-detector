@@ -47,6 +47,11 @@ treeMakerSampler:
     creature: 1.0
     object: 0.8
     abstract: 0.9
+  topologyWeights:
+    radial-star: 0.22
+    hubbed-limbs: 0.34
+    spine-chain: 0.28
+    branched-hybrid: 0.16
 
 validation:
   strictGlobal: false

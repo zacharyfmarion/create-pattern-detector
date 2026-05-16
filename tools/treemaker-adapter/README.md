@@ -23,10 +23,14 @@ external checkout. It prints the environment variables to use:
 ```bash
 export TREEMAKER_CLI=~/.cache/cp-detector/treemaker-legacy/build/treemaker-json-cli
 export TREEMAKER_CLI_ARGS=--triangulate
+export TREEMAKER_TIMEOUT_MS=5000
 ```
 
 `--triangulate` is currently required for sampled specs; without it, TreeMaker
 often emits partial polygon content with `POLYS_NOT_VALID`.
+
+`TREEMAKER_TIMEOUT_MS` prevents one pathological tree from hanging a large
+generation shard. The synthetic generator treats timeout as a rejected attempt.
 
 ## CLI Contract
 

@@ -199,8 +199,10 @@ TreeMaker external setup and smoke:
 python3.10 tools/treemaker-adapter/scripts/setup_external_treemaker_cli.py
 export TREEMAKER_CLI=~/.cache/cp-detector/treemaker-legacy/build/treemaker-json-cli
 export TREEMAKER_CLI_ARGS=--triangulate
+export TREEMAKER_TIMEOUT_MS=5000
 bun run generate -- --recipe recipes/synthetic/treemaker_tree_v1.yaml --count 16 --out /tmp/treemaker_tree_v1
-python scripts/data/render_synthetic_dataset.py --root /tmp/treemaker_tree_v1
+python3.10 scripts/data/synthetic_fold_report.py --root /tmp/treemaker_tree_v1
+python3.10 scripts/data/merge_synthetic_fold_shards.py --out /tmp/treemaker_tree_v1_merged /tmp/treemaker_tree_v1
 ```
 
 Code quality, once dependencies are installed:
@@ -226,6 +228,7 @@ Do not rely on the console scripts in `pyproject.toml` (`cp-train`, `cp-evaluate
 - Synthetic generation must not silently fall back to fake data. Do not reintroduce Rabbit Ear axiom/classic/single-vertex, hand-written box pleat, dense lattice, non-BP dense, or strict-completion fallback outputs as production data.
 - `bp-studio-realistic` samples BP Studio-style trees/layouts, runs the pinned BP Studio adapter, normalizes raw exports, and then strict validation decides acceptance. If raw exports fail local/global constraints, fix the BP Studio adapter/sampler/normalizer path or stop with an RCA.
 - `treemaker-tree` requires a real external `TREEMAKER_CLI`. The repo provides only a thin wrapper/build script; GPL TreeMaker source is cloned and built outside the repo, similar to external scraped data.
+- TreeMaker graph generation comes before Phase 3 image augmentation. Keep scale checks focused on accepted `.fold` graphs, shard merges, topology/symmetry/archetype diversity, and fold distribution reports.
 - `strictGlobal: true` with `globalBackend: rabbit-ear-solver` means the generator checks local Kawasaki/Maekawa, asks Rabbit Ear for globally consistent layer ordering, and computes finite flat-folded vertex coordinates. Use `folded-preview` when you need visual QA of the folded state, not only the CP drawing.
 - In lightweight Python environments without OpenCV/SciPy, `src/data/annotations.py` uses optimized Pillow/NumPy fallbacks. Keep dense manifest loading smoke-tested; a naive per-edge supersampled fallback is too slow for 1,000+ edge samples.
 - Several older docs mention `scripts/render_dataset.py`; the current synthetic renderer is `scripts/data/render_synthetic_dataset.py`.

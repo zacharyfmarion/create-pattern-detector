@@ -97,14 +97,19 @@ export function runTreeMakerAdapter(
   const specPath = join(tempRoot, "spec.json");
   const outPath = join(tempRoot, "out.json");
   writeFileSync(specPath, JSON.stringify(spec, null, 2) + "\n");
+  const timeoutMs = treeMakerTimeoutMs();
 
   const proc = Bun.spawnSync({
     cmd: [...command, "--spec", specPath, "--out", outPath],
     stdout: "pipe",
     stderr: "pipe",
+    timeout: timeoutMs,
   });
   const stdout = new TextDecoder().decode(proc.stdout);
   const stderr = new TextDecoder().decode(proc.stderr);
+  if (proc.signalCode) {
+    throw new Error(`TreeMaker CLI terminated by ${proc.signalCode} after ${timeoutMs}ms: ${stderr || stdout}`);
+  }
   if (proc.exitCode !== 0) {
     throw new Error(`TreeMaker CLI failed (${proc.exitCode}): ${stderr || stdout}`);
   }
@@ -172,6 +177,16 @@ function commandFromEnvironment(): string[] {
   if (!command) return [];
   const args = process.env.TREEMAKER_CLI_ARGS?.trim();
   return [command, ...(args ? args.split(/\s+/u) : [])];
+}
+
+function treeMakerTimeoutMs(): number {
+  const raw = process.env.TREEMAKER_TIMEOUT_MS?.trim();
+  if (!raw) return 15_000;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new Error(`TREEMAKER_TIMEOUT_MS must be a positive number of milliseconds, got ${raw}`);
+  }
+  return value;
 }
 
 function createTempDir(): string {

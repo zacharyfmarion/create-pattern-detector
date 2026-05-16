@@ -60,6 +60,17 @@ Symmetry target:
 Middle-axis is split between vertical/horizontal. Diagonal is split between
 main/anti diagonal.
 
+Topology target:
+
+- `radial-star`: shallow baseline trees;
+- `hubbed-limbs`: paired or asymmetric hubs with terminal child flaps;
+- `spine-chain`: multi-hub chains with paired terminals along a symmetry axis;
+- `branched-hybrid`: spine plus side hubs.
+
+The goal is diverse `.fold` graph structure before any image augmentation.
+Image noise/style augmentation belongs to Phase 3 training, not this graph
+generation phase.
+
 ## Acceptance Rules
 
 Required before a generated sample becomes training data:
@@ -99,14 +110,50 @@ Result:
 - rendered rows: 12;
 - folded previews: 4 / 4.
 
+## Scale Workflow
+
+Use shard-level generation with different seeds and external TreeMaker timeout:
+
+```bash
+TREEMAKER_CLI=~/.cache/cp-detector/treemaker-legacy/build/treemaker-json-cli \
+TREEMAKER_CLI_ARGS=--triangulate \
+TREEMAKER_TIMEOUT_MS=5000 \
+bun run --cwd tools/synthetic-generator generate -- \
+  --recipe ../../recipes/synthetic/treemaker_tree_v1.yaml \
+  --seed 9170001 \
+  --count 250 \
+  --out /path/to/synthetic/treemaker_tree_v1/shards/shard-000 \
+  --max-attempts 10000
+```
+
+Merge accepted fold shards without rendering:
+
+```bash
+python3.10 scripts/data/merge_synthetic_fold_shards.py \
+  --out /path/to/synthetic/treemaker_tree_v1/merged \
+  --recompute-splits \
+  /path/to/synthetic/treemaker_tree_v1/shards/shard-*
+```
+
+Create graph distribution QA:
+
+```bash
+python3.10 scripts/data/synthetic_fold_report.py \
+  --root /path/to/synthetic/treemaker_tree_v1/merged
+```
+
+The report tracks vertices, edges, assignments, degree histogram, active-degree
+histogram, angle histogram, border intersections, archetype, symmetry, topology,
+branch depth, and terminal count.
+
 ## Next Work
 
-1. Add richer symbolic tree archetypes with deeper branch structures, not only
-   root-star layouts.
+1. Run a 100-accepted-graph pilot and inspect the fold distribution report.
 2. Tune the sampler to reduce rejection rate while preserving the 85% symmetry
    distribution.
-3. Generate a 100-sample smoke and inspect contact sheets before treating V1 as
-   a real training source.
-4. Add a manifest-loader smoke for the rendered TreeMaker dataset.
+3. Generate a 1k accepted graph calibration set and verify topology/archetype
+   diversity before training.
+4. Add a manifest-loader smoke for rendered rows after clean rendering is
+   re-enabled for CPLineNet training.
 5. Decide whether `F`/unfolded hinge lines should be included in every render
    or reserved for full-CP variants only.

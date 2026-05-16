@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { generateFold } from "../src/generators.ts";
 import { loadRecipe } from "../src/recipe.ts";
-import { generateTreeMakerSpec, validateTreeMakerSpec } from "../src/treemaker-sampler.ts";
+import { generateTreeMakerSpec, treeMetadataFromSpec, validateTreeMakerSpec } from "../src/treemaker-sampler.ts";
 import { runTreeMakerAdapter, treeMakerOutputToFold, type TreeMakerExternalOutput } from "../src/treemaker-adapter.ts";
 import { validateFold } from "../src/validate.ts";
 
@@ -44,6 +44,51 @@ test("TreeMaker symmetry sampler follows the configured 85 percent symmetric dis
   expect(counts["middle-axis"] / 2000).toBeLessThan(0.47);
   expect(counts.asymmetric / 2000).toBeGreaterThan(0.11);
   expect(counts.asymmetric / 2000).toBeLessThan(0.19);
+});
+
+test("TreeMaker sampler can force deeper non-radial topology families", () => {
+  for (const topology of ["hubbed-limbs", "spine-chain", "branched-hybrid"] as const) {
+    const spec = generateTreeMakerSpec({
+      id: `tree-${topology}`,
+      family: "treemaker-tree",
+      seed: 24680,
+      numCreases: 420,
+      bucket: "medium",
+      treeMakerSampler: {
+        symmetryWeights: { diagonal: 0, "middle-axis": 1, asymmetric: 0 },
+        middleAxisWeights: { vertical: 1, horizontal: 0 },
+        topologyWeights: {
+          "radial-star": 0,
+          "hubbed-limbs": topology === "hubbed-limbs" ? 1 : 0,
+          "spine-chain": topology === "spine-chain" ? 1 : 0,
+          "branched-hybrid": topology === "branched-hybrid" ? 1 : 0,
+        },
+      },
+    });
+    const metadata = treeMetadataFromSpec(spec);
+    expect(spec.topology).toBe(topology);
+    expect(validateTreeMakerSpec(spec)).toEqual([]);
+    expect(metadata.branchDepth).toBeGreaterThanOrEqual(2);
+    expect(metadata.terminalCount).toBeGreaterThanOrEqual(4);
+  }
+});
+
+test("TreeMaker topology sampler favors non-radial structures for diversity", () => {
+  const counts: Record<string, number> = {};
+  for (let seed = 1; seed <= 400; seed++) {
+    const spec = generateTreeMakerSpec({
+      id: `topology-${seed}`,
+      family: "treemaker-tree",
+      seed,
+      numCreases: 350,
+      bucket: "medium",
+    });
+    counts[spec.topology] = (counts[spec.topology] ?? 0) + 1;
+  }
+  expect(counts["hubbed-limbs"] ?? 0).toBeGreaterThan(80);
+  expect(counts["spine-chain"] ?? 0).toBeGreaterThan(60);
+  expect(counts["branched-hybrid"] ?? 0).toBeGreaterThan(35);
+  expect(counts["radial-star"] ?? 0).toBeLessThan(130);
 });
 
 test("TreeMaker adapter fails clearly when no external CLI is configured", () => {
