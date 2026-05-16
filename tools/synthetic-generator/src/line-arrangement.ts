@@ -37,13 +37,18 @@ export function arrangeSegments(
   creator = "cp-synthetic-generator/arrangement",
   bpMetadata?: FOLDFormat["bp_metadata"],
 ): FOLDFormat {
-  const splitPoints = segments.map((segment) => [segment.p1, segment.p2]);
+  const inputSegments = segments.map((segment) => ({
+    ...segment,
+    p1: snapPointToMetadataGrid(segment.p1, bpMetadata),
+    p2: snapPointToMetadataGrid(segment.p2, bpMetadata),
+  }));
+  const splitPoints = inputSegments.map((segment) => [segment.p1, segment.p2]);
 
-  for (let i = 0; i < segments.length; i++) {
-    for (let j = i + 1; j < segments.length; j++) {
-      for (const point of intersectionPoints(segments[i], segments[j])) {
-        if (onSegment(point, segments[i])) splitPoints[i].push(point);
-        if (onSegment(point, segments[j])) splitPoints[j].push(point);
+  for (let i = 0; i < inputSegments.length; i++) {
+    for (let j = i + 1; j < inputSegments.length; j++) {
+      for (const point of intersectionPoints(inputSegments[i], inputSegments[j])) {
+        if (onSegment(point, inputSegments[i])) splitPoints[i].push(snapPointToMetadataGrid(point, bpMetadata));
+        if (onSegment(point, inputSegments[j])) splitPoints[j].push(snapPointToMetadataGrid(point, bpMetadata));
       }
     }
   }
@@ -63,8 +68,8 @@ export function arrangeSegments(
     return index;
   };
 
-  for (let i = 0; i < segments.length; i++) {
-    const segment = segments[i];
+  for (let i = 0; i < inputSegments.length; i++) {
+    const segment = inputSegments[i];
     const points = uniquePoints(splitPoints[i]).sort((a, b) => parameterAlong(segment, a) - parameterAlong(segment, b));
     for (let j = 0; j < points.length - 1; j++) {
       if (distance(points[j], points[j + 1]) < EPSILON) continue;
@@ -201,6 +206,16 @@ function pointKey(point: Point): string {
 
 function roundPoint(point: Point): Point {
   return [round(point[0]), round(point[1])];
+}
+
+function snapPointToMetadataGrid(point: Point, bpMetadata?: FOLDFormat["bp_metadata"]): Point {
+  const gridSize = bpMetadata?.gridSize;
+  if (!gridSize || gridSize <= 0) return roundPoint(point);
+  const denominator = gridSize * 2;
+  return [
+    round(Math.round(point[0] * denominator) / denominator),
+    round(Math.round(point[1] * denominator) / denominator),
+  ];
 }
 
 function round(value: number): number {
