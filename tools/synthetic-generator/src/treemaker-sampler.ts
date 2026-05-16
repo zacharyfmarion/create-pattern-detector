@@ -196,6 +196,13 @@ class TreeBuilder {
     return [left, right];
   }
 
+  addMirroredHubPair(label: string, parentA: string, parentB: string, point: [number, number], length: number): [string, string] {
+    const left = this.addHub(`${label}-a`, point, parentA, length);
+    const mirrored = mirrorPoint(point, this.symmetryVariant);
+    const right = this.addHub(`${label}-b`, mirrored, parentB, length);
+    return [left, right];
+  }
+
   addMirroredTerminalPair(label: string, parentA: string, parentB: string, point: [number, number], length: number): [string, string] {
     const left = this.addTerminal(`${label}-a`, point);
     const mirrored = mirrorPoint(point, this.symmetryVariant);
@@ -291,20 +298,61 @@ function addSymmetricSpineChain(
   archetype: TreeMakerArchetype,
   targetCreases: number,
 ): void {
-  const spineHubs = targetCreases > 500 ? rng.int(3, 5) : rng.int(2, 4);
+  const spineHubs = targetCreases > 500 ? rng.int(4, 5) : rng.int(3, 4);
   const positions = sortedAxisPositions(spineHubs, rng);
   let parent = "root";
   let terminalIndex = 0;
   for (let index = 0; index < spineHubs; index++) {
     const hub = builder.addAxisHub(`${archetype}-spine-${index}`, positions[index], parent, index === 0 ? rng.float(0.12, 0.22) : rng.float(0.1, 0.2));
-    const pairCount = index === 0 || index === spineHubs - 1 ? 1 : rng.int(1, 2);
-    for (let pair = 0; pair < pairCount; pair++) {
+    if (index === 0 || index === spineHubs - 1) {
       const point = offsetFromSymmetryAxis(builder.symmetryVariant, positions[index], rng.float(0.16, 0.33), rng.float(-0.06, 0.06));
       builder.addMirroredTerminalPair(`${archetype}-spine-flap-${terminalIndex}`, hub, hub, point, lengthFor(archetype, terminalIndex, rng) * rng.float(0.75, 1.1));
       terminalIndex++;
+    } else {
+      const forkCount = targetCreases > 500 ? rng.int(1, 2) : 1;
+      for (let fork = 0; fork < forkCount; fork++) {
+        terminalIndex = addSymmetricLimbFork(builder, rng, archetype, hub, positions[index], terminalIndex, fork);
+      }
     }
     parent = hub;
   }
+}
+
+function addSymmetricLimbFork(
+  builder: TreeBuilder,
+  rng: SeededRandom,
+  archetype: TreeMakerArchetype,
+  spineHub: string,
+  axisPosition: number,
+  terminalIndex: number,
+  forkIndex: number,
+): number {
+  const branchHubPoint = offsetFromSymmetryAxis(
+    builder.symmetryVariant,
+    axisPosition,
+    rng.float(0.11, 0.24),
+    rng.float(-0.045, 0.045),
+  );
+  const [branchHubA, branchHubB] = builder.addMirroredHubPair(
+    `${archetype}-limb-fork-${terminalIndex}-${forkIndex}`,
+    spineHub,
+    spineHub,
+    branchHubPoint,
+    rng.float(0.08, 0.16),
+  );
+  const children = rng.next() < 0.62 ? 2 : 1;
+  for (let child = 0; child < children; child++) {
+    const terminalPoint = offsetPoint(branchHubPoint, rng.float(-Math.PI, Math.PI), rng.float(0.1, 0.22));
+    builder.addMirroredTerminalPair(
+      `${archetype}-fork-terminal-${terminalIndex}`,
+      branchHubA,
+      branchHubB,
+      terminalPoint,
+      lengthFor(archetype, terminalIndex + child, rng) * rng.float(0.62, 0.92),
+    );
+    terminalIndex++;
+  }
+  return terminalIndex;
 }
 
 function addSymmetricBranchedHybrid(

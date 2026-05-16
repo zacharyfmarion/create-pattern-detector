@@ -70,6 +70,10 @@ test("TreeMaker sampler can force deeper non-radial topology families", () => {
     expect(validateTreeMakerSpec(spec)).toEqual([]);
     expect(metadata.branchDepth).toBeGreaterThanOrEqual(2);
     expect(metadata.terminalCount).toBeGreaterThanOrEqual(4);
+    if (topology === "spine-chain" || topology === "branched-hybrid") {
+      expect(metadata.branchDepth).toBeGreaterThanOrEqual(3);
+      expect(spec.nodes.some((node) => node.label.includes("limb-fork"))).toBe(true);
+    }
   }
 });
 
