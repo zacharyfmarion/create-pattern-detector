@@ -1,13 +1,16 @@
 """
-Main crease pattern detection model.
+Deprecated mask-style crease pattern detector.
 
-Combines backbone and pixel head for end-to-end crease pattern detection.
+Roadmap Phase 3 uses :class:`src.models.cpline_net.CPLineNet`, whose heads
+predict separate line geometry and assignment fields for PlanarGraphBuilder.
+This module remains only for legacy scripts/tests until they are migrated.
 """
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from typing import Dict, Optional
+import warnings
 
 from .backbone import HRNetBackbone
 from .heads import PixelHead
@@ -45,6 +48,11 @@ class CreasePatternDetector(nn.Module):
             output_stride: Backbone output stride
         """
         super().__init__()
+        warnings.warn(
+            "CreasePatternDetector is deprecated; use CPLineNet for Phase 3 training.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
 
         self.backbone_name = backbone
         self.num_seg_classes = num_seg_classes

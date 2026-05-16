@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """
-Training script for crease pattern detection.
+Deprecated training script for the legacy pixel-head detector.
+
+Roadmap Phase 3 training should use scripts/training/train_cpline_smoke.py,
+which trains CPLineNet fields and evaluates through PlanarGraphBuilder.
 
 Usage:
     python scripts/training/train_pixel_head.py --fold-dir data/output/synthetic/raw/tier-a --epochs 50

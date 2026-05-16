@@ -322,7 +322,14 @@ Goal: replace ground-truth labels with model-predicted fields.
 Tasks:
 
 - Implement CPLineNet heads with separate geometry and assignment targets.
-- Train first on clean renders, then progressively add render noise.
+- Train first on clean renders, then progressively add CPLine-specific augmentations.
+- Add render-time augmentation profiles before larger local/RunPod training:
+  `line-style`, `dark-mode`, `print-light`, `print-medium`, and `photo-light`.
+- Keep augmentation vector-first: apply geometric perturbations to graph vertices,
+  then render matching input images and dense CPLineNet labels from that geometry.
+- Treat dark-mode grids as visual background noise, not crease evidence.
+- Add visual augmentation contact sheets and JSON sidecars before scaling image size.
+- Run local visual/performance gates for augmentations before paid GPU training.
 - Evaluate through the full vectorizer, not only pixel IoU.
 - Cache predictions and graph-builder intermediate artifacts for reproducibility.
 
@@ -330,6 +337,8 @@ Exit criteria on held-out synthetic renders:
 
 - Clean edge recall >= 95%.
 - Noisy synthetic edge recall >= 90%.
+- Augmentation contact sheets are visually approved at 256 and 384 resolution.
+- Dark-mode grid pixels are not included in line or junction targets.
 - Final valid FOLD rate >= 90%.
 - Median vertex localization error <= 2 px at 1024 resolution.
 
@@ -376,8 +385,8 @@ Tasks:
 
 - Build a small real benchmark of 25 to 100 manually corrected CP images.
 - Add rectification tests.
-- Add scanner/photo augmentations only after clean vectorization is stable.
-- Fine-tune CPLineNet on mixed synthetic and real examples.
+- Fine-tune CPLineNet on mixed synthetic and real examples after Phase 3
+  augmentation gates are stable.
 
 Exit criteria:
 
