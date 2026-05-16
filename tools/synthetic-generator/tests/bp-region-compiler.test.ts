@@ -277,7 +277,7 @@ test("region compiler closes collinear lane gaps through body panels", () => {
   expect(candidate.localProbe?.kawasakiBad).toBe(0);
 });
 
-test("region compiler extends terminal lanes only inside flap allocation circles", () => {
+test("region compiler extends terminal lanes only inside terminal source zones", () => {
   const candidate = compileRegionCandidate(terminalContinuationLayout());
   const closures = candidate.segments.filter((segment) => segment.kind === "terminal-closure");
 
@@ -286,6 +286,19 @@ test("region compiler extends terminal lanes only inside flap allocation circles
   expect(closures[0].p1).toEqual([14 / 16, 5 / 16]);
   expect(closures[0].p2).toEqual([1, 5 / 16]);
   expect(candidate.localProbe?.kawasakiBad).toBe(0);
+});
+
+test("region compiler can use BP Studio terminal contours for owned terminal closure", () => {
+  const candidate = compileRegionCandidate(terminalContourContinuationLayout());
+  const closures = candidate.segments.filter((segment) => segment.kind === "terminal-closure");
+
+  expect(candidate.rejectionReasons).toHaveLength(0);
+  expect(closures).toHaveLength(1);
+  expect(closures[0]).toMatchObject({
+    regionId: "right-terminal",
+    p1: [14 / 16, 5 / 16],
+    p2: [1, 5 / 16],
+  });
 });
 
 test("sheet-sweep lab completion can make long-axis corridor lanes strict", async () => {
@@ -423,6 +436,19 @@ function terminalContinuationLayout(): RegionLayout {
       phase: 0,
       startAssignment: "M",
     }],
+  };
+}
+
+function terminalContourContinuationLayout(): RegionLayout {
+  const layout = terminalContinuationLayout();
+  return {
+    ...layout,
+    id: "terminal-contour-continuation-layout",
+    flaps: layout.flaps.map((flap) => ({
+      ...flap,
+      allocationRadius: 1 / 64,
+      sourceContourRect: { x1: 14 / 16, y1: 4 / 16, x2: 1, y2: 6 / 16 },
+    })),
   };
 }
 

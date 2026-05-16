@@ -245,14 +245,15 @@ function terminalBorderContinuationSegments(
     if (foldedEdges.length !== 1) continue;
     const pointItem = arranged.vertices_coords[vertex];
     if (!pointItem || isSheetBoundaryPoint(pointItem)) continue;
-    const flap = layout.flaps.find((candidate) => pointInsideFlapAllocation(pointItem, candidate, pitch / 3));
-    if (!flap) continue;
     const edge = foldedEdges[0];
+    const flap = terminalClosureCandidateFlaps(layout, arranged.edges_bpStudioSource?.[edge]?.ownerId)
+      .find((candidate) => pointInsideTerminalClosureZone(pointItem, candidate, pitch * 2));
+    if (!flap) continue;
     const [a, b] = arranged.edges_vertices[edge];
     const other = arranged.vertices_coords[a === vertex ? b : a];
     const endpoint = terminalBorderEndpoint(pointItem, other, layout.gridSize);
     if (!endpoint) continue;
-    if (!segmentInsideFlapAllocation(pointItem, endpoint, flap, pitch / 3)) continue;
+    if (!segmentInsideTerminalClosureZone(pointItem, endpoint, flap, pitch * 2)) continue;
     const p1 = roundPoint(pointItem);
     const p2 = roundPoint(endpoint);
     const key = segmentKey(p1, p2);
@@ -273,17 +274,36 @@ function terminalBorderContinuationSegments(
   return result;
 }
 
+function terminalClosureCandidateFlaps(layout: RegionLayout, ownerId: string | number | undefined): FlapRegion[] {
+  const owner = ownerId === undefined ? undefined : String(ownerId);
+  const strip = owner ? layout.pleatStrips.find((candidate) => candidate.id === owner) : undefined;
+  if (!strip) return layout.flaps;
+  const flapById = new Map(layout.flaps.flatMap((flap) => [
+    [flap.terminalId, flap],
+    [flap.id, flap],
+  ]));
+  const flaps = [strip.from, strip.to].flatMap((id) => {
+    const flap = flapById.get(id);
+    return flap ? [flap] : [];
+  });
+  return flaps.length ? flaps : layout.flaps;
+}
+
 function pointInsideFlapAllocation(pointItem: Point, flap: FlapRegion, tolerance: number): boolean {
   if (!flap.allocationRadius) return false;
   return Math.hypot(pointItem[0] - flap.center.x, pointItem[1] - flap.center.y) <= flap.allocationRadius + tolerance;
 }
 
-function segmentInsideFlapAllocation(start: Point, end: Point, flap: FlapRegion, tolerance: number): boolean {
-  if (!flap.allocationRadius) return false;
+function pointInsideTerminalClosureZone(pointItem: Point, flap: FlapRegion, tolerance: number): boolean {
+  return pointInsideFlapAllocation(pointItem, flap, tolerance) ||
+    Boolean(flap.sourceContourRect && rectContainsPoint(inflateRect(flap.sourceContourRect, tolerance), point(pointItem[0], pointItem[1])));
+}
+
+function segmentInsideTerminalClosureZone(start: Point, end: Point, flap: FlapRegion, tolerance: number): boolean {
   for (const t of [0, 0.25, 0.5, 0.75, 1]) {
     const x = start[0] + (end[0] - start[0]) * t;
     const y = start[1] + (end[1] - start[1]) * t;
-    if (Math.hypot(x - flap.center.x, y - flap.center.y) > flap.allocationRadius + tolerance) return false;
+    if (!pointInsideTerminalClosureZone([x, y], flap, tolerance)) return false;
   }
   return true;
 }
@@ -1697,6 +1717,15 @@ function rectContainsPoint(container: RegionRect, inner: CompletionPoint): boole
     inner.y >= container.y1 - 1e-9 &&
     inner.x <= container.x2 + 1e-9 &&
     inner.y <= container.y2 + 1e-9;
+}
+
+function inflateRect(rect: RegionRect, amount: number): RegionRect {
+  return clampRect({
+    x1: rect.x1 - amount,
+    y1: rect.y1 - amount,
+    x2: rect.x2 + amount,
+    y2: rect.y2 + amount,
+  });
 }
 
 function rectArea(rect: RegionRect): number {
