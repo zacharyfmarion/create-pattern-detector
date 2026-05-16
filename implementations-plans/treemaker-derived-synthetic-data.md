@@ -170,6 +170,25 @@ Lightweight smoke, before installing torch:
 PYTHONPATH=. python3.10 scripts/data/smoke_shared_synthetic_data.py
 ```
 
+## Rabbit Ear Supplement
+
+TreeMaker remains the primary production family. The only approved supplement is
+the strict Rabbit Ear fold-program family documented in
+`implementations-plans/rabbit-ear-fold-program-supplement.md`.
+
+Target fold-only training mix:
+
+- 12,000 TreeMaker samples from `treemaker_tree_v1`;
+- 2,000 Rabbit Ear fold-program samples from `rabbit_ear_fold_program_v1`;
+- mixed symlinked root: `cp_training_mix_v1`.
+
+Use the mix root for training setup once it exists:
+
+```bash
+scripts/data/link_shared_synthetic_data.sh cp_training_mix_v1
+PYTHONPATH=. python3.10 scripts/data/smoke_shared_synthetic_data.py --root data/generated/synthetic/cp_training_mix_v1
+```
+
 ## Next Work
 
 1. After installing the full ML dependencies, verify a `CreasePatternDataset`

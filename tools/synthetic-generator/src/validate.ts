@@ -46,6 +46,9 @@ export async function validateFold(fold: FOLDFormat, config: ValidationConfig): 
   if (config.requireTreeMaker || normalized.treemaker_metadata || normalized.tree_metadata) {
     runCheck("treemaker-structure", passed, failed, errors, () => checkTreeMakerStructure(normalized));
   }
+  if (config.requireRabbitEarFoldProgram || normalized.rabbit_ear_metadata) {
+    runCheck("rabbit-ear-fold-program-structure", passed, failed, errors, () => checkRabbitEarFoldProgramStructure(normalized));
+  }
   if (config.requireBoxPleat || normalized.edges_bpRole || normalized.bp_metadata) {
     runCheck("box-pleat-structure", passed, failed, errors, () => checkBoxPleatStructure(normalized, config.boxPleatMode ?? "simple"));
   }
@@ -233,6 +236,46 @@ function checkTreeMakerStructure(fold: FOLDFormat): void {
   }
   if ((assignmentTotals.U ?? 0) + (assignmentTotals.F ?? 0) < 1) {
     throw new Error("TreeMaker full-CP samples should preserve flat/unfolded hinge lines");
+  }
+}
+
+function checkRabbitEarFoldProgramStructure(fold: FOLDFormat): void {
+  const metadata = fold.rabbit_ear_metadata;
+  if (!metadata) throw new Error("rabbit_ear_metadata is required");
+  if (metadata.generator !== "rabbit-ear-fold-program") {
+    throw new Error("rabbit_ear_metadata.generator must be rabbit-ear-fold-program");
+  }
+  if (metadata.rabbitEarApi !== "ear.graph.flatFold") {
+    throw new Error("rabbit_ear_metadata.rabbitEarApi must be ear.graph.flatFold");
+  }
+  if (metadata.appliedFoldCount < 1) throw new Error("Rabbit Ear fold-program samples require at least one applied fold");
+  if (metadata.attemptedFoldCount < metadata.appliedFoldCount) {
+    throw new Error("attemptedFoldCount cannot be less than appliedFoldCount");
+  }
+  if (!metadata.targetActiveCreaseRange || metadata.targetActiveCreaseRange.length !== 2) {
+    throw new Error("targetActiveCreaseRange is required");
+  }
+  const [minActive, maxActive] = metadata.targetActiveCreaseRange;
+  const activeCreases = fold.edges_assignment.filter((assignment) => assignment === "M" || assignment === "V").length;
+  if (activeCreases !== metadata.activeCreaseCount) {
+    throw new Error(`active crease count ${activeCreases} does not match metadata ${metadata.activeCreaseCount}`);
+  }
+  if (activeCreases < minActive || activeCreases > maxActive) {
+    throw new Error(`active crease count ${activeCreases} is outside requested range ${minActive}-${maxActive}`);
+  }
+  if (Object.keys(metadata.axiomUsage).length < 1) throw new Error("axiomUsage is required");
+  const axiomTotal = Object.values(metadata.axiomUsage).reduce((sum, count) => sum + Number(count), 0);
+  if (axiomTotal !== metadata.appliedFoldCount) {
+    throw new Error(`axiomUsage total ${axiomTotal} does not match appliedFoldCount ${metadata.appliedFoldCount}`);
+  }
+  const labelPolicy = fold.label_policy;
+  if (!labelPolicy?.trainingEligible) throw new Error("label_policy.trainingEligible must be true");
+  if (
+    labelPolicy.labelSource !== "rabbit-ear-fold-program" ||
+    labelPolicy.geometrySource !== "rabbit-ear-fold-program" ||
+    labelPolicy.assignmentSource !== "rabbit-ear-fold-program"
+  ) {
+    throw new Error("label_policy must mark Rabbit Ear fold-program provenance");
   }
 }
 

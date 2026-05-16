@@ -6,6 +6,13 @@ import { splitForIndex } from "../src/fold-utils.ts";
 import { loadRecipe } from "../src/recipe.ts";
 
 test("strict validation APIs are available", () => {
+  expect(typeof ear.graph.square).toBe("function");
+  expect(typeof ear.graph.flatFold).toBe("function");
+  expect(typeof ear.axiom.axiom1).toBe("function");
+  expect(typeof ear.axiom.axiom2).toBe("function");
+  expect(typeof ear.axiom.axiom3).toBe("function");
+  expect(typeof ear.axiom.axiom4).toBe("function");
+  expect(typeof ear.axiom.axiom7).toBe("function");
   expect(typeof ear.graph.populate).toBe("function");
   expect(typeof ear.singleVertex.validateKawasaki).toBe("function");
   expect(typeof ear.singleVertex.validateMaekawa).toBe("function");
@@ -14,22 +21,24 @@ test("strict validation APIs are available", () => {
 });
 
 test("synthetic generation exposes BP Studio diagnostics and TreeMaker tree bases", () => {
-  expect(availableFamilies()).toEqual(["bp-studio-realistic", "bp-studio-completed", "treemaker-tree"]);
-  expect(() =>
-    generateFold({
-      id: "legacy",
-      family: "box-pleat" as "bp-studio-realistic",
-      seed: 1,
-      numCreases: 80,
-      bucket: "small",
-    }),
-  ).toThrow(/Unsupported synthetic generator family/);
+  expect(availableFamilies()).toEqual(["bp-studio-realistic", "bp-studio-completed", "treemaker-tree", "rabbit-ear-fold-program"]);
+  for (const family of ["box-pleat", "grid", "classic", "dense-non-bp"] as const) {
+    expect(() =>
+      generateFold({
+        id: `legacy-${family}`,
+        family: family as "bp-studio-realistic",
+        seed: 1,
+        numCreases: 80,
+        bucket: "small",
+      }),
+    ).toThrow(/Unsupported synthetic generator family/);
+  }
 });
 
 test("BP Studio raw diagnostic recipe loads through Bun YAML parser", async () => {
   const recipe = await loadRecipe("../../recipes/synthetic/bp_studio_realistic_v1.yaml");
   expect(recipe.name).toBe("bp_studio_realistic_v1");
-  expect(recipe.families).toEqual({ "bp-studio-realistic": 1, "bp-studio-completed": 0, "treemaker-tree": 0 });
+  expect(recipe.families).toEqual({ "bp-studio-realistic": 1, "bp-studio-completed": 0, "treemaker-tree": 0, "rabbit-ear-fold-program": 0 });
   expect(recipe.validation).toMatchObject({
     strictGlobal: true,
     requireBoxPleat: true,
@@ -41,7 +50,7 @@ test("BP Studio raw diagnostic recipe loads through Bun YAML parser", async () =
 test("default recipe uses TreeMaker tree labels", async () => {
   const recipe = await loadRecipe();
   expect(recipe.name).toBe("treemaker_tree_v1");
-  expect(recipe.families).toEqual({ "bp-studio-realistic": 0, "bp-studio-completed": 0, "treemaker-tree": 1 });
+  expect(recipe.families).toEqual({ "bp-studio-realistic": 0, "bp-studio-completed": 0, "treemaker-tree": 1, "rabbit-ear-fold-program": 0 });
   expect(recipe.validation.requireRealistic).toBe(false);
   expect(recipe.validation.requireTreeMaker).toBe(true);
 });
@@ -49,13 +58,43 @@ test("default recipe uses TreeMaker tree labels", async () => {
 test("BP Studio completed recipe loads as the strict e2e smoke path", async () => {
   const recipe = await loadRecipe("../../recipes/synthetic/bp_completed_uniaxial_v1.yaml");
   expect(recipe.name).toBe("bp_completed_uniaxial_v1");
-  expect(recipe.families).toEqual({ "bp-studio-realistic": 0, "bp-studio-completed": 1, "treemaker-tree": 0 });
+  expect(recipe.families).toEqual({ "bp-studio-realistic": 0, "bp-studio-completed": 1, "treemaker-tree": 0, "rabbit-ear-fold-program": 0 });
   expect(recipe.validation).toMatchObject({
     strictGlobal: true,
     requireBoxPleat: true,
     requireDense: true,
     requireRealistic: false,
   });
+});
+
+test("Rabbit Ear fold-program recipe loads as a supplemental strict non-BP family", async () => {
+  const recipe = await loadRecipe("../../recipes/synthetic/rabbit_ear_fold_program_v1.yaml");
+  expect(recipe.name).toBe("rabbit_ear_fold_program_v1");
+  expect(recipe.families).toEqual({ "bp-studio-realistic": 0, "bp-studio-completed": 0, "treemaker-tree": 0, "rabbit-ear-fold-program": 1 });
+  expect(recipe.validation).toMatchObject({
+    strictGlobal: true,
+    requireRabbitEarFoldProgram: true,
+    requireBoxPleat: false,
+    requireTreeMaker: false,
+  });
+});
+
+test("Rabbit Ear fold-program generation is deterministic by seed", () => {
+  const config = {
+    id: "rabbit-ear-unit",
+    family: "rabbit-ear-fold-program" as const,
+    seed: 24680,
+    numCreases: 40,
+    maxCreases: 90,
+    bucket: "small",
+  };
+  const first = generateFold(config);
+  const second = generateFold(config);
+  expect(JSON.stringify(first)).toBe(JSON.stringify(second));
+  expect(first.rabbit_ear_metadata?.generator).toBe("rabbit-ear-fold-program");
+  expect(first.rabbit_ear_metadata?.appliedFoldCount).toBeGreaterThan(0);
+  expect(first.rabbit_ear_metadata?.activeCreaseCount).toBeGreaterThanOrEqual(40);
+  expect(first.label_policy?.labelSource).toBe("rabbit-ear-fold-program");
 });
 
 test("deterministic split helper preserves recipe ratios for smoke counts", () => {

@@ -11,6 +11,7 @@ const DEFAULT_RECIPE: SyntheticRecipe = {
     "bp-studio-realistic": 0,
     "bp-studio-completed": 0,
     "treemaker-tree": 1,
+    "rabbit-ear-fold-program": 0,
   },
   complexityBuckets: [
     { name: "small", minCreases: 80, maxCreases: 180, weight: 0.35 },

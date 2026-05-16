@@ -47,6 +47,8 @@ async function main(): Promise<void> {
   const treeMakerVariantCounts: Record<string, number> = {};
   const treeMakerArchetypeCounts: Record<string, number> = {};
   const treeMakerTopologyCounts: Record<string, number> = {};
+  const rabbitEarAxiomCounts: Record<string, number> = {};
+  const rabbitEarRequestedBucketCounts: Record<string, number> = {};
   const acceptedTreeMetadata = (): NonNullable<RawManifestRow["treeMetadata"]>[] =>
     rows.map((row) => row.treeMetadata).filter((metadata): metadata is NonNullable<RawManifestRow["treeMetadata"]> => metadata !== undefined);
   const maxAttempts = args.maxAttempts ?? args.count * 40;
@@ -62,7 +64,8 @@ async function main(): Promise<void> {
       id,
       family,
       seed: sampleSeed,
-      numCreases: rng.int(bucket.minCreases, bucket.maxCreases),
+      numCreases: family === "rabbit-ear-fold-program" ? bucket.minCreases : rng.int(bucket.minCreases, bucket.maxCreases),
+      maxCreases: bucket.maxCreases,
       bucket: bucket.name,
       dense: recipe.validation.requireDense === true,
       treeMakerSampler: family === "treemaker-tree"
@@ -82,10 +85,11 @@ async function main(): Promise<void> {
           validation,
           bpMetadata: fold.bp_metadata,
           designTree: fold.design_tree,
-        realismMetadata: fold.realism_metadata,
-        treeMetadata: fold.tree_metadata,
-        treeMakerMetadata: fold.treemaker_metadata,
-      });
+          realismMetadata: fold.realism_metadata,
+          treeMetadata: fold.tree_metadata,
+          treeMakerMetadata: fold.treemaker_metadata,
+          rabbitEarMetadata: fold.rabbit_ear_metadata,
+        });
         continue;
       }
 
@@ -114,6 +118,7 @@ async function main(): Promise<void> {
         realismMetadata: fold.realism_metadata,
         treeMetadata: fold.tree_metadata,
         treeMakerMetadata: fold.treemaker_metadata,
+        rabbitEarMetadata: fold.rabbit_ear_metadata,
         completionMetadata: fold.completion_metadata,
         labelPolicy: fold.label_policy,
         bpStudioSummary: fold.bp_studio_summary,
@@ -141,6 +146,13 @@ async function main(): Promise<void> {
         treeMakerVariantCounts[fold.tree_metadata.symmetryVariant] = (treeMakerVariantCounts[fold.tree_metadata.symmetryVariant] ?? 0) + 1;
         treeMakerArchetypeCounts[fold.tree_metadata.archetype] = (treeMakerArchetypeCounts[fold.tree_metadata.archetype] ?? 0) + 1;
         treeMakerTopologyCounts[fold.tree_metadata.topology] = (treeMakerTopologyCounts[fold.tree_metadata.topology] ?? 0) + 1;
+      }
+      if (fold.rabbit_ear_metadata) {
+        for (const [axiom, count] of Object.entries(fold.rabbit_ear_metadata.axiomUsage)) {
+          rabbitEarAxiomCounts[axiom] = (rabbitEarAxiomCounts[axiom] ?? 0) + Number(count);
+        }
+        rabbitEarRequestedBucketCounts[fold.rabbit_ear_metadata.requestedBucket] =
+          (rabbitEarRequestedBucketCounts[fold.rabbit_ear_metadata.requestedBucket] ?? 0) + 1;
       }
       if (fold.realism_metadata?.score !== undefined) realismScoreValues.push(fold.realism_metadata.score);
       if (validation.metrics?.solverMs !== undefined) solverMsValues.push(validation.metrics.solverMs);
@@ -178,6 +190,8 @@ async function main(): Promise<void> {
     treeMakerVariantCounts,
     treeMakerArchetypeCounts,
     treeMakerTopologyCounts,
+    rabbitEarAxiomCounts,
+    rabbitEarRequestedBucketCounts,
     realismScore: summarizeOrNull(realismScoreValues),
     roleCounts: aggregateRoleCounts,
     gridSizeCounts,

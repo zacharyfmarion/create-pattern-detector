@@ -249,7 +249,7 @@ test("TreeMaker converter keeps the full square sheet when TreeMaker emits a use
 
 test("treemaker-tree recipe loads and requires a real external CLI for generation", async () => {
   const recipe = await loadRecipe("../../recipes/synthetic/treemaker_tree_v1.yaml");
-  expect(recipe.families).toEqual({ "bp-studio-realistic": 0, "bp-studio-completed": 0, "treemaker-tree": 1 });
+  expect(recipe.families).toEqual({ "bp-studio-realistic": 0, "bp-studio-completed": 0, "treemaker-tree": 1, "rabbit-ear-fold-program": 0 });
   expect(recipe.treeMakerSampler?.symmetryWeights).toMatchObject({
     diagonal: 0.425,
     "middle-axis": 0.425,

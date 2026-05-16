@@ -150,6 +150,43 @@ test("dense validation rejects too-simple graphs", async () => {
   expect(result.failed).toContain("dense-structure");
 });
 
+test("Rabbit Ear fold-program validation rejects missing metadata", async () => {
+  const result = await validateFold(square(), {
+    ...validation,
+    requireRabbitEarFoldProgram: true,
+  });
+  expect(result.failed).toContain("rabbit-ear-fold-program-structure");
+});
+
+test("Rabbit Ear fold-program validation rejects sparse outputs", async () => {
+  const fold: FOLDFormat = {
+    ...square(),
+    rabbit_ear_metadata: {
+      generator: "rabbit-ear-fold-program",
+      rabbitEarApi: "ear.graph.flatFold",
+      appliedFoldCount: 0,
+      attemptedFoldCount: 0,
+      axiomUsage: {},
+      activeCreaseCount: 0,
+      targetActiveCreases: 40,
+      targetActiveCreaseRange: [40, 90],
+      requestedBucket: "small",
+    },
+    label_policy: {
+      labelSource: "rabbit-ear-fold-program",
+      geometrySource: "rabbit-ear-fold-program",
+      assignmentSource: "rabbit-ear-fold-program",
+      trainingEligible: true,
+      notes: [],
+    },
+  };
+  const result = await validateFold(fold, {
+    ...validation,
+    requireRabbitEarFoldProgram: true,
+  });
+  expect(result.failed).toContain("rabbit-ear-fold-program-structure");
+});
+
 test("realistic BP validation rejects missing design metadata", async () => {
   const fold = bpFixture();
   fold.density_metadata = {

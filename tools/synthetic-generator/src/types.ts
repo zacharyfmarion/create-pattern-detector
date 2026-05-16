@@ -32,6 +32,7 @@ export type TreeMakerArchetype = "insect" | "quadruped" | "bird" | "creature" | 
 export type TreeMakerSymmetryClass = "diagonal" | "middle-axis" | "asymmetric";
 export type TreeMakerSymmetryVariant = "main-diagonal" | "anti-diagonal" | "vertical" | "horizontal" | "none";
 export type TreeMakerTopology = "radial-star" | "hubbed-limbs" | "spine-chain" | "branched-hybrid";
+export type RabbitEarFoldProgramAxiom = "axiom1" | "axiom2" | "axiom3" | "axiom4" | "axiom7";
 export type TreeMakerCreaseKind =
   | "BORDER"
   | "AXIAL"
@@ -148,6 +149,18 @@ export interface TreeMakerMetadata {
   sourceCreaseCount: number;
 }
 
+export interface RabbitEarFoldProgramMetadata {
+  generator: "rabbit-ear-fold-program";
+  rabbitEarApi: "ear.graph.flatFold";
+  appliedFoldCount: number;
+  attemptedFoldCount: number;
+  axiomUsage: Partial<Record<RabbitEarFoldProgramAxiom, number>>;
+  activeCreaseCount: number;
+  targetActiveCreases: number;
+  targetActiveCreaseRange: [number, number];
+  requestedBucket: string;
+}
+
 export interface CompletionMetadata {
   engine: string;
   version: string;
@@ -167,9 +180,9 @@ export interface CompletionMetadata {
 }
 
 export interface LabelPolicy {
-  labelSource: "compiler" | "bp-studio-raw" | "treemaker-external";
-  geometrySource: "compiler" | "bp-studio-raw" | "treemaker-external";
-  assignmentSource: "compiler" | "bp-studio-raw" | "treemaker-external";
+  labelSource: "compiler" | "bp-studio-raw" | "treemaker-external" | "rabbit-ear-fold-program";
+  geometrySource: "compiler" | "bp-studio-raw" | "treemaker-external" | "rabbit-ear-fold-program";
+  assignmentSource: "compiler" | "bp-studio-raw" | "treemaker-external" | "rabbit-ear-fold-program";
   trainingEligible: boolean;
   notes: string[];
 }
@@ -207,6 +220,7 @@ export interface FOLDFormat {
   realism_metadata?: RealismMetadata;
   tree_metadata?: TreeMetadata;
   treemaker_metadata?: TreeMakerMetadata;
+  rabbit_ear_metadata?: RabbitEarFoldProgramMetadata;
   edges_treemakerKind?: TreeMakerCreaseKind[];
   completion_metadata?: CompletionMetadata;
   label_policy?: LabelPolicy;
@@ -220,6 +234,7 @@ export const GENERATOR_FAMILIES = [
   "bp-studio-realistic",
   "bp-studio-completed",
   "treemaker-tree",
+  "rabbit-ear-fold-program",
 ] as const;
 export type GeneratorFamily = (typeof GENERATOR_FAMILIES)[number];
 export type GlobalValidationBackend = "rabbit-ear-solver" | "fold-cli";
@@ -244,6 +259,7 @@ export interface ValidationConfig {
   requireRealistic?: boolean;
   minRealismScore?: number;
   requireTreeMaker?: boolean;
+  requireRabbitEarFoldProgram?: boolean;
   requireLocalFlatFoldability?: boolean;
 }
 
@@ -272,6 +288,7 @@ export interface GenerationConfig {
   family: GeneratorFamily;
   seed: number;
   numCreases: number;
+  maxCreases?: number;
   bucket: string;
   dense?: boolean;
   denseSubfamily?: string;
@@ -326,6 +343,7 @@ export interface RawManifestRow {
   realismMetadata?: RealismMetadata;
   treeMetadata?: TreeMetadata;
   treeMakerMetadata?: TreeMakerMetadata;
+  rabbitEarMetadata?: RabbitEarFoldProgramMetadata;
   completionMetadata?: CompletionMetadata;
   labelPolicy?: LabelPolicy;
   bpStudioSummary?: BPStudioSummary;

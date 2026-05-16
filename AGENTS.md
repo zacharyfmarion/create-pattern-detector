@@ -20,8 +20,8 @@ The codebase is partly aspirational. Treat docs and comments as useful design no
 - `src/models/backbone/hrnet.py`: timm HRNet feature extractor, concatenating multiscale features at stride 4.
 - `src/models/heads/pixel_head.py`: segmentation, orientation, junction heatmap, and junction offset branches.
 - `src/data/`: FOLD parser, ground-truth map generation, datasets, transforms, and manifest-based synthetic data tooling.
-- `tools/synthetic-generator/`: tracked Bun/Rabbit Ear validation plus BP Studio-backed and TreeMaker-backed generation package. It writes canonical FOLD files plus raw manifests.
-- `recipes/synthetic/`: synthetic generation recipes. `bp_studio_realistic_v1.yaml` is BP Studio diagnostic/calibration work; `treemaker_tree_v1.yaml` is the current real external non-BP TreeMaker family. Older hand-written/fake generator recipes have been removed.
+- `tools/synthetic-generator/`: tracked Bun/Rabbit Ear validation plus BP Studio-backed, TreeMaker-backed, and quarantined Rabbit Ear fold-program generation package. It writes canonical FOLD files plus raw manifests.
+- `recipes/synthetic/`: synthetic generation recipes. `bp_studio_realistic_v1.yaml` is BP Studio diagnostic/calibration work; `treemaker_tree_v1.yaml` is the primary real external non-BP TreeMaker family; `rabbit_ear_fold_program_v1.yaml` is a strict supplemental non-BP geometry-diversity family. Older hand-written/fake generator recipes have been removed.
 - `src/postprocessing/`: pixel-to-graph extraction. `GraphExtractor` skeletonizes segmentation, finds vertices from heatmaps/skeleton/boundaries, traces candidate edges, assigns labels, and can export FOLD-like dictionaries.
 - `src/models/graph/`: graph head feature extraction, message passing layers, and edge/vertex prediction heads.
 - `scripts/training/train_pixel_head.py`: primary pixel-head training entrypoint.
@@ -91,6 +91,8 @@ Current shared datasets:
 ```text
 /Users/zacharymarion/Documents/datasets/create-pattern-detector/scraped
 /Users/zacharymarion/Documents/datasets/create-pattern-detector/synthetic/treemaker_tree_v1
+/Users/zacharymarion/Documents/datasets/create-pattern-detector/synthetic/rabbit_ear_fold_program_v1
+/Users/zacharymarion/Documents/datasets/create-pattern-detector/synthetic/cp_training_mix_v1
 ```
 
 Each worktree should access them through ignored symlinks:
@@ -98,6 +100,8 @@ Each worktree should access them through ignored symlinks:
 ```text
 data/output/scraped -> /Users/zacharymarion/Documents/datasets/create-pattern-detector/scraped
 data/generated/synthetic/treemaker_tree_v1 -> /Users/zacharymarion/Documents/datasets/create-pattern-detector/synthetic/treemaker_tree_v1
+data/generated/synthetic/rabbit_ear_fold_program_v1 -> /Users/zacharymarion/Documents/datasets/create-pattern-detector/synthetic/rabbit_ear_fold_program_v1
+data/generated/synthetic/cp_training_mix_v1 -> /Users/zacharymarion/Documents/datasets/create-pattern-detector/synthetic/cp_training_mix_v1
 ```
 
 For a new worktree, run:
@@ -105,7 +109,8 @@ For a new worktree, run:
 ```bash
 scripts/data/link_shared_scraped_data.sh
 scripts/data/link_shared_synthetic_data.sh treemaker_tree_v1
-PYTHONPATH=. python3.10 scripts/data/smoke_shared_synthetic_data.py
+scripts/data/link_shared_synthetic_data.sh cp_training_mix_v1
+PYTHONPATH=. python3.10 scripts/data/smoke_shared_synthetic_data.py --root data/generated/synthetic/cp_training_mix_v1
 ```
 
 If the dataset lives somewhere else on a machine, set one of:
@@ -113,14 +118,14 @@ If the dataset lives somewhere else on a machine, set one of:
 ```bash
 export CP_SHARED_DATA_ROOT=/path/to/create-pattern-detector-datasets
 export CP_SCRAPED_DATASET=/path/to/create-pattern-detector-datasets/scraped
-export CP_SYNTHETIC_DATASET=/path/to/create-pattern-detector-datasets/synthetic/treemaker_tree_v1
+export CP_SYNTHETIC_DATASET=/path/to/create-pattern-detector-datasets/synthetic/cp_training_mix_v1
 ```
 
 Then rerun:
 
 ```bash
 scripts/data/link_shared_scraped_data.sh
-scripts/data/link_shared_synthetic_data.sh treemaker_tree_v1
+scripts/data/link_shared_synthetic_data.sh cp_training_mix_v1
 ```
 
 The linker scripts refuse to replace a non-empty data path unless it only contains metadata such as `.DS_Store`.
@@ -218,6 +223,30 @@ python3.10 scripts/data/synthetic_fold_report.py --root /tmp/treemaker_tree_v1
 python3.10 scripts/data/merge_synthetic_fold_shards.py --out /tmp/treemaker_tree_v1_merged /tmp/treemaker_tree_v1
 ```
 
+Rabbit Ear fold-program supplement smoke:
+
+```bash
+bun run --cwd tools/synthetic-generator generate -- \
+  --recipe ../../recipes/synthetic/rabbit_ear_fold_program_v1.yaml \
+  --count 64 \
+  --out /tmp/rabbit_ear_fold_program_v1 \
+  --max-attempts 2000
+python3.10 scripts/data/synthetic_fold_report.py --root /tmp/rabbit_ear_fold_program_v1
+bun run --cwd tools/synthetic-generator folded-preview -- --root /tmp/rabbit_ear_fold_program_v1 --limit 24 --skip-failures
+```
+
+Fold-only training mix:
+
+```bash
+python3.10 scripts/data/build_synthetic_training_mix.py \
+  --out /Users/zacharymarion/Documents/datasets/create-pattern-detector/synthetic/cp_training_mix_v1 \
+  --recompute-splits \
+  /Users/zacharymarion/Documents/datasets/create-pattern-detector/synthetic/treemaker_tree_v1 \
+  /Users/zacharymarion/Documents/datasets/create-pattern-detector/synthetic/rabbit_ear_fold_program_v1
+scripts/data/link_shared_synthetic_data.sh cp_training_mix_v1
+PYTHONPATH=. python3.10 scripts/data/smoke_shared_synthetic_data.py --root data/generated/synthetic/cp_training_mix_v1
+```
+
 Code quality, once dependencies are installed:
 
 ```bash
@@ -238,7 +267,7 @@ Do not rely on the console scripts in `pyproject.toml` (`cp-train`, `cp-evaluate
 - `src/training/graph_trainer.py` currently calls the pixel model without `return_features=True` and expects a `crease_pattern` batch key. Prefer `scripts/training/train_graph_head.py` or fix the stale trainer first.
 - The postprocessing extractor is intentionally over-complete. Low precision is expected before the graph head; missing true edges are much more damaging than extra candidate edges.
 - There is no finished inference CLI that takes an arbitrary image and writes a cleaned `.fold` file. `ExtractedGraph.to_fold_format()` exists, but full image rectification, graph-head filtering, coordinate denormalization, and validation are not wired into a productized path.
-- Synthetic generation must not silently fall back to fake data. Do not reintroduce Rabbit Ear axiom/classic/single-vertex, hand-written box pleat, dense lattice, non-BP dense, or strict-completion fallback outputs as production data.
+- Production synthetic data is TreeMaker-primary, with a capped Rabbit Ear `rabbit-ear-fold-program` supplement for strict geometric diversity. Synthetic generation must not silently fall back to fake data. Do not reintroduce hand-written box pleat, dense lattice, classic spam, single-vertex spam, fake grids, or old `data/ts-generation` outputs as production data.
 - `bp-studio-realistic` samples BP Studio-style trees/layouts, runs the pinned BP Studio adapter, normalizes raw exports, and then strict validation decides acceptance. If raw exports fail local/global constraints, fix the BP Studio adapter/sampler/normalizer path or stop with an RCA.
 - `treemaker-tree` requires a real external `TREEMAKER_CLI`. The repo provides only a thin wrapper/build script; GPL TreeMaker source is cloned and built outside the repo, similar to external scraped data.
 - TreeMaker graph generation comes before Phase 3 image augmentation. Keep scale checks focused on accepted `.fold` graphs, shard merges, topology/symmetry/archetype diversity, and fold distribution reports.
