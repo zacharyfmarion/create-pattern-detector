@@ -52,6 +52,17 @@ treeMakerSampler:
     hubbed-limbs: 0.34
     spine-chain: 0.28
     branched-hybrid: 0.16
+  acceptedMix:
+    enabled: true
+    symmetryWeights:
+      diagonal: 0.425
+      middle-axis: 0.425
+      asymmetric: 0.150
+    topologyWeights:
+      radial-star: 0.18
+      hubbed-limbs: 0.30
+      spine-chain: 0.30
+      branched-hybrid: 0.22
 
 validation:
   strictGlobal: false

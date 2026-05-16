@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { generateFold } from "../src/generators.ts";
 import { loadRecipe } from "../src/recipe.ts";
+import { samplerForAcceptedTreeMakerMix } from "../src/treemaker-mix-scheduler.ts";
 import { generateTreeMakerSpec, treeMetadataFromSpec, validateTreeMakerSpec } from "../src/treemaker-sampler.ts";
 import { runTreeMakerAdapter, treeMakerOutputToFold, type TreeMakerExternalOutput } from "../src/treemaker-adapter.ts";
 import { validateFold } from "../src/validate.ts";
@@ -94,6 +95,48 @@ test("TreeMaker topology sampler favors non-radial structures for diversity", ()
   expect(counts["branched-hybrid"] ?? 0).toBeGreaterThan(35);
   expect(counts["radial-star"] ?? 0).toBeLessThan(130);
 });
+
+test("TreeMaker accepted mix scheduler forces underfilled symmetry and topology buckets", () => {
+  const sampler = {
+    symmetryWeights: { diagonal: 0.425, "middle-axis": 0.425, asymmetric: 0.15 },
+    topologyWeights: { "radial-star": 0.18, "hubbed-limbs": 0.3, "spine-chain": 0.3, "branched-hybrid": 0.22 },
+    acceptedMix: {
+      enabled: true,
+      symmetryWeights: { diagonal: 0.425, "middle-axis": 0.425, asymmetric: 0.15 },
+      topologyWeights: { "radial-star": 0.18, "hubbed-limbs": 0.3, "spine-chain": 0.3, "branched-hybrid": 0.22 },
+    },
+  };
+  const accepted = [
+    acceptedTreeMetadata("diagonal", "radial-star"),
+    acceptedTreeMetadata("diagonal", "radial-star"),
+    acceptedTreeMetadata("asymmetric", "hubbed-limbs"),
+    acceptedTreeMetadata("diagonal", "hubbed-limbs"),
+    acceptedTreeMetadata("diagonal", "hubbed-limbs"),
+    acceptedTreeMetadata("asymmetric", "branched-hybrid"),
+    acceptedTreeMetadata("diagonal", "branched-hybrid"),
+  ];
+
+  const scheduled = samplerForAcceptedTreeMakerMix(sampler, accepted, 10);
+  expect(scheduled?.symmetryWeights).toEqual({ diagonal: 0, "middle-axis": 1, asymmetric: 0 });
+  expect(scheduled?.topologyWeights).toEqual({ "radial-star": 0, "hubbed-limbs": 0, "spine-chain": 1, "branched-hybrid": 0 });
+});
+
+function acceptedTreeMetadata(symmetryClass: "diagonal" | "middle-axis" | "asymmetric", topology: "radial-star" | "hubbed-limbs" | "spine-chain" | "branched-hybrid") {
+  return {
+    generator: "treemaker-tree" as const,
+    archetype: "abstract" as const,
+    symmetryClass,
+    symmetryVariant: symmetryClass === "diagonal" ? "main-diagonal" as const : symmetryClass === "middle-axis" ? "vertical" as const : "none" as const,
+    topology,
+    rootId: "root",
+    nodeCount: 1,
+    terminalCount: 0,
+    branchDepth: 0,
+    edgeLengths: [],
+    nodes: [],
+    edges: [],
+  };
+}
 
 test("TreeMaker adapter fails clearly when no external CLI is configured", () => {
   const spec = generateTreeMakerSpec({

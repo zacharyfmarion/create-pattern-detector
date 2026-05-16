@@ -5,6 +5,7 @@ import { assignmentCounts, countCreases, relativePath, roleCounts, splitForIndex
 import { generateFold } from "./generators.ts";
 import { SeededRandom } from "./random.ts";
 import { loadRecipe } from "./recipe.ts";
+import { samplerForAcceptedTreeMakerMix } from "./treemaker-mix-scheduler.ts";
 import type { ComplexityBucket, GenerationConfig, GeneratorFamily, RawManifestRow } from "./types.ts";
 import { preflightValidation, validateFold } from "./validate.ts";
 
@@ -46,6 +47,8 @@ async function main(): Promise<void> {
   const treeMakerVariantCounts: Record<string, number> = {};
   const treeMakerArchetypeCounts: Record<string, number> = {};
   const treeMakerTopologyCounts: Record<string, number> = {};
+  const acceptedTreeMetadata = (): NonNullable<RawManifestRow["treeMetadata"]>[] =>
+    rows.map((row) => row.treeMetadata).filter((metadata): metadata is NonNullable<RawManifestRow["treeMetadata"]> => metadata !== undefined);
   const maxAttempts = args.maxAttempts ?? args.count * 40;
   let attempts = 0;
 
@@ -62,7 +65,9 @@ async function main(): Promise<void> {
       numCreases: rng.int(bucket.minCreases, bucket.maxCreases),
       bucket: bucket.name,
       dense: recipe.validation.requireDense === true,
-      treeMakerSampler: recipe.treeMakerSampler,
+      treeMakerSampler: family === "treemaker-tree"
+        ? samplerForAcceptedTreeMakerMix(recipe.treeMakerSampler, acceptedTreeMetadata(), args.count)
+        : recipe.treeMakerSampler,
     };
 
     try {
@@ -181,6 +186,7 @@ async function main(): Promise<void> {
     rabbitEarStrictPassRate: recipe.validation.strictGlobal
       ? rows.filter((row) => row.validation.passed.includes("rabbit-ear-solver")).length / rows.length
       : null,
+    treeMakerAcceptedMix: recipe.treeMakerSampler?.acceptedMix,
     rejectionCounts,
     vertices: summarize(rows.map((row) => row.vertices)),
     edges: summarize(rows.map((row) => row.edges)),

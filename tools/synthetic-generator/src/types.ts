@@ -285,6 +285,14 @@ export interface TreeMakerSamplerConfig {
   diagonalWeights?: Partial<Record<Extract<TreeMakerSymmetryVariant, "main-diagonal" | "anti-diagonal">, number>>;
   archetypeWeights?: Partial<Record<TreeMakerArchetype, number>>;
   topologyWeights?: Partial<Record<TreeMakerTopology, number>>;
+  acceptedMix?: TreeMakerAcceptedMixConfig;
+}
+
+export interface TreeMakerAcceptedMixConfig {
+  enabled?: boolean;
+  symmetryWeights?: Partial<Record<TreeMakerSymmetryClass, number>>;
+  archetypeWeights?: Partial<Record<TreeMakerArchetype, number>>;
+  topologyWeights?: Partial<Record<TreeMakerTopology, number>>;
 }
 
 export interface ValidationResult {
