@@ -16,7 +16,7 @@ import numpy as np
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 
-from src.data.cpline_augmentations import AUGMENT_PROFILES
+from src.data.cpline_augmentations import AUGMENT_PROFILES, NON_IDENTITY_SQUARE_SYMMETRIES
 from src.data.cpline_dataset import load_manifest_records, render_cpline_sample, resolve_fold_path
 from src.data.fold_parser import FOLDParser
 
@@ -35,7 +35,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--profiles",
         type=str,
-        default="line-style,dark-mode,print-light,print-medium,photo-light",
+        default="square-symmetry,line-style,dark-mode,print-light,print-medium,photo-light",
         help="Comma-separated profiles or 'all'.",
     )
     parser.add_argument("--num-samples", type=int, default=3)
@@ -82,7 +82,8 @@ def main() -> None:
                     line_width=_line_width(args.image_size),
                     augment_profile=profile,
                     seed=seed,
-                    style_variant=variant,
+                    style_variant=variant if profile == "dark-mode" else None,
+                    square_symmetry=variant if profile == "square-symmetry" else None,
                 )
                 rows.append(
                     {
@@ -120,6 +121,8 @@ def _select_records(manifest: Path, *, count: int, max_edges: int | None) -> lis
 
 
 def _variants_for_profile(profile: str) -> list[str | None]:
+    if profile == "square-symmetry":
+        return list(NON_IDENTITY_SQUARE_SYMMETRIES)
     if profile == "dark-mode":
         return ["dark-no-grid", "dark-grid", "dark-gray", "dark-bright"]
     return [None]
@@ -151,16 +154,26 @@ def _write_contact_sheet(rows: list[dict[str, Any]], *, profile: str, output_pat
             _assignment_overlay(augmented.image, augmented.assignment),
             _graph_overlay(augmented.image, augmented.pixel_vertices, augmented.edges, augmented.assignments),
         ]
-        row_label = f"{row['record']['id']}"
+        row_label = str(row["record"]["id"])
         if row["variant"]:
-            row_label += f"\n{row['variant']}"
+            row_label = f"{row['variant']}\n{row_label}"
         for col_idx, image in enumerate(images):
             axes[row_idx, col_idx].imshow(image)
             axes[row_idx, col_idx].axis("off")
             if row_idx == 0:
                 axes[row_idx, col_idx].set_title(columns[col_idx], fontsize=10)
             if col_idx == 0:
-                axes[row_idx, col_idx].set_ylabel(row_label, fontsize=8)
+                axes[row_idx, col_idx].text(
+                    0.02,
+                    0.98,
+                    row_label,
+                    transform=axes[row_idx, col_idx].transAxes,
+                    va="top",
+                    ha="left",
+                    fontsize=7,
+                    color="black",
+                    bbox={"facecolor": "white", "alpha": 0.72, "edgecolor": "none", "pad": 1.5},
+                )
     fig.suptitle(f"CPLine Augmentations: {profile}", fontsize=13, y=0.995)
     fig.tight_layout(rect=(0, 0, 1, 0.985))
     fig.savefig(output_path, dpi=140, bbox_inches="tight")

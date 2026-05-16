@@ -159,6 +159,7 @@ def render_cpline_sample(
     seed: int | None = None,
     rng: np.random.Generator | None = None,
     style_variant: str | None = None,
+    square_symmetry: str | None = None,
     base_pixel_vertices: np.ndarray | None = None,
 ) -> CplineSample:
     sample = render_augmented_cpline_sample(
@@ -171,6 +172,7 @@ def render_cpline_sample(
         seed=seed,
         rng=rng,
         style_variant=style_variant,
+        square_symmetry=square_symmetry,
         base_pixel_vertices=base_pixel_vertices,
     )
 

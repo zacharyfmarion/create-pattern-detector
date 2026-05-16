@@ -7,6 +7,7 @@ import numpy as np
 import torch
 
 from src.data.cpline_dataset import CplineFoldDataset, render_cpline_sample, render_input_image
+from src.data.cpline_augmentations import NON_IDENTITY_SQUARE_SYMMETRIES
 from src.data.fold_parser import CreasePattern, FOLDParser
 from src.models import CPLineNet
 from src.vectorization import cpline_outputs_to_evidence
@@ -37,6 +38,27 @@ def simple_mv_cp() -> CreasePattern:
     return CreasePattern(
         vertices=cp.vertices.copy(),
         edges=cp.edges.copy(),
+        assignments=np.array([2, 2, 2, 2, 0, 1, 0, 1], dtype=np.int8),
+    )
+
+
+def asymmetric_mv_cp() -> CreasePattern:
+    return CreasePattern(
+        vertices=np.array(
+            [
+                [0.0, 0.0],
+                [1.0, 0.0],
+                [1.0, 1.0],
+                [0.0, 1.0],
+                [0.23, 0.36],
+                [0.82, 0.58],
+            ],
+            dtype=np.float32,
+        ),
+        edges=np.array(
+            [[0, 1], [1, 2], [2, 3], [3, 0], [0, 4], [4, 5], [5, 2], [1, 5]],
+            dtype=np.int64,
+        ),
         assignments=np.array([2, 2, 2, 2, 0, 1, 0, 1], dtype=np.int8),
     )
 
@@ -78,6 +100,7 @@ def test_cpline_dark_mode_preserves_geometry_targets():
         augment_profile="dark-mode",
         seed=11,
         style_variant="dark-grid",
+        square_symmetry="identity",
     )
 
     assert dark.image.mean() < clean.image.mean()
@@ -98,6 +121,7 @@ def test_cpline_dark_mode_grid_is_not_line_target():
         augment_profile="dark-mode",
         seed=12,
         style_variant="dark-grid",
+        square_symmetry="identity",
     )
     background = clean.line_prob < 0.01
     changed_background = np.any(dark.image[background] != clean.image[background], axis=1)
@@ -105,6 +129,29 @@ def test_cpline_dark_mode_grid_is_not_line_target():
     assert dark.metadata["grid_enabled"] is True
     assert np.count_nonzero(changed_background) > 0
     assert np.array_equal(dark.line_prob, clean.line_prob)
+
+
+def test_cpline_square_symmetry_transforms_vertices_and_targets():
+    cp = asymmetric_mv_cp()
+    clean = render_cpline_sample(cp, image_size=128, padding=8, line_width=2, augment_profile="clean")
+    rotated = render_cpline_sample(
+        cp,
+        image_size=128,
+        padding=8,
+        line_width=2,
+        augment_profile="square-symmetry",
+        square_symmetry="rotate90",
+        seed=3,
+    )
+    expected_vertices = np.stack([127.0 - clean.pixel_vertices[:, 1], clean.pixel_vertices[:, 0]], axis=1)
+
+    assert rotated.metadata["selected_profile"] == "square-symmetry"
+    assert rotated.metadata["square_symmetry"] == "rotate90"
+    assert rotated.metadata["geometry_applied"] is True
+    assert np.allclose(rotated.pixel_vertices, expected_vertices, atol=1e-4)
+    assert np.array_equal(rotated.assignments, clean.assignments)
+    assert not np.array_equal(rotated.line_prob, clean.line_prob)
+    assert rotated.junction_mask.sum() == clean.junction_mask.sum()
 
 
 def test_cpline_photo_light_geometric_augmentation_recomputes_targets():
@@ -130,7 +177,15 @@ def test_cpline_seeded_augmentation_is_reproducible():
 
 def test_cpline_monochrome_style_does_not_hallucinate_mv_targets():
     cp = simple_mv_cp()
-    sample = render_cpline_sample(cp, image_size=96, padding=8, line_width=2, augment_profile="line-style", seed=0)
+    sample = render_cpline_sample(
+        cp,
+        image_size=96,
+        padding=8,
+        line_width=2,
+        augment_profile="line-style",
+        seed=0,
+        square_symmetry="identity",
+    )
 
     assert sample.metadata["params"]["palette_kind"] == "monochrome"
     assert sample.metadata["params"]["assignment_target_mode"] == "mv_to_unassigned"
@@ -189,6 +244,39 @@ def test_cpline_augmentation_visualization_script_smoke(tmp_path):
     data = json.loads(sidecar.read_text(encoding="utf-8"))
     assert len(data["rows"]) == 4
     assert any(row["augmentation"]["grid_enabled"] for row in data["rows"])
+
+
+def test_cpline_square_symmetry_visualization_script_smoke(tmp_path):
+    manifest = _write_manifest(tmp_path, count=1)
+    output_dir = tmp_path / "visualizations"
+    env = {**os.environ, "MPLBACKEND": "Agg"}
+    subprocess.run(
+        [
+            sys.executable,
+            "scripts/visualize/cpline_augmentations.py",
+            "--manifest",
+            str(manifest),
+            "--profiles",
+            "square-symmetry",
+            "--num-samples",
+            "1",
+            "--max-edges",
+            "20",
+            "--image-size",
+            "96",
+            "--output-dir",
+            str(output_dir),
+        ],
+        check=True,
+        env=env,
+    )
+
+    assert (output_dir / "square-symmetry" / "contact_sheet_96.png").exists()
+    sidecar = output_dir / "square-symmetry" / "contact_sheet_96.json"
+    assert sidecar.exists()
+    data = json.loads(sidecar.read_text(encoding="utf-8"))
+    assert len(data["rows"]) == len(NON_IDENTITY_SQUARE_SYMMETRIES)
+    assert {row["augmentation"]["square_symmetry"] for row in data["rows"]} == set(NON_IDENTITY_SQUARE_SYMMETRIES)
 
 
 def test_cpline_training_script_dark_mode_smoke(tmp_path):

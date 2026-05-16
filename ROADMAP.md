@@ -324,14 +324,47 @@ Tasks:
 - Implement CPLineNet heads with separate geometry and assignment targets.
 - Train first on clean renders, then progressively add CPLine-specific augmentations.
 - Add render-time augmentation profiles before larger local/RunPod training:
-  `line-style`, `dark-mode`, `print-light`, `print-medium`, and `photo-light`.
+  `square-symmetry`, `line-style`, `dark-mode`, `print-light`,
+  `print-medium`, and `photo-light`.
 - Keep augmentation vector-first: apply geometric perturbations to graph vertices,
   then render matching input images and dense CPLineNet labels from that geometry.
+- Include exact non-identity square-domain rotations/flips: 90/180/270-degree
+  rotation, horizontal/vertical flip, and both diagonal reflections. Preserve
+  M/V labels because the rendered colors/line assignments move with the
+  transformed graph.
 - Treat dark-mode grids as visual background noise, not crease evidence.
 - Add visual augmentation contact sheets and JSON sidecars before scaling image size.
 - Run local visual/performance gates for augmentations before paid GPU training.
+- Add configurable augmentation mixes so curriculum stages can sample only the
+  approved profiles for that stage instead of jumping straight to full `mixed`.
 - Evaluate through the full vectorizer, not only pixel IoU.
 - Cache predictions and graph-builder intermediate artifacts for reproducibility.
+
+Current local finding:
+
+- A 384px tiny-backbone `mixed` augmentation gate is trainable, but full mixed
+  augmentation is too aggressive as the next scaling step.
+- Clean validation reached edge F1 ~= 0.714 and mixed validation reached edge
+  F1 ~= 0.709 after 800 local MPS steps, with 100% structural validity.
+- The main failure mode is line overproduction, especially when dark grid
+  backgrounds are introduced before the line head is stable.
+
+Augmentation curriculum before larger sizes:
+
+1. `clean + square-symmetry + line-style + print-light`: establish robustness
+   to the square dihedral symmetries, line weight, color, antialiasing, mild
+   blur/noise, and paper tone.
+2. Add `print-medium` and `photo-light`: introduce stronger print/photo
+   variation and mild geometric perturbation after clean validation remains
+   stable.
+3. Add `dark-mode` without grid: teach dark backgrounds and bright M/V colors.
+4. Add `dark-mode` with grid at low probability: grid is background noise and
+   must not produce line or junction targets.
+5. Only then use the full `mixed` profile for longer local or RunPod training.
+
+Do not add occlusion augmentation for V1. It requires an explicit completion
+contract and confidence reporting so the model does not learn to hallucinate
+hidden geometry.
 
 Exit criteria on held-out synthetic renders:
 
@@ -339,6 +372,8 @@ Exit criteria on held-out synthetic renders:
 - Noisy synthetic edge recall >= 90%.
 - Augmentation contact sheets are visually approved at 256 and 384 resolution.
 - Dark-mode grid pixels are not included in line or junction targets.
+- Each curriculum stage passes a 384px local graph-eval gate before moving to
+  the next stage.
 - Final valid FOLD rate >= 90%.
 - Median vertex localization error <= 2 px at 1024 resolution.
 

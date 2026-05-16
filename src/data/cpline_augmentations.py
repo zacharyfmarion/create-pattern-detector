@@ -21,6 +21,7 @@ from src.vectorization.evidence import render_vectorizer_evidence_from_pixels
 
 AUGMENT_PROFILES = (
     "clean",
+    "square-symmetry",
     "line-style",
     "dark-mode",
     "print-light",
@@ -28,6 +29,17 @@ AUGMENT_PROFILES = (
     "photo-light",
     "mixed",
 )
+SQUARE_SYMMETRIES = (
+    "identity",
+    "rotate90",
+    "rotate180",
+    "rotate270",
+    "flip-horizontal",
+    "flip-vertical",
+    "transpose",
+    "anti-transpose",
+)
+NON_IDENTITY_SQUARE_SYMMETRIES = tuple(symmetry for symmetry in SQUARE_SYMMETRIES if symmetry != "identity")
 
 ASSIGNMENT_RGB = {
     0: (220, 40, 40),
@@ -84,6 +96,7 @@ def render_augmented_cpline_sample(
     seed: int | None = None,
     rng: np.random.Generator | None = None,
     style_variant: str | None = None,
+    square_symmetry: str | None = None,
     base_pixel_vertices: np.ndarray | None = None,
 ) -> AugmentedCplineSample:
     """Render an augmented CPLineNet input and matching dense labels."""
@@ -98,12 +111,18 @@ def render_augmented_cpline_sample(
         line_width=line_width,
         rng=local_rng,
         style_variant=style_variant,
+        square_symmetry=square_symmetry,
     )
     if base_pixel_vertices is None:
         pixel_vertices, _ = transform_coords(cp.vertices, image_size=image_size, padding=padding)
     else:
         pixel_vertices = np.asarray(base_pixel_vertices, dtype=np.float32)
     transformed_vertices = _apply_geometry(pixel_vertices, params["homography"])
+    transformed_vertices = _apply_square_symmetry(
+        transformed_vertices,
+        image_size=image_size,
+        symmetry=params["square_symmetry"],
+    )
     target_assignments = _target_assignments(cp.assignments, params)
 
     target_line_width = int(params["target_line_width"])
@@ -139,6 +158,7 @@ def render_augmented_cpline_sample(
         "profile": profile,
         "selected_profile": selected_profile,
         "style_variant": style_variant,
+        "square_symmetry": params["square_symmetry"],
         "seed": seed,
         "render_ms": (perf_counter() - start) * 1000.0,
         "line_width": int(params["line_width"]),
@@ -169,8 +189,18 @@ def render_augmented_cpline_sample(
 def _select_profile(profile: str, rng: np.random.Generator) -> str:
     if profile != "mixed":
         return profile
-    profiles = np.array(["clean", "line-style", "dark-mode", "print-light", "print-medium", "photo-light"])
-    weights = np.array([0.12, 0.22, 0.16, 0.24, 0.20, 0.06], dtype=np.float64)
+    profiles = np.array(
+        [
+            "clean",
+            "square-symmetry",
+            "line-style",
+            "dark-mode",
+            "print-light",
+            "print-medium",
+            "photo-light",
+        ]
+    )
+    weights = np.array([0.08, 0.10, 0.20, 0.14, 0.24, 0.18, 0.06], dtype=np.float64)
     return str(rng.choice(profiles, p=weights / weights.sum()))
 
 
@@ -181,6 +211,7 @@ def _sample_render_params(
     line_width: int,
     rng: np.random.Generator,
     style_variant: str | None,
+    square_symmetry: str | None,
 ) -> dict[str, Any]:
     params: dict[str, Any] = {
         "profile": profile,
@@ -202,8 +233,13 @@ def _sample_render_params(
         "geometry_applied": False,
         "homography": np.eye(3, dtype=np.float32),
         "assignment_target_mode": "original",
+        "square_symmetry": _select_square_symmetry(profile, rng, square_symmetry),
     }
     if profile == "clean":
+        return params
+    if params["square_symmetry"] != "identity":
+        params["geometry_applied"] = True
+    if profile == "square-symmetry":
         return params
     if profile == "line-style":
         _apply_line_style_params(params, rng, line_width=line_width)
@@ -297,6 +333,20 @@ def _target_assignments(assignments: np.ndarray, params: dict[str, Any]) -> np.n
     return result
 
 
+def _select_square_symmetry(
+    profile: str,
+    rng: np.random.Generator,
+    requested: str | None,
+) -> str:
+    if profile == "clean":
+        return "identity"
+    if requested is not None:
+        if requested not in SQUARE_SYMMETRIES:
+            raise ValueError(f"Unsupported square_symmetry: {requested}")
+        return requested
+    return str(rng.choice(NON_IDENTITY_SQUARE_SYMMETRIES))
+
+
 def _apply_dark_mode_params(
     params: dict[str, Any],
     rng: np.random.Generator,
@@ -347,6 +397,37 @@ def _apply_geometry(vertices: np.ndarray, homography: np.ndarray) -> np.ndarray:
     transformed = homogeneous @ homography.T
     denom = np.maximum(np.abs(transformed[:, 2:3]), 1e-6)
     return (transformed[:, :2] / denom).astype(np.float32)
+
+
+def _apply_square_symmetry(
+    vertices: np.ndarray,
+    *,
+    image_size: int,
+    symmetry: str,
+) -> np.ndarray:
+    vertices = np.asarray(vertices, dtype=np.float32)
+    x = vertices[:, 0]
+    y = vertices[:, 1]
+    max_coord = float(image_size - 1)
+    if symmetry == "identity":
+        transformed = np.stack([x, y], axis=1)
+    elif symmetry == "rotate90":
+        transformed = np.stack([max_coord - y, x], axis=1)
+    elif symmetry == "rotate180":
+        transformed = np.stack([max_coord - x, max_coord - y], axis=1)
+    elif symmetry == "rotate270":
+        transformed = np.stack([y, max_coord - x], axis=1)
+    elif symmetry == "flip-horizontal":
+        transformed = np.stack([max_coord - x, y], axis=1)
+    elif symmetry == "flip-vertical":
+        transformed = np.stack([x, max_coord - y], axis=1)
+    elif symmetry == "transpose":
+        transformed = np.stack([y, x], axis=1)
+    elif symmetry == "anti-transpose":
+        transformed = np.stack([max_coord - y, max_coord - x], axis=1)
+    else:
+        raise ValueError(f"Unsupported square_symmetry: {symmetry}")
+    return transformed.astype(np.float32)
 
 
 def _render_input_image_from_pixels(

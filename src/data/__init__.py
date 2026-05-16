@@ -7,6 +7,8 @@ __all__ = [
     "CreasePatternDataset",
     "CplineFoldDataset",
     "AUGMENT_PROFILES",
+    "SQUARE_SYMMETRIES",
+    "NON_IDENTITY_SQUARE_SYMMETRIES",
     "render_augmented_cpline_sample",
 ]
 
@@ -29,7 +31,12 @@ def __getattr__(name: str):
         from .cpline_dataset import CplineFoldDataset
 
         return CplineFoldDataset
-    if name in {"AUGMENT_PROFILES", "render_augmented_cpline_sample"}:
+    if name in {
+        "AUGMENT_PROFILES",
+        "SQUARE_SYMMETRIES",
+        "NON_IDENTITY_SQUARE_SYMMETRIES",
+        "render_augmented_cpline_sample",
+    }:
         from . import cpline_augmentations
 
         return getattr(cpline_augmentations, name)
