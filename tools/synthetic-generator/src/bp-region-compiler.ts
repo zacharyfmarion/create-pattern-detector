@@ -960,13 +960,39 @@ function bodyPortMapForCorridors(layout: CompletionLayout, endpoints: Map<string
   for (const list of grouped.values()) {
     list.sort((a, b) => bodySideSortCoordinate(a.other, a.side) - bodySideSortCoordinate(b.other, b.side) ||
       a.key.localeCompare(b.key));
+    const occupied: CompletionPoint[] = [];
     for (const [index, item] of list.entries()) {
       const basePort = bodyPortPoint(item.body, item.side, index, list.length, pitch);
       const flapClamped = clampBodyPortAwayFromFlapAllocation(basePort, item.corridor, item.other, pitch);
-      result.set(item.key, clampBodyPortAwayFromBodyRegions(flapClamped, item.corridor, item.body, item.other, bodies, pitch));
+      const bodyClamped = clampBodyPortAwayFromBodyRegions(flapClamped, item.corridor, item.body, item.other, bodies, pitch);
+      const separated = separateBodySidePort(bodyClamped, item.body.rect!, item.side, occupied, pitch);
+      occupied.push(separated);
+      result.set(item.key, separated);
     }
   }
   return result;
+}
+
+function separateBodySidePort(
+  port: CompletionPoint,
+  rect: RegionRect,
+  side: BodyPortSide,
+  occupied: CompletionPoint[],
+  pitch: number,
+): CompletionPoint {
+  const minSpacing = pitch * 2 - 1e-9;
+  const offsets = [0, 1, -1, 2, -2, 3, -3, 4, -4].map((scale) => scale * pitch);
+  for (const offset of offsets) {
+    const candidate = side === "left" || side === "right"
+      ? point(port.x, clamp(snapToStep(port.y + offset, pitch), rect.y1, rect.y2))
+      : point(clamp(snapToStep(port.x + offset, pitch), rect.x1, rect.x2), port.y);
+    const coordinate = side === "left" || side === "right" ? candidate.y : candidate.x;
+    const farEnough = occupied.every((item) =>
+      Math.abs(coordinate - (side === "left" || side === "right" ? item.y : item.x)) >= minSpacing
+    );
+    if (farEnough) return candidate;
+  }
+  return port;
 }
 
 function bodyPortKey(corridorId: string, bodyId: string): string {
