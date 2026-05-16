@@ -67,7 +67,10 @@ test("regularized simple quadruped corridors avoid flap allocation interiors", (
 
   expect(candidate.validity).toBe("candidate-complete");
   expect(candidate.rejectionReasons.filter((reason) => reason.startsWith("flap-allocation-overlap"))).toHaveLength(0);
-  expect(candidate.layout.pleatStrips).toHaveLength(7);
+  expect(candidate.layout.pleatStrips.length).toBeGreaterThan(7);
+  expect(candidate.layout.pleatStrips.every((strip) =>
+    (strip.rect.x2 - strip.rect.x1) > 0 && (strip.rect.y2 - strip.rect.y1) > 0
+  )).toBe(true);
 });
 
 test("BP Studio layout graph derives internal hubs from optimized BP graph only", () => {

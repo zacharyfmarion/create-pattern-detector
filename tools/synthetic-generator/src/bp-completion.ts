@@ -183,6 +183,7 @@ export function regularizeBPStudioLayout(
     ? spec.layout.bodies.map((body) => body.nodeId)
     : graph?.nodes.filter((node) => node.kind === "hub").map((node) => node.nodeId) ?? [];
   const bodyHalfSize = 1 / gridSize;
+  const corridorClearance = 2 / gridSize;
   const bodies = bodyNodeIds.flatMap((nodeId): CompletionRegion[] => {
     const graphNode = graphNodeById.get(nodeId);
     const sourceBody = spec.layout.bodies.find((body) => body.nodeId === nodeId);
@@ -191,7 +192,7 @@ export function regularizeBPStudioLayout(
       y: sourceBody.center.y / spec.sheet.height,
     } : undefined);
     if (!rawCenter) return [];
-    const center = keepPointOutsideTerminalAllocations(rawCenter, terminals, gridSize, bodyHalfSize);
+    const center = keepPointOutsideTerminalAllocations(rawCenter, terminals, gridSize, bodyHalfSize + corridorClearance);
     return [{
       id: nodeId,
       kind: "body",

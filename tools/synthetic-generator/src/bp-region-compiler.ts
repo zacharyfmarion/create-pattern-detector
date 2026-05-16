@@ -38,6 +38,9 @@ interface CorridorEndpoint {
   rect?: RegionRect;
 }
 
+type BodyPortSide = "left" | "right" | "top" | "bottom";
+type BodyPortMap = Map<string, CompletionPoint>;
+
 export type RegionFixtureName = "two-flap-stretch" | "three-flap-relay" | "five-flap-uniaxial" | "insect-lite";
 
 export interface CompileRegionCandidateOptions {
@@ -57,16 +60,17 @@ export function fixtureRegionLayout(name: RegionFixtureName): RegionLayout {
 
 export function regionLayoutFromCompletionLayout(layout: CompletionLayout): RegionLayout {
   const pitch = pleatPitchForGrid(layout.gridSize);
-  const bodies = layout.regions.filter((region) => region.kind === "body").map((region): BodyPanelRegion => {
+  const baseBodies = layout.regions.filter((region) => region.kind === "body").map((region): BodyPanelRegion => {
     const rect = snapRectToStep({ x1: region.x1, y1: region.y1, x2: region.x2, y2: region.y2 }, pitch);
     return { id: region.id, rect, center: rectCenter(rect) };
   });
-  const primaryBody = bodies[0] ?? {
+  const primaryBody = baseBodies[0] ?? {
     id: "implicit-body",
     rect: { x1: 0.375, y1: 0.375, x2: 0.625, y2: 0.625 },
     center: { x: 0.5, y: 0.5 },
   };
   const flaps = layout.terminals.map((terminal) => flapRegion(terminal, layout.gridSize));
+  const bodies = expandBodyPanelsForCorridorPorts(layout, flaps, baseBodies.length ? baseBodies : [primaryBody]);
   const pleatStrips = layout.corridors.length
     ? corridorPleatStripRegions(layout, flaps, bodies.length ? bodies : [primaryBody])
     : flaps.map((flap, index) => pleatStripRegion(flap, primaryBody, layout, index));
@@ -347,11 +351,41 @@ function pleatLaneCount(strip: PleatStripRegion): number {
   return Math.max(1, count);
 }
 
-function corridorPleatStripRegions(
+function expandBodyPanelsForCorridorPorts(
   layout: CompletionLayout,
   flaps: FlapRegion[],
   bodies: BodyPanelRegion[],
-): PleatStripRegion[] {
+): BodyPanelRegion[] {
+  if (!layout.corridors.length) return bodies;
+  const pitch = pleatPitchForGrid(layout.gridSize);
+  const corridorWidth = Math.max(pitch * 2, 2 / layout.gridSize);
+  const endpoints = endpointMap(flaps, bodies);
+  const counts = new Map<string, Record<BodyPortSide, number>>();
+  for (const corridor of layout.corridors) {
+    const from = endpoints.get(corridor.from);
+    const to = endpoints.get(corridor.to);
+    if (!from || !to) continue;
+    for (const [body, other] of [[from, to], [to, from]] as const) {
+      if (body.kind !== "body" || !body.rect) continue;
+      const side = bodyPortSideForCorridor(corridor, body, other, pitch);
+      const record = counts.get(body.id) ?? { left: 0, right: 0, top: 0, bottom: 0 };
+      record[side] += 1;
+      counts.set(body.id, record);
+    }
+  }
+  return bodies.map((body) => {
+    const record = counts.get(body.id);
+    if (!record) return body;
+    const verticalPorts = Math.max(record.left, record.right, 1);
+    const horizontalPorts = Math.max(record.top, record.bottom, 1);
+    const width = Math.max(body.rect.x2 - body.rect.x1, horizontalPorts * corridorWidth);
+    const height = Math.max(body.rect.y2 - body.rect.y1, verticalPorts * corridorWidth);
+    const rect = snapRectToStep(rectAround(body.center, width, height), pitch);
+    return { ...body, rect, center: rectCenter(rect) };
+  });
+}
+
+function endpointMap(flaps: FlapRegion[], bodies: BodyPanelRegion[]): Map<string, CorridorEndpoint> {
   const endpoints = new Map<string, CorridorEndpoint>();
   for (const flap of flaps) {
     endpoints.set(flap.terminalId, {
@@ -364,31 +398,163 @@ function corridorPleatStripRegions(
   }
   for (const body of bodies) endpoints.set(body.id, { id: body.id, center: body.center, kind: "body", rect: body.rect });
   if (!endpoints.has("body") && bodies[0]) endpoints.set("body", { id: "body", center: bodies[0].center, kind: "body", rect: bodies[0].rect });
+  return endpoints;
+}
+
+function corridorPleatStripRegions(
+  layout: CompletionLayout,
+  flaps: FlapRegion[],
+  bodies: BodyPanelRegion[],
+): PleatStripRegion[] {
+  const endpoints = endpointMap(flaps, bodies);
+  const bodyPorts = bodyPortMapForCorridors(layout, endpoints);
 
   return layout.corridors.flatMap((corridor, index) => {
     const from = endpoints.get(corridor.from);
     const to = endpoints.get(corridor.to);
     if (!from || !to) return [];
-    return [corridorPleatStripRegion(corridor, from, to, layout.gridSize, index)];
+    return corridorPleatStripRegionsForCorridor(corridor, from, to, layout.gridSize, index, bodyPorts);
   });
 }
 
-function corridorPleatStripRegion(
+function bodyPortMapForCorridors(layout: CompletionLayout, endpoints: Map<string, CorridorEndpoint>): BodyPortMap {
+  const pitch = pleatPitchForGrid(layout.gridSize);
+  const grouped = new Map<string, Array<{
+    key: string;
+    body: CorridorEndpoint;
+    other: CorridorEndpoint;
+    corridor: CompletionCorridor;
+    side: BodyPortSide;
+  }>>();
+  for (const corridor of layout.corridors) {
+    const from = endpoints.get(corridor.from);
+    const to = endpoints.get(corridor.to);
+    if (!from || !to) continue;
+    for (const [body, other] of [[from, to], [to, from]] as const) {
+      if (body.kind !== "body" || !body.rect) continue;
+      const side = bodyPortSideForCorridor(corridor, body, other, pitch);
+      const groupKey = `${body.id}:${side}`;
+      const list = grouped.get(groupKey) ?? [];
+      list.push({ key: bodyPortKey(corridor.id, body.id), body, other, corridor, side });
+      grouped.set(groupKey, list);
+    }
+  }
+
+  const result: BodyPortMap = new Map();
+  for (const list of grouped.values()) {
+    list.sort((a, b) => bodySideSortCoordinate(a.other, a.side) - bodySideSortCoordinate(b.other, b.side) ||
+      a.key.localeCompare(b.key));
+    for (const [index, item] of list.entries()) {
+      const basePort = bodyPortPoint(item.body, item.side, index, list.length, pitch);
+      result.set(item.key, clampBodyPortAwayFromFlapAllocation(basePort, item.corridor, item.other, pitch));
+    }
+  }
+  return result;
+}
+
+function bodyPortKey(corridorId: string, bodyId: string): string {
+  return `${corridorId}:${bodyId}`;
+}
+
+function bodyPortSideForCorridor(
+  corridor: CompletionCorridor,
+  body: CorridorEndpoint,
+  other: CorridorEndpoint,
+  pitch: number,
+): BodyPortSide {
+  const rect = body.rect!;
+  const lane = snapToStep(corridor.coordinate, pitch);
+  if (corridor.orientation === "vertical") {
+    if (lane < rect.x1 - 1e-9) return "left";
+    if (lane > rect.x2 + 1e-9) return "right";
+    return other.center.y >= body.center.y ? "top" : "bottom";
+  }
+  if (lane < rect.y1 - 1e-9) return "bottom";
+  if (lane > rect.y2 + 1e-9) return "top";
+  return other.center.x >= body.center.x ? "right" : "left";
+}
+
+function bodySideSortCoordinate(endpoint: CorridorEndpoint, side: BodyPortSide): number {
+  return side === "left" || side === "right" ? endpoint.center.y : endpoint.center.x;
+}
+
+function bodyPortPoint(
+  body: CorridorEndpoint,
+  side: BodyPortSide,
+  index: number,
+  count: number,
+  pitch: number,
+): CompletionPoint {
+  const rect = body.rect!;
+  const fraction = (index + 1) / (count + 1);
+  if (side === "left" || side === "right") {
+    const y = snapToStep(rect.y1 + (rect.y2 - rect.y1) * fraction, pitch);
+    return point(side === "left" ? rect.x1 : rect.x2, clamp(y, rect.y1, rect.y2));
+  }
+  const x = snapToStep(rect.x1 + (rect.x2 - rect.x1) * fraction, pitch);
+  return point(clamp(x, rect.x1, rect.x2), side === "bottom" ? rect.y1 : rect.y2);
+}
+
+function clampBodyPortAwayFromFlapAllocation(
+  port: CompletionPoint,
+  corridor: CompletionCorridor,
+  other: CorridorEndpoint,
+  pitch: number,
+): CompletionPoint {
+  if (other.kind !== "flap" || !other.allocationRadius) return port;
+  const halfWidth = pitch;
+  if (corridor.orientation === "vertical") {
+    const perpendicular = Math.abs(snapToStep(corridor.coordinate, pitch) - other.center.x);
+    const along = Math.sqrt(Math.max(0, other.allocationRadius ** 2 - perpendicular ** 2));
+    if (other.center.y >= port.y) return point(port.x, Math.min(port.y, other.center.y - along - halfWidth));
+    return point(port.x, Math.max(port.y, other.center.y + along + halfWidth));
+  }
+  const perpendicular = Math.abs(snapToStep(corridor.coordinate, pitch) - other.center.y);
+  const along = Math.sqrt(Math.max(0, other.allocationRadius ** 2 - perpendicular ** 2));
+  if (other.center.x >= port.x) return point(Math.min(port.x, other.center.x - along - halfWidth), port.y);
+  return point(Math.max(port.x, other.center.x + along + halfWidth), port.y);
+}
+
+function corridorPleatStripRegionsForCorridor(
   corridor: CompletionCorridor,
   from: CorridorEndpoint,
   to: CorridorEndpoint,
   gridSize: number,
   index: number,
-): PleatStripRegion {
+  bodyPorts: BodyPortMap,
+): PleatStripRegion[] {
   const unit = 1 / gridSize;
   const pitch = pleatPitchForGrid(gridSize);
   const width = Math.max(snapEvenDistanceToStep(corridor.width, pitch), pitch * 2, unit * 2);
+  const fromPort = bodyPorts.get(bodyPortKey(corridor.id, from.id));
+  const toPort = bodyPorts.get(bodyPortKey(corridor.id, to.id));
+  const core = coreCorridorPleatStripRegion(corridor, from, to, gridSize, index, width, pitch, fromPort, toPort);
+  const strips: PleatStripRegion[] = [];
+  const fromApproach = bodyApproachStripRegion(corridor, from, to, gridSize, index, width, pitch, "from", fromPort);
+  const toApproach = bodyApproachStripRegion(corridor, to, from, gridSize, index, width, pitch, "to", toPort);
+  if (fromApproach) strips.push(fromApproach);
+  if (rectLongEnough(core.rect, corridor.orientation, pitch)) strips.push(core);
+  if (toApproach) strips.push(toApproach);
+  return strips;
+}
+
+function coreCorridorPleatStripRegion(
+  corridor: CompletionCorridor,
+  from: CorridorEndpoint,
+  to: CorridorEndpoint,
+  gridSize: number,
+  index: number,
+  width: number,
+  pitch: number,
+  fromPort?: CompletionPoint,
+  toPort?: CompletionPoint,
+): PleatStripRegion {
   const half = width / 2;
   let rect: RegionRect;
   if (corridor.orientation === "horizontal") {
     const y = snapToStep(corridor.coordinate, pitch);
-    const x1 = endpointBoundaryCoordinate(from, to.center, "horizontal", y);
-    const x2 = endpointBoundaryCoordinate(to, from.center, "horizontal", y);
+    const x1 = from.kind === "body" && fromPort ? fromPort.x : endpointBoundaryCoordinate(from, to.center, "horizontal", y);
+    const x2 = to.kind === "body" && toPort ? toPort.x : endpointBoundaryCoordinate(to, from.center, "horizontal", y);
     rect = normalizeRect({
       x1: snapToStep(x1, pitch),
       y1: snapToStep(y - half, pitch),
@@ -397,8 +563,8 @@ function corridorPleatStripRegion(
     });
   } else {
     const x = snapToStep(corridor.coordinate, pitch);
-    const y1 = endpointBoundaryCoordinate(from, to.center, "vertical", x);
-    const y2 = endpointBoundaryCoordinate(to, from.center, "vertical", x);
+    const y1 = from.kind === "body" && fromPort ? fromPort.y : endpointBoundaryCoordinate(from, to.center, "vertical", x);
+    const y2 = to.kind === "body" && toPort ? toPort.y : endpointBoundaryCoordinate(to, from.center, "vertical", x);
     rect = normalizeRect({
       x1: snapToStep(x - half, pitch),
       y1: snapToStep(y1, pitch),
@@ -406,17 +572,97 @@ function corridorPleatStripRegion(
       y2: snapToStep(y2, pitch),
     });
   }
+  return pleatStripFromRect(
+    `strip-${index}-${corridor.id}`,
+    corridor.from,
+    corridor.to,
+    rect,
+    corridor.orientation,
+    pitch,
+    index,
+    corridor.id,
+  );
+}
+
+function bodyApproachStripRegion(
+  corridor: CompletionCorridor,
+  body: CorridorEndpoint,
+  other: CorridorEndpoint,
+  gridSize: number,
+  index: number,
+  width: number,
+  pitch: number,
+  side: "from" | "to",
+  port?: CompletionPoint,
+): PleatStripRegion | undefined {
+  if (body.kind !== "body" || !body.rect) return undefined;
+  if (!port) return undefined;
+  const lane = snapToStep(corridor.coordinate, pitch);
+  const half = width / 2;
+  let rect: RegionRect | undefined;
+  let approachOrientation: CompletionCorridor["orientation"];
+
+  if (corridor.orientation === "vertical") {
+    if (lane >= body.rect.x1 - 1e-9 && lane <= body.rect.x2 + 1e-9) return undefined;
+    rect = normalizeRect({
+      x1: snapToStep(port.x, pitch),
+      x2: snapToStep(lane, pitch),
+      y1: snapToStep(port.y - half, pitch),
+      y2: snapToStep(port.y + half, pitch),
+    });
+    approachOrientation = "horizontal";
+  } else {
+    if (lane >= body.rect.y1 - 1e-9 && lane <= body.rect.y2 + 1e-9) return undefined;
+    rect = normalizeRect({
+      x1: snapToStep(port.x - half, pitch),
+      x2: snapToStep(port.x + half, pitch),
+      y1: snapToStep(port.y, pitch),
+      y2: snapToStep(lane, pitch),
+    });
+    approachOrientation = "vertical";
+  }
+
+  const clamped = clampRect(rect);
+  if (!rectLongEnough(clamped, approachOrientation, pitch)) return undefined;
+  return pleatStripFromRect(
+    `strip-${index}-${corridor.id}-${side}-body-approach`,
+    corridor.from,
+    corridor.to,
+    clamped,
+    approachOrientation,
+    pitch,
+    index + (side === "from" ? 1000 : 2000),
+    corridor.id,
+  );
+}
+
+function pleatStripFromRect(
+  id: string,
+  from: string,
+  to: string,
+  rect: RegionRect,
+  corridorOrientation: CompletionCorridor["orientation"],
+  pitch: number,
+  index: number,
+  treeEdgeId?: string,
+): PleatStripRegion {
   return {
-    id: `strip-${index}-${corridor.id}`,
-    from: corridor.from,
-    to: corridor.to,
+    id,
+    from,
+    to,
     rect: clampRect(rect),
-    orientation: corridor.orientation === "horizontal" ? "vertical" : "horizontal",
+    orientation: corridorOrientation === "horizontal" ? "vertical" : "horizontal",
     pitch,
     phase: 0,
     startAssignment: index % 2 === 0 ? "M" : "V",
-    treeEdgeId: corridor.id,
+    treeEdgeId,
   };
+}
+
+function rectLongEnough(rect: RegionRect, corridorOrientation: CompletionCorridor["orientation"], pitch: number): boolean {
+  const length = corridorOrientation === "horizontal" ? Math.abs(rect.x2 - rect.x1) : Math.abs(rect.y2 - rect.y1);
+  const width = corridorOrientation === "horizontal" ? Math.abs(rect.y2 - rect.y1) : Math.abs(rect.x2 - rect.x1);
+  return length >= pitch - 1e-9 && width >= pitch - 1e-9;
 }
 
 function endpointBoundaryCoordinate(
@@ -658,6 +904,14 @@ function overlapRejections(layout: RegionLayout): string[] {
       const overlap = rectIntersection(a.rect, b.rect);
       if (!overlap || rectArea(overlap) < 1e-9) continue;
       if (layout.bodies.some((body) => rectContainsPoint(body.rect, rectCenter(overlap)))) continue;
+      if (a.treeEdgeId && a.treeEdgeId === b.treeEdgeId) {
+        const turnArea = Math.max(a.pitch, b.pitch) ** 2 * 4 + 1e-9;
+        if (rectArea(overlap) <= turnArea) continue;
+      }
+      if ((a.treeEdgeId || b.treeEdgeId) && stripsShareEndpoint(a, b)) {
+        const branchArea = Math.max(a.pitch, b.pitch) ** 2 * 4 + 1e-9;
+        if (rectArea(overlap) <= branchArea) continue;
+      }
       result.push(`pleat-strip-overlap:${a.id}:${b.id}`);
     }
   }
@@ -684,6 +938,10 @@ function flapAllocationOverlapRejections(layout: RegionLayout): string[] {
     }
   }
   return result;
+}
+
+function stripsShareEndpoint(a: PleatStripRegion, b: PleatStripRegion): boolean {
+  return a.from === b.from || a.from === b.to || a.to === b.from || a.to === b.to;
 }
 
 function rectCircleInteriorOverlap(
