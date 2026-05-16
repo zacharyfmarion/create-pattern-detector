@@ -8,6 +8,8 @@ import {
   solveRegionPleatStripPhases,
 } from "../src/bp-region-compiler.ts";
 import { sequenceToString } from "../src/bp-port-assignment-solver.ts";
+import { completeRegionCandidateBySheetSweep } from "../src/bp-region-sheet-sweep.ts";
+import { validateFold } from "../src/validate.ts";
 import type { CompletionLayout, RegionLayout } from "../src/bp-completion-contracts.ts";
 
 test("region compiler builds fixture layouts with local pleat-strip regions", () => {
@@ -262,6 +264,24 @@ test("region compiler rejects unsatisfied strip port constraints", () => {
   const candidate = compileRegionCandidate(layout);
   expect(candidate.validity).toBe("rejected");
   expect(candidate.rejectionReasons).toContain("port-phase:port-solver-unsat");
+});
+
+test("sheet-sweep lab completion can make long-axis corridor lanes strict", async () => {
+  const candidate = compileRegionCandidate(fixtureRegionLayout("two-flap-stretch"));
+  const completion = completeRegionCandidateBySheetSweep(candidate);
+  expect(completion.ok).toBe(true);
+  expect(completion.fold?.label_policy?.trainingEligible).toBe(false);
+  expect(completion.assignmentSteps).toBeGreaterThan(0);
+
+  const validation = await validateFold(completion.fold!, {
+    strictGlobal: true,
+    globalBackend: "rabbit-ear-solver",
+    minVertexDistance: 1e-9,
+    maxVertices: 1000,
+    maxEdges: 1000,
+  });
+  expect(validation.valid).toBe(true);
+  expect(validation.passed).toContain("rabbit-ear-solver");
 });
 
 function firstPleat(candidate: ReturnType<typeof compileRegionCandidate>, regionId: string) {

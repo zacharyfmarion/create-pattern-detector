@@ -1,6 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { regularizeBPStudioLayout } from "./bp-completion.ts";
+import { foldComparisonSvg } from "./bp-debug-svg.ts";
 import {
   compileRegionCandidate,
   fixtureRegionLayout,
@@ -22,6 +23,9 @@ import {
   validateBPStudioPacking,
   type BPStudioPackingValidation,
 } from "./bp-studio-packing-validity.ts";
+import { completeRegionCandidateBySheetSweep } from "./bp-region-sheet-sweep.ts";
+import { makeFlatFoldedPreview } from "./folded-preview.ts";
+import { validateFold } from "./validate.ts";
 import type { AdapterMetadata } from "./bp-studio-realistic.ts";
 import type { RegionCompletionCandidate } from "./bp-completion-contracts.ts";
 
@@ -93,6 +97,7 @@ async function main(): Promise<void> {
     await writeFile(join(options.out, `${label}.adapter_metadata.json`), JSON.stringify(adapterMetadata, null, 2));
     await writeFile(join(options.out, `${label}.packing_validity.json`), JSON.stringify(packingValidity, null, 2));
     await writeFile(join(options.out, `${label}.three_panel.svg`), threePanelSvg(spec, adapterMetadata, candidate, packingValidity, options.size));
+    await writeSheetSweepDebug(options.out, label, candidate);
   } else {
     const fixtures = options.allFixtures ? [...FIXTURES] : [options.fixture];
     for (const fixture of fixtures) {
@@ -122,6 +127,43 @@ async function main(): Promise<void> {
       validity: item.validity,
       rejectionReasons: item.rejectionReasons,
     })),
+  }, null, 2));
+}
+
+async function writeSheetSweepDebug(out: string, label: string, candidate: RegionCompletionCandidate): Promise<void> {
+  const completion = completeRegionCandidateBySheetSweep(candidate);
+  const reportPath = join(out, `${label}.sheet_sweep.json`);
+  if (!completion.ok || !completion.fold) {
+    await writeFile(reportPath, JSON.stringify(completion, null, 2));
+    return;
+  }
+  const validation = await validateFold(completion.fold, {
+    strictGlobal: true,
+    globalBackend: "rabbit-ear-solver",
+    minVertexDistance: 1e-9,
+    maxVertices: 10_000,
+    maxEdges: 20_000,
+  });
+  const preview = makeFlatFoldedPreview(completion.fold);
+  await writeFile(join(out, `${label}.sheet_sweep.fold`), JSON.stringify(completion.fold, null, 2) + "\n");
+  await writeFile(join(out, `${label}.sheet_sweep.folded.fold`), JSON.stringify(preview.foldedFold, null, 2) + "\n");
+  await writeFile(join(out, `${label}.sheet_sweep.svg`), foldComparisonSvg({
+    title: "Sheet-sweep closure lab",
+    subtitle: "Extends BP Studio-guided long-axis corridor lanes to the sheet border, then solves final M/V. This is lab-only, not production.",
+    leftTitle: "strict CP probe",
+    rightTitle: "Rabbit Ear folded coordinates",
+    cp: completion.fold,
+    folded: preview.foldedFold,
+    footer: `Validation ${validation.valid ? "passed" : "failed"}; assignment steps ${completion.assignmentSteps}; faces ${validation.metrics?.faces ?? preview.faces}; trainingEligible=false.`,
+  }));
+  await writeFile(reportPath, JSON.stringify({
+    ok: true,
+    validation,
+    assignmentSteps: completion.assignmentSteps,
+    vertices: completion.fold.vertices_coords.length,
+    edges: completion.fold.edges_vertices.length,
+    faces: validation.metrics?.faces ?? preview.faces,
+    trainingEligible: completion.fold.label_policy?.trainingEligible ?? null,
   }, null, 2));
 }
 
