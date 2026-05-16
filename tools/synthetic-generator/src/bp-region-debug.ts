@@ -28,6 +28,7 @@ import { makeFlatFoldedPreview } from "./folded-preview.ts";
 import { validateFold } from "./validate.ts";
 import type { AdapterMetadata } from "./bp-studio-realistic.ts";
 import type { RegionCompletionCandidate } from "./bp-completion-contracts.ts";
+import type { EdgeAssignment, FOLDFormat } from "./types.ts";
 
 const FIXTURES = ["two-flap-stretch", "three-flap-relay", "five-flap-uniaxial", "insect-lite"] as const;
 
@@ -99,6 +100,7 @@ async function main(): Promise<void> {
     await writeFile(join(options.out, `${label}.adapter_metadata.json`), JSON.stringify(adapterMetadata, null, 2));
     await writeFile(join(options.out, `${label}.packing_validity.json`), JSON.stringify(packingValidity, null, 2));
     await writeFile(join(options.out, `${label}.three_panel.svg`), threePanelSvg(spec, adapterMetadata, candidate, packingValidity, options.size));
+    await writeFile(join(options.out, `${label}.four_panel.svg`), fourPanelSvg(spec, adapterMetadata, candidate, packingValidity, options.size));
     await writeSheetSweepDebug(options.out, label, candidate);
   } else {
     const fixtures = options.allFixtures ? [...FIXTURES] : [options.fixture];
@@ -337,6 +339,73 @@ function threePanelSvg(
   ].join("\n");
 }
 
+function fourPanelSvg(
+  spec: BPStudioAdapterSpec,
+  adapterMetadata: AdapterMetadata,
+  candidate: RegionCompletionCandidate,
+  packingValidity: BPStudioPackingValidation,
+  panelSize: number,
+): string {
+  const gutter = Math.max(24, Math.round(panelSize * 0.035));
+  const titleHeight = Math.max(74, Math.round(panelSize * 0.095));
+  const legendGap = Math.max(12, Math.round(panelSize * 0.018));
+  const legendHeight = Math.max(118, Math.round(panelSize * 0.17));
+  const footerHeight = Math.max(56, Math.round(panelSize * 0.075));
+  const width = panelSize * 4 + gutter * 5;
+  const height = panelSize + titleHeight + legendGap + legendHeight + footerHeight + gutter;
+  const strictCompletion = completeRegionCandidateBySheetSweep(candidate);
+  const strictSubtitle = strictCompletion.ok && strictCompletion.fold
+    ? `strict line-field target, ${strictCompletion.fold.edges_vertices.length} edges, ${strictCompletion.assignmentSteps} assignment steps`
+    : `strict line-field target failed: ${strictCompletion.errors.slice(0, 2).join("; ")}`;
+  const panels = [
+    {
+      x: gutter,
+      title: "1. Source Tree",
+      subtitle: `${spec.archetype}, ${spec.tree.nodes.length} nodes, ${spec.tree.edges.length} edges`,
+      body: sourceTreePanel(spec, panelSize),
+      legend: treeLegendOutside(panelSize),
+    },
+    {
+      x: gutter * 2 + panelSize,
+      title: "2. BP Studio Optimized Packing",
+      subtitle: chosenLayout(adapterMetadata)?.optimized
+        ? `${adapterMetadata.spec?.optimizerLayout ?? "unknown"} optimizer${adapterMetadata.spec?.optimizerUseBH ? " + variations" : ""}, sheet ${formatSheetSize(chosenLayout(adapterMetadata)?.sheet)}, ${packingSubtitle(packingValidity)}`
+        : "adapter did not report optimized layout",
+      body: packingPanel(spec, adapterMetadata, panelSize),
+      legend: packingLegendOutside(panelSize),
+    },
+    {
+      x: gutter * 3 + panelSize * 2,
+      title: "3. Bounded Candidate",
+      subtitle: `${candidate.validity}, active K/M ${candidate.localProbe?.kawasakiBad ?? "?"}/${candidate.localProbe?.maekawaBad ?? "?"}, ${dominantLocalFailure(candidate)}`,
+      body: candidateOverlayPanel(spec, adapterMetadata, candidate, panelSize),
+      legend: compilerLegendOutside(panelSize),
+    },
+    {
+      x: gutter * 4 + panelSize * 3,
+      title: "4. Strict Line-Field Probe",
+      subtitle: strictSubtitle,
+      body: strictLineFieldPanel(strictCompletion, panelSize),
+      legend: strictProbeLegendOutside(panelSize),
+    },
+  ];
+  return [
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" shape-rendering="geometricPrecision">`,
+    `<rect width="${width}" height="${height}" fill="#f8fafc"/>`,
+    ...panels.map((panel) => [
+      `<g transform="translate(${panel.x},${gutter})">`,
+      `<text x="0" y="24" font-family="Inter, Arial, sans-serif" font-size="22" font-weight="700" fill="#0f172a">${escapeXml(panel.title)}</text>`,
+      `<text x="0" y="48" font-family="Inter, Arial, sans-serif" font-size="14" fill="#475569">${escapeXml(panel.subtitle)}</text>`,
+      `<g transform="translate(0,${titleHeight})">${panel.body}</g>`,
+      `<g transform="translate(0,${titleHeight + panelSize + legendGap})">${panel.legend}</g>`,
+      `</g>`,
+    ].join("\n")),
+    `<text x="${gutter}" y="${height - gutter * 1.15}" font-family="Inter, Arial, sans-serif" font-size="14" fill="#475569">Panel 4 is the current strict proof target for the same BP Studio layout. It is intentionally marked trainingEligible=false until bounded terminal/hub closure molecules replace sheet-border lane extension.</text>`,
+    `<text x="${gutter}" y="${height - gutter * 0.55}" font-family="Inter, Arial, sans-serif" font-size="14" fill="#475569">Panels 1-2 are BP Studio source truth. Panel 3 is unfinished compiler scaffold. Panel 4 is Rabbit Ear-valid final geometry for debugging the assignment/validation target.</text>`,
+    `</svg>`,
+  ].join("\n");
+}
+
 function sourceTreePanel(spec: BPStudioAdapterSpec, size: number): string {
   const graph = treeLayout(spec, size);
   const edgeItems = spec.tree.edges.filter((edge) => edge.from !== spec.tree.rootId).map((edge) => {
@@ -525,6 +594,88 @@ function compilerLocalFailureOverlay(candidate: RegionCompletionCandidate, size:
   });
   if (dots.length === 0) return "";
   return `<g data-debug-overlay="local-failures">${dots.join("\n")}</g>`;
+}
+
+function strictLineFieldPanel(
+  completion: ReturnType<typeof completeRegionCandidateBySheetSweep>,
+  size: number,
+): string {
+  if (!completion.ok || !completion.fold) {
+    return panelFrame(size, [
+      `<text x="${size * 0.08}" y="${size * 0.46}" font-family="Inter, Arial, sans-serif" font-size="16" font-weight="700" fill="#991b1b">Strict probe failed</text>`,
+      `<text x="${size * 0.08}" y="${size * 0.52}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#7f1d1d">${escapeXml(completion.errors.slice(0, 3).join("; "))}</text>`,
+    ]);
+  }
+  const folded = makeFlatFoldedPreview(completion.fold).foldedFold;
+  const mini = Math.round((size - 46) / 2);
+  const y = Math.round(size * 0.18);
+  const leftX = 14;
+  const rightX = leftX + mini + 18;
+  return panelFrame(size, [
+    `<text x="${leftX}" y="${y - 18}" font-family="Inter, Arial, sans-serif" font-size="14" font-weight="800" fill="#0f172a">strict CP</text>`,
+    `<text x="${rightX}" y="${y - 18}" font-family="Inter, Arial, sans-serif" font-size="14" font-weight="800" fill="#0f172a">folded preview</text>`,
+    miniFoldFrame(leftX, y, mini, renderFoldMini(completion.fold, mini, false)),
+    miniFoldFrame(rightX, y, mini, renderFoldMini(folded, mini, true)),
+    `<text x="16" y="${size - 54}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#334155">Rabbit Ear checks: complete border, local flat-foldability, global layer solver.</text>`,
+    `<text x="16" y="${size - 32}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#64748b">Not production yet: sheet-border lane extension is a proof target, not bounded molecule closure.</text>`,
+  ]);
+}
+
+function miniFoldFrame(x: number, y: number, size: number, body: string): string {
+  return [
+    `<g transform="translate(${x},${y})">`,
+    `<rect x="-5" y="-5" width="${size + 10}" height="${size + 10}" rx="6" fill="#ffffff" stroke="#cbd5e1"/>`,
+    body,
+    `</g>`,
+  ].join("\n");
+}
+
+function renderFoldMini(fold: FOLDFormat, size: number, normalize: boolean): string {
+  const coords = normalize
+    ? normalizedFoldCoords(fold.vertices_coords, size)
+    : fold.vertices_coords.map(([x, y]): [number, number] => [x * size, (1 - y) * size]);
+  const edges = fold.edges_vertices.map(([a, b], index) => {
+    const p1 = coords[a];
+    const p2 = coords[b];
+    const assignment = fold.edges_assignment[index] ?? "U";
+    const color = foldAssignmentColor(assignment);
+    const width = assignment === "B" ? 2.0 : 2.4;
+    return `<line x1="${round1(p1[0])}" y1="${round1(p1[1])}" x2="${round1(p2[0])}" y2="${round1(p2[1])}" stroke="${color}" stroke-width="${width}" stroke-linecap="round" stroke-opacity="0.96"/>`;
+  });
+  return `<g>${miniGrid(size)}${edges.join("\n")}</g>`;
+}
+
+function normalizedFoldCoords(coords: [number, number][], size: number): [number, number][] {
+  const xs = coords.map(([x]) => x);
+  const ys = coords.map(([, y]) => y);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  const span = Math.max(maxX - minX, maxY - minY, 1e-9);
+  const padding = size * 0.12;
+  const scale = (size - padding * 2) / span;
+  return coords.map(([x, y]) => [
+    padding + (x - minX) * scale + (size - padding * 2 - (maxX - minX) * scale) / 2,
+    size - (padding + (y - minY) * scale + (size - padding * 2 - (maxY - minY) * scale) / 2),
+  ]);
+}
+
+function miniGrid(size: number): string {
+  const lines: string[] = [];
+  for (let index = 0; index <= 8; index += 1) {
+    const p = (index / 8) * size;
+    lines.push(`<line x1="${round1(p)}" y1="0" x2="${round1(p)}" y2="${size}" stroke="#e2e8f0" stroke-width="0.6"/>`);
+    lines.push(`<line x1="0" y1="${round1(p)}" x2="${size}" y2="${round1(p)}" stroke="#e2e8f0" stroke-width="0.6"/>`);
+  }
+  return lines.join("\n");
+}
+
+function foldAssignmentColor(assignment: EdgeAssignment): string {
+  if (assignment === "M") return "#ff1f1f";
+  if (assignment === "V") return "#0057ff";
+  if (assignment === "B") return "#111827";
+  return "#94a3b8";
 }
 
 function dominantLocalFailure(candidate: RegionCompletionCandidate): string {
@@ -782,6 +933,19 @@ function compilerLegendOutside(size: number): string {
     `<line x1="310" y1="${y3}" x2="340" y2="${y3}" stroke="#64748b" stroke-width="1.2" stroke-dasharray="3 4"/><text x="350" y="${y3 + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">center-to-port guide</text>`,
     `<circle cx="498" cy="${y3}" r="5.8" fill="#d946ef" fill-opacity="0.22" stroke="#a21caf" stroke-width="1.5"/><line x1="494" y1="${y3 - 4}" x2="502" y2="${y3 + 4}" stroke="#a21caf" stroke-width="1.2"/><line x1="494" y1="${y3 + 4}" x2="502" y2="${y3 - 4}" stroke="#a21caf" stroke-width="1.2"/><text x="512" y="${y3 + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">K</text>`,
     `<circle cx="548" cy="${y3}" r="4.7" fill="#fb923c" fill-opacity="0.22" stroke="#ea580c" stroke-width="1.4"/><line x1="544" y1="${y3}" x2="552" y2="${y3}" stroke="#ea580c" stroke-width="1.2"/><line x1="548" y1="${y3 - 4}" x2="548" y2="${y3 + 4}" stroke="#ea580c" stroke-width="1.2"/><text x="562" y="${y3 + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">M failures</text>`,
+  ].join("\n");
+}
+
+function strictProbeLegendOutside(size: number): string {
+  const y1 = 34;
+  const y2 = 72;
+  return [
+    legendBand(size, "Strict probe legend"),
+    `<line x1="16" y1="${y1}" x2="48" y2="${y1}" stroke="#ff1f1f" stroke-width="3.4" stroke-linecap="round"/><text x="58" y="${y1 + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">solved mountain</text>`,
+    `<line x1="206" y1="${y1}" x2="238" y2="${y1}" stroke="#0057ff" stroke-width="3.4" stroke-linecap="round"/><text x="248" y="${y1 + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">solved valley</text>`,
+    `<line x1="390" y1="${y1}" x2="422" y2="${y1}" stroke="#111827" stroke-width="3.4" stroke-linecap="round"/><text x="432" y="${y1 + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">sheet border</text>`,
+    `<text x="16" y="${y2 + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">Line coordinates come from BP Studio-derived corridor lanes.</text>`,
+    `<text x="16" y="${y2 + 30}" font-family="Inter, Arial, sans-serif" font-size="11" fill="#64748b">This panel is a strict proof target, not production data.</text>`,
   ].join("\n");
 }
 

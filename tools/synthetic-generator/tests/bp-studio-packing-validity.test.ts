@@ -1,9 +1,11 @@
 import { expect, test } from "bun:test";
 import { compilerGridSizeForSheet, regularizeBPStudioLayout } from "../src/bp-completion.ts";
 import { compileRegionCandidate, regionLayoutFromCompletionLayout } from "../src/bp-region-compiler.ts";
+import { completeRegionCandidateBySheetSweep } from "../src/bp-region-sheet-sweep.ts";
 import { buildBPStudioLayoutGraph } from "../src/bp-studio-layout-graph.ts";
 import { runBPStudioAdapter, toAdapterSpec } from "../src/bp-studio-realistic.ts";
 import { simpleQuadrupedBPStudioSpec } from "../src/bp-studio-fixtures.ts";
+import { validateFold } from "../src/validate.ts";
 import {
   bpStudioPackingCircles,
   validateBPStudioPacking,
@@ -111,6 +113,35 @@ test("regularized simple quadruped uses tangent lanes and downgrades inferred-bo
   expect(candidate.layout.pleatStrips.every((strip) =>
     (strip.rect.x2 - strip.rect.x1) > 0 && (strip.rect.y2 - strip.rect.y1) > 0
   )).toBe(true);
+});
+
+test("simple quadruped BP Studio line-field probe is strict flat-foldable", async () => {
+  const spec = simpleQuadrupedBPStudioSpec(7);
+  const adapterSpec = toAdapterSpec(spec);
+  adapterSpec.optimizeLayout = true;
+  adapterSpec.optimizerLayout = "view";
+  adapterSpec.optimizerSeed = 7;
+  adapterSpec.optimizerUseBH = true;
+
+  const { metadata } = runBPStudioAdapter(adapterSpec);
+  const completionLayout = regularizeBPStudioLayout(spec, { adapterSpec, adapterMetadata: metadata });
+  const candidate = compileRegionCandidate(regionLayoutFromCompletionLayout(completionLayout));
+  const completion = completeRegionCandidateBySheetSweep(candidate);
+
+  expect(completion.ok).toBe(true);
+  expect(completion.fold?.label_policy?.trainingEligible).toBe(false);
+  expect(completion.assignmentSteps).toBe(32);
+
+  const validation = await validateFold(completion.fold!, {
+    strictGlobal: true,
+    globalBackend: "rabbit-ear-solver",
+    minVertexDistance: 1e-9,
+    maxVertices: 1000,
+    maxEdges: 1000,
+  });
+  expect(validation.valid).toBe(true);
+  expect(validation.passed).toContain("local-flat-foldability");
+  expect(validation.passed).toContain("rabbit-ear-solver");
 });
 
 test("BP Studio layout graph derives internal hubs from optimized BP graph only", () => {
