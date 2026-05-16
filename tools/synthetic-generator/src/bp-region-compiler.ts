@@ -1390,10 +1390,6 @@ function overlapRejections(layout: RegionLayout): string[] {
         const turnArea = Math.max(a.pitch, b.pitch) ** 2 * 4 + 1e-9;
         if (rectArea(overlap) <= turnArea) continue;
       }
-      if ((a.treeEdgeId || b.treeEdgeId) && stripsShareEndpoint(a, b)) {
-        const branchArea = Math.max(a.pitch, b.pitch) ** 2 * 4 + 1e-9;
-        if (rectArea(overlap) <= branchArea) continue;
-      }
       result.push(`pleat-strip-overlap:${a.id}:${b.id}`);
     }
   }
@@ -1424,10 +1420,6 @@ function flapAllocationOverlapRejections(layout: RegionLayout): string[] {
     }
   }
   return result;
-}
-
-function stripsShareEndpoint(a: PleatStripRegion, b: PleatStripRegion): boolean {
-  return a.from === b.from || a.from === b.to || a.to === b.from || a.to === b.to;
 }
 
 function rectCircleInteriorOverlap(
