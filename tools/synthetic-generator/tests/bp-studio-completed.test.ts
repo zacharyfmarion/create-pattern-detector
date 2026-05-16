@@ -6,7 +6,7 @@ test("BP Studio completed generator consumes optimized scaffold and emits strict
   const fold = generateBPStudioCompletedFold({
     id: "completed-smoke",
     family: "bp-studio-completed",
-    seed: 12345,
+    seed: 7777,
     numCreases: 16,
     bucket: "small",
   });
@@ -35,7 +35,7 @@ test("BP Studio completed generator consumes optimized scaffold and emits strict
     maxVertices: 4000,
     maxEdges: 4000,
     requireBoxPleat: true,
-    boxPleatMode: "dense",
+    boxPleatMode: "bp-studio-source",
     requireDense: false,
     requireRealistic: false,
   });

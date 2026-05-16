@@ -33,7 +33,7 @@ export function assignmentToFoldAngle(assignment: EdgeAssignment): number {
 }
 
 export function normalizeAssignment(assignment: EdgeAssignment): EdgeAssignment {
-  if (assignment === "M" || assignment === "V" || assignment === "B") return assignment;
+  if (assignment === "M" || assignment === "V" || assignment === "B" || assignment === "F") return assignment;
   return "U";
 }
 
@@ -54,7 +54,7 @@ export function roleCounts(fold: FOLDFormat): Record<string, number> {
 }
 
 export function countCreases(fold: FOLDFormat): number {
-  return (fold.edges_assignment ?? []).filter((a) => a === "M" || a === "V" || a === "U").length;
+  return (fold.edges_assignment ?? []).filter((a) => a === "M" || a === "V" || a === "U" || a === "F").length;
 }
 
 export function stableId(prefix: string, seed: number, index: number): string {

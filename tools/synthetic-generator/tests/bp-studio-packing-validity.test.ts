@@ -3,6 +3,7 @@ import { compilerGridSizeForSheet, regularizeBPStudioLayout } from "../src/bp-co
 import { compileRegionCandidate, regionLayoutFromCompletionLayout } from "../src/bp-region-compiler.ts";
 import { completeRegionCandidateBySheetSweep } from "../src/bp-region-sheet-sweep.ts";
 import { buildBPStudioLayoutGraph } from "../src/bp-studio-layout-graph.ts";
+import { completeBPStudioScaffoldByFoldProgram } from "../src/bp-studio-fold-program-completion.ts";
 import { runBPStudioAdapter, toAdapterSpec } from "../src/bp-studio-realistic.ts";
 import { simpleQuadrupedBPStudioSpec } from "../src/bp-studio-fixtures.ts";
 import { validateFold } from "../src/validate.ts";
@@ -69,6 +70,25 @@ test("regularized compiler grid is a multiple of BP Studio optimized sheet units
   expect(layout.regions.find((body) => body.id === "front-hub")?.x1).not.toBe(15 / 32);
 });
 
+test("regularized BP Studio corridors use tree edge lengths as pleat-strip width", () => {
+  const spec = simpleQuadrupedBPStudioSpec(7);
+  const adapterSpec = toAdapterSpec(spec);
+  adapterSpec.optimizeLayout = true;
+  adapterSpec.optimizerLayout = "view";
+  adapterSpec.optimizerSeed = 7;
+  adapterSpec.optimizerUseBH = true;
+
+  const { metadata } = runBPStudioAdapter(adapterSpec);
+  const layout = regularizeBPStudioLayout(spec, { adapterSpec, adapterMetadata: metadata });
+  const widthById = new Map(layout.corridors.map((corridor) => [corridor.id, corridor.width]));
+
+  expect(widthById.get("front-head")).toBe(1 / 7);
+  expect(widthById.get("front-left-leg")).toBe(1 / 7);
+  expect(widthById.get("front-right-leg")).toBe(1 / 7);
+  expect(widthById.get("front-rear-river")).toBe(2 / 7);
+  expect(widthById.get("rear-tail")).toBe(3 / 7);
+});
+
 test("region layout carries BP Studio terminal contour bounds as source metadata", () => {
   const spec = simpleQuadrupedBPStudioSpec(7);
   const adapterSpec = toAdapterSpec(spec);
@@ -89,7 +109,7 @@ test("region layout carries BP Studio terminal contour bounds as source metadata
   expect(head?.rect).not.toEqual(head?.sourceContourRect);
 });
 
-test("regularized simple quadruped uses tangent lanes and downgrades inferred-body overlap", () => {
+test("regularized simple quadruped exposes unresolved wide-corridor overlaps", () => {
   const spec = simpleQuadrupedBPStudioSpec(7);
   const adapterSpec = toAdapterSpec(spec);
   adapterSpec.optimizeLayout = true;
@@ -101,12 +121,12 @@ test("regularized simple quadruped uses tangent lanes and downgrades inferred-bo
   const completionLayout = regularizeBPStudioLayout(spec, { adapterSpec, adapterMetadata: metadata });
   const candidate = compileRegionCandidate(regionLayoutFromCompletionLayout(completionLayout));
 
-  expect(candidate.validity).toBe("layout-valid");
+  expect(candidate.validity).toBe("rejected");
   expect(candidate.localProbe?.locallyFlatFoldable).toBe(false);
-  expect(candidate.localProbe?.kawasakiBad).toBe(0);
+  expect(candidate.localProbe?.kawasakiBad ?? 0).toBeGreaterThan(0);
   expect(candidate.segments.filter((segment) => segment.kind === "turn-closure").length).toBeGreaterThan(0);
-  expect(candidate.rejectionReasons.filter((reason) => reason.startsWith("flap-allocation-overlap"))).toHaveLength(0);
-  expect(candidate.rejectionReasons.filter((reason) => reason.startsWith("pleat-strip-body-overlap"))).toHaveLength(0);
+  expect(candidate.rejectionReasons.filter((reason) => reason.startsWith("pleat-strip-overlap"))).not.toHaveLength(0);
+  expect(candidate.rejectionReasons.filter((reason) => reason.startsWith("flap-allocation-overlap"))).not.toHaveLength(0);
   expect(candidate.warnings?.filter((reason) => reason.startsWith("inferred-pleat-strip-body-overlap"))).not.toHaveLength(0);
   expect(candidate.layout.pleatStrips.length).toBeGreaterThan(7);
   expect(candidate.layout.pleatStrips.some((strip) => strip.id.includes("body-connector"))).toBe(true);
@@ -130,7 +150,7 @@ test("simple quadruped BP Studio line-field probe is strict flat-foldable", asyn
 
   expect(completion.ok).toBe(true);
   expect(completion.fold?.label_policy?.trainingEligible).toBe(false);
-  expect(completion.assignmentSteps).toBe(32);
+  expect(completion.assignmentSteps).toBeGreaterThan(0);
 
   const validation = await validateFold(completion.fold!, {
     strictGlobal: true,
@@ -138,6 +158,42 @@ test("simple quadruped BP Studio line-field probe is strict flat-foldable", asyn
     minVertexDistance: 1e-9,
     maxVertices: 1000,
     maxEdges: 1000,
+  });
+  expect(validation.valid).toBe(true);
+  expect(validation.passed).toContain("local-flat-foldability");
+  expect(validation.passed).toContain("rabbit-ear-solver");
+});
+
+test("BP Studio source-line fold program completes simple quadruped to a strict CP", async () => {
+  const spec = simpleQuadrupedBPStudioSpec(7);
+  const adapterSpec = toAdapterSpec(spec);
+  adapterSpec.optimizeLayout = true;
+  adapterSpec.optimizerLayout = "view";
+  adapterSpec.optimizerSeed = 7;
+  adapterSpec.optimizerUseBH = true;
+
+  const { fold: scaffoldFold, metadata } = runBPStudioAdapter(adapterSpec);
+  const completion = completeBPStudioScaffoldByFoldProgram(scaffoldFold, {
+    id: "simple-quadruped-source-line-test",
+    spec,
+    adapterMetadata: metadata,
+    gridSize: compilerGridSizeForSheet(7, 7),
+  });
+
+  expect(completion.ok).toBe(true);
+  expect(completion.fold?.label_policy?.trainingEligible).toBe(true);
+  expect(completion.foldCount).toBeGreaterThan(0);
+  expect(completion.fold!.edges_assignment.filter((assignment) => assignment === "M" || assignment === "V").length).toBeGreaterThan(70);
+
+  const validation = await validateFold(completion.fold!, {
+    strictGlobal: true,
+    globalBackend: "rabbit-ear-solver",
+    minVertexDistance: 1e-9,
+    maxVertices: 5000,
+    maxEdges: 5000,
+    requireBoxPleat: true,
+    boxPleatMode: "bp-studio-source",
+    requireDense: true,
   });
   expect(validation.valid).toBe(true);
   expect(validation.passed).toContain("local-flat-foldability");

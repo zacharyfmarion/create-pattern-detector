@@ -1,0 +1,72 @@
+name: treemaker_tree_v1
+seed: 9170
+imageSize: 768
+padding: 42
+
+splits:
+  train: 0.85
+  val: 0.10
+  test: 0.05
+
+families:
+  treemaker-tree: 1.0
+
+complexityBuckets:
+  - name: small
+    minCreases: 80
+    maxCreases: 180
+    weight: 0.35
+  - name: medium
+    minCreases: 180
+    maxCreases: 500
+    weight: 0.40
+  - name: dense
+    minCreases: 500
+    maxCreases: 1200
+    weight: 0.20
+  - name: superdense
+    minCreases: 1200
+    maxCreases: 2400
+    weight: 0.05
+
+treeMakerSampler:
+  symmetryWeights:
+    diagonal: 0.425
+    middle-axis: 0.425
+    asymmetric: 0.150
+  middleAxisWeights:
+    vertical: 1.0
+    horizontal: 1.0
+  diagonalWeights:
+    main-diagonal: 1.0
+    anti-diagonal: 1.0
+  archetypeWeights:
+    insect: 1.3
+    quadruped: 1.2
+    bird: 1.0
+    creature: 1.0
+    object: 0.8
+    abstract: 0.9
+
+validation:
+  strictGlobal: false
+  globalBackend: rabbit-ear-solver
+  minVertexDistance: 0.00001
+  maxVertices: 4000
+  maxEdges: 4000
+  requireBoxPleat: false
+  requireDense: true
+  requireRealistic: false
+  requireTreeMaker: true
+  requireLocalFlatFoldability: false
+
+renderVariants:
+  - name: treemaker_full_cp
+    assignmentVisibility: visible
+    count: 1
+  - name: treemaker_active_only
+    assignmentVisibility: active-only
+    count: 1
+  - name: monochrome_ink
+    assignmentVisibility: hidden
+    count: 1

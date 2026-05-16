@@ -110,6 +110,8 @@ def render_dataset(
                     label_policy=(
                         "mv_segmentation"
                         if variant["assignmentVisibility"] == "visible"
+                        else "active_mv_segmentation"
+                        if variant["assignmentVisibility"] == "active-only"
                         else "visible_creases_as_unassigned"
                     ),
                     image_size=image_size,
@@ -125,6 +127,8 @@ def render_dataset(
                     layout_metadata=dict(raw_row["layoutMetadata"]) if raw_row.get("layoutMetadata") is not None else None,
                     molecule_metadata=dict(raw_row["moleculeMetadata"]) if raw_row.get("moleculeMetadata") is not None else None,
                     realism_metadata=dict(raw_row["realismMetadata"]) if raw_row.get("realismMetadata") is not None else None,
+                    tree_metadata=dict(raw_row["treeMetadata"]) if raw_row.get("treeMetadata") is not None else None,
+                    treemaker_metadata=dict(raw_row["treeMakerMetadata"]) if raw_row.get("treeMakerMetadata") is not None else None,
                     completion_metadata=dict(raw_row["completionMetadata"]) if raw_row.get("completionMetadata") is not None else None,
                     graph_label_policy=dict(raw_row["labelPolicy"]) if raw_row.get("labelPolicy") is not None else None,
                     bp_studio_summary=dict(raw_row["bpStudioSummary"]) if raw_row.get("bpStudioSummary") is not None else None,
@@ -169,6 +173,8 @@ def render_fold(
 
     for edge_index, (v1_index, v2_index) in enumerate(fold["edges_vertices"]):
         assignment = assignments[edge_index] if edge_index < len(assignments) else "U"
+        if assignment_visibility == "active-only" and assignment not in {"M", "V", "B"}:
+            continue
         role = roles[edge_index] if edge_index < len(roles) else None
         color = _edge_color(assignment, assignment_visibility, config, style=style, role=role)
         v1 = _jitter(vertices[v1_index], jitter, rng)
@@ -197,6 +203,9 @@ def write_qa(root: Path, rows: Iterable[SyntheticManifestRow]) -> None:
     density_buckets: Counter[str] = Counter()
     dense_subfamilies: Counter[str] = Counter()
     archetypes: Counter[str] = Counter()
+    treemaker_symmetries: Counter[str] = Counter()
+    treemaker_variants: Counter[str] = Counter()
+    treemaker_archetypes: Counter[str] = Counter()
     realism_scores: List[float] = []
     empty_space_ratios: List[float] = []
     density_variances: List[float] = []
@@ -224,6 +233,13 @@ def write_qa(root: Path, rows: Iterable[SyntheticManifestRow]) -> None:
                 empty_space_ratios.append(float(row.realism_metadata["emptySpaceRatio"]))
             if "localDensityVariance" in row.realism_metadata:
                 density_variances.append(float(row.realism_metadata["localDensityVariance"]))
+        if row.tree_metadata:
+            if row.tree_metadata.get("symmetryClass"):
+                treemaker_symmetries[str(row.tree_metadata["symmetryClass"])] += 1
+            if row.tree_metadata.get("symmetryVariant"):
+                treemaker_variants[str(row.tree_metadata["symmetryVariant"])] += 1
+            if row.tree_metadata.get("archetype"):
+                treemaker_archetypes[str(row.tree_metadata["archetype"])] += 1
         if "rabbit-ear-solver" in row.validation.get("passed", []):
             strict_passes += 1
         metrics = row.validation.get("metrics", {})
@@ -246,6 +262,9 @@ def write_qa(root: Path, rows: Iterable[SyntheticManifestRow]) -> None:
         "densityBuckets": dict(sorted(density_buckets.items())),
         "denseSubfamilies": dict(sorted(dense_subfamilies.items())),
         "archetypes": dict(sorted(archetypes.items())),
+        "treeMakerSymmetries": dict(sorted(treemaker_symmetries.items())),
+        "treeMakerSymmetryVariants": dict(sorted(treemaker_variants.items())),
+        "treeMakerArchetypes": dict(sorted(treemaker_archetypes.items())),
         "realismScore": _summarize(realism_scores),
         "emptySpaceRatio": _summarize(empty_space_ratios),
         "localDensityVariance": _summarize(density_variances),
@@ -327,7 +346,7 @@ def _edge_color(
     style: str,
     role: str | None,
 ) -> RGB:
-    if assignment_visibility == "visible":
+    if assignment_visibility in {"visible", "active-only"}:
         if style.startswith("bp_color") and role:
             return BP_VISIBLE_COLORS.get(role, VISIBLE_COLORS.get(assignment, VISIBLE_COLORS["U"]))
         return VISIBLE_COLORS.get(assignment, VISIBLE_COLORS["U"])

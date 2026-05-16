@@ -42,6 +42,9 @@ async function main(): Promise<void> {
   const faceCountValues: number[] = [];
   const realismScoreValues: number[] = [];
   const archetypeCounts: Record<string, number> = {};
+  const treeMakerSymmetryCounts: Record<string, number> = {};
+  const treeMakerVariantCounts: Record<string, number> = {};
+  const treeMakerArchetypeCounts: Record<string, number> = {};
   const maxAttempts = args.maxAttempts ?? args.count * 40;
   let attempts = 0;
 
@@ -58,6 +61,7 @@ async function main(): Promise<void> {
       numCreases: rng.int(bucket.minCreases, bucket.maxCreases),
       bucket: bucket.name,
       dense: recipe.validation.requireDense === true,
+      treeMakerSampler: recipe.treeMakerSampler,
     };
 
     try {
@@ -72,8 +76,10 @@ async function main(): Promise<void> {
           validation,
           bpMetadata: fold.bp_metadata,
           designTree: fold.design_tree,
-          realismMetadata: fold.realism_metadata,
-        });
+        realismMetadata: fold.realism_metadata,
+        treeMetadata: fold.tree_metadata,
+        treeMakerMetadata: fold.treemaker_metadata,
+      });
         continue;
       }
 
@@ -100,6 +106,8 @@ async function main(): Promise<void> {
         layoutMetadata: fold.layout_metadata,
         moleculeMetadata: fold.molecule_metadata,
         realismMetadata: fold.realism_metadata,
+        treeMetadata: fold.tree_metadata,
+        treeMakerMetadata: fold.treemaker_metadata,
         completionMetadata: fold.completion_metadata,
         labelPolicy: fold.label_policy,
         bpStudioSummary: fold.bp_studio_summary,
@@ -121,6 +129,11 @@ async function main(): Promise<void> {
       }
       if (fold.design_tree?.archetype) {
         archetypeCounts[fold.design_tree.archetype] = (archetypeCounts[fold.design_tree.archetype] ?? 0) + 1;
+      }
+      if (fold.tree_metadata) {
+        treeMakerSymmetryCounts[fold.tree_metadata.symmetryClass] = (treeMakerSymmetryCounts[fold.tree_metadata.symmetryClass] ?? 0) + 1;
+        treeMakerVariantCounts[fold.tree_metadata.symmetryVariant] = (treeMakerVariantCounts[fold.tree_metadata.symmetryVariant] ?? 0) + 1;
+        treeMakerArchetypeCounts[fold.tree_metadata.archetype] = (treeMakerArchetypeCounts[fold.tree_metadata.archetype] ?? 0) + 1;
       }
       if (fold.realism_metadata?.score !== undefined) realismScoreValues.push(fold.realism_metadata.score);
       if (validation.metrics?.solverMs !== undefined) solverMsValues.push(validation.metrics.solverMs);
@@ -154,6 +167,9 @@ async function main(): Promise<void> {
     densityBucketCounts,
     denseSubfamilyCounts,
     archetypeCounts,
+    treeMakerSymmetryCounts,
+    treeMakerVariantCounts,
+    treeMakerArchetypeCounts,
     realismScore: summarizeOrNull(realismScoreValues),
     roleCounts: aggregateRoleCounts,
     gridSizeCounts,

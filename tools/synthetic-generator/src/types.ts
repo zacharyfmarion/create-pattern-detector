@@ -21,12 +21,26 @@ export type BPSubfamily =
   | "dense-molecule-tessellation"
   | "realistic-tree-base"
   | "bp-studio-export"
+  | "bp-studio-source-line-program"
   | "bp-studio-completed-uniaxial"
   | "diagonal-staircase-cap-primitive"
   | "staircase-bridge-primitive";
 export type DenseNonBPSubfamily = "recursive-axiom" | "expanded-classic" | "radial-multi-vertex" | "tessellation-like";
 export type RealisticBPArchetype = "insect" | "quadruped" | "bird" | "object" | "abstract";
-export type BoxPleatMode = "simple" | "dense";
+export type BoxPleatMode = "simple" | "dense" | "bp-studio-source";
+export type TreeMakerArchetype = "insect" | "quadruped" | "bird" | "creature" | "object" | "abstract";
+export type TreeMakerSymmetryClass = "diagonal" | "middle-axis" | "asymmetric";
+export type TreeMakerSymmetryVariant = "main-diagonal" | "anti-diagonal" | "vertical" | "horizontal" | "none";
+export type TreeMakerCreaseKind =
+  | "BORDER"
+  | "AXIAL"
+  | "RIDGE"
+  | "GUSSET"
+  | "FOLDED_HINGE"
+  | "UNFOLDED_HINGE"
+  | "PSEUDOHINGE"
+  | "CONSTRUCTION"
+  | "UNKNOWN";
 
 export interface BPMetadata {
   gridSize: number;
@@ -96,6 +110,42 @@ export interface RealismMetadata {
   gates: Record<string, boolean>;
 }
 
+export interface TreeMetadata {
+  generator: "treemaker-tree";
+  archetype: TreeMakerArchetype;
+  symmetryClass: TreeMakerSymmetryClass;
+  symmetryVariant: TreeMakerSymmetryVariant;
+  rootId: string;
+  nodeCount: number;
+  terminalCount: number;
+  branchDepth: number;
+  edgeLengths: number[];
+  nodes: Array<{
+    id: string;
+    kind: "root" | "hub" | "terminal";
+    label: string;
+    x: number;
+    y: number;
+  }>;
+  edges: Array<{
+    id: string;
+    from: string;
+    to: string;
+    length: number;
+  }>;
+}
+
+export interface TreeMakerMetadata {
+  adapterVersion: string;
+  toolVersion?: string;
+  externalCommand?: string;
+  optimizationSuccess: boolean;
+  foldedFormSuccess?: boolean;
+  warnings: string[];
+  creaseKindCounts: Record<string, number>;
+  sourceCreaseCount: number;
+}
+
 export interface CompletionMetadata {
   engine: string;
   version: string;
@@ -115,9 +165,9 @@ export interface CompletionMetadata {
 }
 
 export interface LabelPolicy {
-  labelSource: "compiler" | "bp-studio-raw";
-  geometrySource: "compiler" | "bp-studio-raw";
-  assignmentSource: "compiler" | "bp-studio-raw";
+  labelSource: "compiler" | "bp-studio-raw" | "treemaker-external";
+  geometrySource: "compiler" | "bp-studio-raw" | "treemaker-external";
+  assignmentSource: "compiler" | "bp-studio-raw" | "treemaker-external";
   trainingEligible: boolean;
   notes: string[];
 }
@@ -153,6 +203,9 @@ export interface FOLDFormat {
   layout_metadata?: LayoutMetadata;
   molecule_metadata?: MoleculeMetadata;
   realism_metadata?: RealismMetadata;
+  tree_metadata?: TreeMetadata;
+  treemaker_metadata?: TreeMakerMetadata;
+  edges_treemakerKind?: TreeMakerCreaseKind[];
   completion_metadata?: CompletionMetadata;
   label_policy?: LabelPolicy;
   bp_studio_summary?: BPStudioSummary;
@@ -164,6 +217,7 @@ export interface FOLDFormat {
 export const GENERATOR_FAMILIES = [
   "bp-studio-realistic",
   "bp-studio-completed",
+  "treemaker-tree",
 ] as const;
 export type GeneratorFamily = (typeof GENERATOR_FAMILIES)[number];
 export type GlobalValidationBackend = "rabbit-ear-solver" | "fold-cli";
@@ -187,11 +241,13 @@ export interface ValidationConfig {
   requireDense?: boolean;
   requireRealistic?: boolean;
   minRealismScore?: number;
+  requireTreeMaker?: boolean;
+  requireLocalFlatFoldability?: boolean;
 }
 
 export interface RenderVariantConfig {
   name: string;
-  assignmentVisibility: "visible" | "hidden";
+  assignmentVisibility: "visible" | "hidden" | "active-only";
   count: number;
 }
 
@@ -206,6 +262,7 @@ export interface SyntheticRecipe {
   validation: ValidationConfig;
   renderVariants: RenderVariantConfig[];
   bpStudioSampler?: Record<string, unknown>;
+  treeMakerSampler?: TreeMakerSamplerConfig;
 }
 
 export interface GenerationConfig {
@@ -217,6 +274,14 @@ export interface GenerationConfig {
   dense?: boolean;
   denseSubfamily?: string;
   realisticArchetype?: RealisticBPArchetype;
+  treeMakerSampler?: TreeMakerSamplerConfig;
+}
+
+export interface TreeMakerSamplerConfig {
+  symmetryWeights?: Partial<Record<TreeMakerSymmetryClass, number>>;
+  middleAxisWeights?: Partial<Record<Extract<TreeMakerSymmetryVariant, "vertical" | "horizontal">, number>>;
+  diagonalWeights?: Partial<Record<Extract<TreeMakerSymmetryVariant, "main-diagonal" | "anti-diagonal">, number>>;
+  archetypeWeights?: Partial<Record<TreeMakerArchetype, number>>;
 }
 
 export interface ValidationResult {
@@ -248,6 +313,8 @@ export interface RawManifestRow {
   layoutMetadata?: LayoutMetadata;
   moleculeMetadata?: MoleculeMetadata;
   realismMetadata?: RealismMetadata;
+  treeMetadata?: TreeMetadata;
+  treeMakerMetadata?: TreeMakerMetadata;
   completionMetadata?: CompletionMetadata;
   labelPolicy?: LabelPolicy;
   bpStudioSummary?: BPStudioSummary;

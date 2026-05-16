@@ -8,8 +8,8 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Literal, Mapping, Optional
 
 
-AssignmentVisibility = Literal["visible", "hidden"]
-LabelPolicy = Literal["mv_segmentation", "visible_creases_as_unassigned"]
+AssignmentVisibility = Literal["visible", "hidden", "active-only"]
+LabelPolicy = Literal["mv_segmentation", "active_mv_segmentation", "visible_creases_as_unassigned"]
 Split = Literal["train", "val", "test"]
 
 
@@ -41,6 +41,8 @@ class SyntheticManifestRow:
     layout_metadata: Optional[Dict[str, Any]]
     molecule_metadata: Optional[Dict[str, Any]]
     realism_metadata: Optional[Dict[str, Any]]
+    tree_metadata: Optional[Dict[str, Any]]
+    treemaker_metadata: Optional[Dict[str, Any]]
     completion_metadata: Optional[Dict[str, Any]]
     graph_label_policy: Optional[Dict[str, Any]]
     bp_studio_summary: Optional[Dict[str, Any]]
@@ -84,6 +86,12 @@ class SyntheticManifestRow:
             else None,
             realism_metadata=dict(row["realism_metadata"] if "realism_metadata" in row else row["realismMetadata"])
             if row.get("realism_metadata") is not None or row.get("realismMetadata") is not None
+            else None,
+            tree_metadata=dict(row["tree_metadata"] if "tree_metadata" in row else row["treeMetadata"])
+            if row.get("tree_metadata") is not None or row.get("treeMetadata") is not None
+            else None,
+            treemaker_metadata=dict(row["treemaker_metadata"] if "treemaker_metadata" in row else row["treeMakerMetadata"])
+            if row.get("treemaker_metadata") is not None or row.get("treeMakerMetadata") is not None
             else None,
             completion_metadata=dict(row["completion_metadata"] if "completion_metadata" in row else row["completionMetadata"])
             if row.get("completion_metadata") is not None or row.get("completionMetadata") is not None

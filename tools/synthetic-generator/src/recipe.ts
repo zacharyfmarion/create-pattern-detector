@@ -2,35 +2,49 @@ import { GENERATOR_FAMILIES } from "./types.ts";
 import type { GeneratorFamily, SyntheticRecipe } from "./types.ts";
 
 const DEFAULT_RECIPE: SyntheticRecipe = {
-  name: "bp_completed_uniaxial_v1",
+  name: "treemaker_tree_v1",
   seed: 9170,
   imageSize: 768,
   padding: 42,
   splits: { train: 0.85, val: 0.1, test: 0.05 },
   families: {
     "bp-studio-realistic": 0,
-    "bp-studio-completed": 1,
+    "bp-studio-completed": 0,
+    "treemaker-tree": 1,
   },
   complexityBuckets: [
-    { name: "small", minCreases: 80, maxCreases: 1500, weight: 1 },
+    { name: "small", minCreases: 80, maxCreases: 180, weight: 0.35 },
+    { name: "medium", minCreases: 180, maxCreases: 500, weight: 0.4 },
+    { name: "dense", minCreases: 500, maxCreases: 1200, weight: 0.2 },
+    { name: "superdense", minCreases: 1200, maxCreases: 2400, weight: 0.05 },
   ],
   validation: {
-    strictGlobal: true,
+    strictGlobal: false,
     globalBackend: "rabbit-ear-solver",
     minVertexDistance: 1e-5,
     maxVertices: 4000,
     maxEdges: 4000,
-    requireBoxPleat: true,
-    boxPleatMode: "dense",
+    requireBoxPleat: false,
     requireDense: true,
     requireRealistic: false,
+    requireTreeMaker: true,
+    requireLocalFlatFoldability: false,
     minRealismScore: 0,
   },
   renderVariants: [
-    { name: "bp_assignment_clean", assignmentVisibility: "visible", count: 1 },
+    { name: "treemaker_full_cp", assignmentVisibility: "visible", count: 1 },
+    { name: "treemaker_active_only", assignmentVisibility: "active-only", count: 1 },
     { name: "monochrome_ink", assignmentVisibility: "hidden", count: 1 },
-    { name: "faint_blueprint", assignmentVisibility: "hidden", count: 1 },
   ],
+  treeMakerSampler: {
+    symmetryWeights: {
+      diagonal: 0.425,
+      "middle-axis": 0.425,
+      asymmetric: 0.15,
+    },
+    middleAxisWeights: { vertical: 1, horizontal: 1 },
+    diagonalWeights: { "main-diagonal": 1, "anti-diagonal": 1 },
+  },
 };
 
 export async function loadRecipe(path?: string): Promise<SyntheticRecipe> {
@@ -56,6 +70,7 @@ function mergeRecipe(base: SyntheticRecipe, overrides: Partial<SyntheticRecipe>)
     validation: { ...base.validation, ...(overrides.validation ?? {}) },
     complexityBuckets: overrides.complexityBuckets ?? base.complexityBuckets,
     renderVariants: overrides.renderVariants ?? base.renderVariants,
+    treeMakerSampler: { ...(base.treeMakerSampler ?? {}), ...(overrides.treeMakerSampler ?? {}) },
   };
 }
 

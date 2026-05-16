@@ -43,10 +43,15 @@ export async function validateFold(fold: FOLDFormat, config: ValidationConfig): 
   if (config.requireRealistic) {
     runCheck("realistic-structure", passed, failed, errors, () => checkRealisticStructure(normalized, config.minRealismScore ?? 0));
   }
+  if (config.requireTreeMaker || normalized.treemaker_metadata || normalized.tree_metadata) {
+    runCheck("treemaker-structure", passed, failed, errors, () => checkTreeMakerStructure(normalized));
+  }
   if (config.requireBoxPleat || normalized.edges_bpRole || normalized.bp_metadata) {
     runCheck("box-pleat-structure", passed, failed, errors, () => checkBoxPleatStructure(normalized, config.boxPleatMode ?? "simple"));
   }
-  runCheck("local-flat-foldability", passed, failed, errors, () => checkLocalFlatFoldability(normalized));
+  if (config.requireLocalFlatFoldability !== false) {
+    runCheck("local-flat-foldability", passed, failed, errors, () => checkLocalFlatFoldability(normalized));
+  }
 
   if (config.strictGlobal) {
     if (config.globalBackend === "rabbit-ear-solver") {
@@ -210,7 +215,28 @@ function checkRealisticStructure(fold: FOLDFormat, minScore: number): void {
   }
 }
 
-function checkBoxPleatStructure(fold: FOLDFormat, mode: "simple" | "dense"): void {
+function checkTreeMakerStructure(fold: FOLDFormat): void {
+  const tree = fold.tree_metadata;
+  const metadata = fold.treemaker_metadata;
+  if (!tree) throw new Error("tree_metadata is required");
+  if (!metadata) throw new Error("treemaker_metadata is required");
+  if (tree.generator !== "treemaker-tree") throw new Error("tree_metadata.generator must be treemaker-tree");
+  if (tree.terminalCount < 3) throw new Error("TreeMaker samples require at least three terminal flaps");
+  if (!metadata.optimizationSuccess) throw new Error("TreeMaker optimization did not succeed");
+  if (metadata.sourceCreaseCount < 4) throw new Error("TreeMaker output has too few source creases");
+  if (!fold.edges_treemakerKind || fold.edges_treemakerKind.length !== fold.edges_vertices.length) {
+    throw new Error("edges_treemakerKind must be present and match edges_vertices length");
+  }
+  const assignmentTotals = countValues(fold.edges_assignment);
+  if ((assignmentTotals.M ?? 0) + (assignmentTotals.V ?? 0) < 2) {
+    throw new Error("TreeMaker samples require active M/V creases");
+  }
+  if ((assignmentTotals.U ?? 0) + (assignmentTotals.F ?? 0) < 1) {
+    throw new Error("TreeMaker full-CP samples should preserve flat/unfolded hinge lines");
+  }
+}
+
+function checkBoxPleatStructure(fold: FOLDFormat, mode: "simple" | "dense" | "bp-studio-source"): void {
   const roles = fold.edges_bpRole;
   const metadata = fold.bp_metadata;
   if (!roles || roles.length !== fold.edges_vertices.length) {
@@ -239,9 +265,11 @@ function checkBoxPleatStructure(fold: FOLDFormat, mode: "simple" | "dense"): voi
     const p2 = fold.vertices_coords[b];
     if (role !== "border") interiorEdges += 1;
 
-    for (const coordinate of [p1[0], p1[1], p2[0], p2[1]]) {
-      if (!onHalfGrid(coordinate, metadata.gridSize)) {
-        throw new Error(`edge ${edgeIndex} has non-grid coordinate ${coordinate}`);
+    if (mode !== "bp-studio-source") {
+      for (const coordinate of [p1[0], p1[1], p2[0], p2[1]]) {
+        if (!onHalfGrid(coordinate, metadata.gridSize)) {
+          throw new Error(`edge ${edgeIndex} has non-grid coordinate ${coordinate}`);
+        }
       }
     }
 
@@ -251,16 +279,18 @@ function checkBoxPleatStructure(fold: FOLDFormat, mode: "simple" | "dense"): voi
     }
     if (role === "ridge") {
       if (mode === "simple" && assignment !== "M") throw new Error(`ridge edge ${edgeIndex} must be mountain assigned`);
-      if (mode === "dense" && assignment !== "M" && assignment !== "V") {
+      if ((mode === "dense" || mode === "bp-studio-source") && assignment !== "M" && assignment !== "V") {
         throw new Error(`ridge edge ${edgeIndex} must be mountain or valley assigned`);
       }
-      if (!isDiagonal45(p1, p2)) throw new Error(`ridge edge ${edgeIndex} is not a 45-degree crease`);
+      if (mode !== "bp-studio-source" && !isDiagonal45(p1, p2)) {
+        throw new Error(`ridge edge ${edgeIndex} is not a 45-degree crease`);
+      }
       diagonalRidges += 1;
       fullDiagonalLines.add(diagonalSignature(p1, p2));
       continue;
     }
     if (mode === "simple" && assignment !== "V") throw new Error(`${role} edge ${edgeIndex} must be valley assigned`);
-    if (mode === "dense" && assignment !== "M" && assignment !== "V") {
+    if ((mode === "dense" || mode === "bp-studio-source") && assignment !== "M" && assignment !== "V") {
       throw new Error(`${role} edge ${edgeIndex} must be mountain or valley assigned`);
     }
     if (!isAxisAligned(p1, p2)) throw new Error(`${role} edge ${edgeIndex} is not axis-aligned`);

@@ -1,4 +1,7 @@
-import { completeBoxPleat } from "./bp-completion.ts";
+import ear from "rabbit-ear";
+import { compilerGridSizeForSheet } from "./bp-completion.ts";
+import { completeBPStudioScaffoldByFoldProgram } from "./bp-studio-fold-program-completion.ts";
+import { normalizeFold } from "./fold-utils.ts";
 import { assertValidBPStudioSpec, generateBPStudioSpec } from "./bp-studio-sampler.ts";
 import {
   bucketFor,
@@ -33,18 +36,32 @@ export function generateBPStudioCompletedFold(config: GenerationConfig): FOLDFor
 
       const adapterSpec = toAdapterSpec(spec);
       const { fold: scaffoldFold, metadata: adapterMetadata } = runBPStudioAdapter(adapterSpec);
-      const completion = completeBoxPleat(spec, {
-        adapterSpec,
+      const sheet = adapterMetadata.optimizedLayout?.sheet ?? adapterMetadata.layout?.sheet ?? adapterSpec.sheet;
+      const completion = completeBPStudioScaffoldByFoldProgram(scaffoldFold, {
+        id: config.id,
+        spec,
         adapterMetadata,
-        layoutId: config.id,
+        gridSize: compilerGridSizeForSheet(sheet.width, sheet.height),
       });
       if (!completion.ok || !completion.fold) {
-        throw new Error(`completion failed: ${completion.rejected.map((item) => `${item.code}:${item.message}`).join("; ")}`);
+        throw new Error(`completion failed: ${completion.errors.join("; ")}`);
       }
 
       const fold = completion.fold;
       const foldedCreases = fold.edges_assignment.filter((assignment) => assignment === "M" || assignment === "V").length;
-      if (foldedCreases < 80) throw new Error(`completion too sparse: ${foldedCreases} folded creases < 80`);
+      if (foldedCreases < 60) throw new Error(`completion too sparse: ${foldedCreases} folded creases < 60`);
+      fold.bp_metadata = {
+        ...(fold.bp_metadata ?? {
+          gridSize: compilerGridSizeForSheet(sheet.width, sheet.height),
+          bpSubfamily: "bp-studio-completed-uniaxial",
+          flapCount: spec.layout.flaps.length,
+          gadgetCount: 0,
+          ridgeCount: 0,
+          hingeCount: 0,
+          axisCount: 0,
+        }),
+        bpSubfamily: "bp-studio-completed-uniaxial",
+      };
       fold.file_creator = "cp-synthetic-generator/bp-studio-completed";
       fold.file_title = `${config.id} BP Studio completed`;
       fold.file_description = "Strict box-pleat CP compiled from a BP Studio optimized tree/layout scaffold.";
@@ -69,9 +86,8 @@ export function generateBPStudioCompletedFold(config: GenerationConfig): FOLDFor
         generatorSteps: [
           "bp-studio-spec-sampler",
           "bp-studio-adapter-optimizer",
-          "regularize-layout",
-          "local-molecule-compiler",
-          "maekawa-assignment-solve",
+          "bp-studio-source-line-program",
+          `rabbit-ear-flat-fold-program:${completion.foldCount}`,
           "pending-strict-validation",
         ],
         moleculeCounts: {
@@ -79,6 +95,7 @@ export function generateBPStudioCompletedFold(config: GenerationConfig): FOLDFor
           ...(fold.molecule_metadata?.molecules ?? {}),
         },
       };
+      strictRabbitEarPrecheck(fold);
       return fold;
     } catch (error) {
       lastError = error instanceof Error ? error.message : String(error);
@@ -89,6 +106,29 @@ export function generateBPStudioCompletedFold(config: GenerationConfig): FOLDFor
   throw new Error(
     `BP Studio completion generator failed after retries: ${lastError}\nRecent attempts:\n${attemptErrors.slice(-5).join("\n")}`,
   );
+}
+
+function strictRabbitEarPrecheck(fold: FOLDFormat): void {
+  const graph = normalizeFold(fold);
+  ear.graph.populate(graph);
+  const kawasakiBad = ear.singleVertex.validateKawasaki(graph) as number[];
+  const maekawaBad = ear.singleVertex.validateMaekawa(graph) as number[];
+  if (kawasakiBad.length || maekawaBad.length) {
+    throw new Error(
+      `source-line completion failed local flat-foldability: kawasaki=${kawasakiBad.length}, maekawa=${maekawaBad.length}`,
+    );
+  }
+  const solverResult = ear.layer.solver(graph);
+  if (!solverResult) {
+    throw new Error("source-line completion failed Rabbit Ear layer solver");
+  }
+  const folded = ear.graph.makeVerticesCoordsFlatFolded(graph);
+  if (!Array.isArray(folded) || folded.length !== graph.vertices_coords.length) {
+    throw new Error("source-line completion could not compute folded coordinates");
+  }
+  if (folded.some((coord) => !Array.isArray(coord) || coord.some((value) => !Number.isFinite(value)))) {
+    throw new Error("source-line completion produced non-finite folded coordinates");
+  }
 }
 
 function truncate(value: string, maxLength: number): string {

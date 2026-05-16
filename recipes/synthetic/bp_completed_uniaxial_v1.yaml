@@ -29,7 +29,7 @@ validation:
   maxVertices: 4000
   maxEdges: 4000
   requireBoxPleat: true
-  boxPleatMode: dense
+  boxPleatMode: bp-studio-source
   requireDense: true
   requireRealistic: false
   minRealismScore: 0.0

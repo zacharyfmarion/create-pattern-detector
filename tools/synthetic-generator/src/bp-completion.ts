@@ -223,8 +223,12 @@ export function regularizeBPStudioLayout(
     to: river.to,
     length: river.width,
   }));
+  const treeEdgeById = new Map(spec.tree.edges.map((edge) => [edge.id, edge]));
+  const sheetScale = Math.max(sheetWidth, sheetHeight);
   const corridors: CompletionCorridor[] = graphEdges.map((edge) => {
-    const width = snap(Math.max(2 / gridSize, 0.5 / Math.max(sheetWidth, sheetHeight)), gridSize);
+    const treeEdge = treeEdgeById.get(edge.id);
+    const edgeLength = Math.max(0, Number(treeEdge?.length ?? edge.length ?? 0));
+    const width = snap(Math.max(2 / gridSize, edgeLength / sheetScale), gridSize);
     const preferredOrientation = orientationForPoints(layoutPoints.get(edge.from), layoutPoints.get(edge.to), axis);
     const route = corridorRouteAvoidingAllocations(edge.from, edge.to, layoutPoints, preferredOrientation, terminalIds, terminals, bodies, gridSize, width);
     return {

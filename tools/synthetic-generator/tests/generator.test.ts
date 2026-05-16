@@ -13,8 +13,8 @@ test("strict validation APIs are available", () => {
   expect(typeof ear.layer.solver).toBe("function");
 });
 
-test("synthetic generation is BP-Studio-backed-only", () => {
-  expect(availableFamilies()).toEqual(["bp-studio-realistic", "bp-studio-completed"]);
+test("synthetic generation exposes BP Studio diagnostics and TreeMaker tree bases", () => {
+  expect(availableFamilies()).toEqual(["bp-studio-realistic", "bp-studio-completed", "treemaker-tree"]);
   expect(() =>
     generateFold({
       id: "legacy",
@@ -23,13 +23,13 @@ test("synthetic generation is BP-Studio-backed-only", () => {
       numCreases: 80,
       bucket: "small",
     }),
-  ).toThrow(/BP-Studio-backed-only/);
+  ).toThrow(/Unsupported synthetic generator family/);
 });
 
 test("BP Studio raw diagnostic recipe loads through Bun YAML parser", async () => {
   const recipe = await loadRecipe("../../recipes/synthetic/bp_studio_realistic_v1.yaml");
   expect(recipe.name).toBe("bp_studio_realistic_v1");
-  expect(recipe.families).toEqual({ "bp-studio-realistic": 1, "bp-studio-completed": 0 });
+  expect(recipe.families).toEqual({ "bp-studio-realistic": 1, "bp-studio-completed": 0, "treemaker-tree": 0 });
   expect(recipe.validation).toMatchObject({
     strictGlobal: true,
     requireBoxPleat: true,
@@ -38,17 +38,18 @@ test("BP Studio raw diagnostic recipe loads through Bun YAML parser", async () =
   });
 });
 
-test("default recipe uses compiler-backed labels", async () => {
+test("default recipe uses TreeMaker tree labels", async () => {
   const recipe = await loadRecipe();
-  expect(recipe.name).toBe("bp_completed_uniaxial_v1");
-  expect(recipe.families).toEqual({ "bp-studio-realistic": 0, "bp-studio-completed": 1 });
+  expect(recipe.name).toBe("treemaker_tree_v1");
+  expect(recipe.families).toEqual({ "bp-studio-realistic": 0, "bp-studio-completed": 0, "treemaker-tree": 1 });
   expect(recipe.validation.requireRealistic).toBe(false);
+  expect(recipe.validation.requireTreeMaker).toBe(true);
 });
 
 test("BP Studio completed recipe loads as the strict e2e smoke path", async () => {
   const recipe = await loadRecipe("../../recipes/synthetic/bp_completed_uniaxial_v1.yaml");
   expect(recipe.name).toBe("bp_completed_uniaxial_v1");
-  expect(recipe.families).toEqual({ "bp-studio-realistic": 0, "bp-studio-completed": 1 });
+  expect(recipe.families).toEqual({ "bp-studio-realistic": 0, "bp-studio-completed": 1, "treemaker-tree": 0 });
   expect(recipe.validation).toMatchObject({
     strictGlobal: true,
     requireBoxPleat: true,
