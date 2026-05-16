@@ -5,6 +5,7 @@ data/**/*.txt
 data/output/scraped
 data/output/scraped/**
 data/ts-generation/node_modules
+.venv
 .venv/
 configs/scraping.env
 */**/__pycache__/**
