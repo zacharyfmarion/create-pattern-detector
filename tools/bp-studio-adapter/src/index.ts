@@ -584,6 +584,9 @@ function collectNodeLayout(): NodeLayoutSpec[] {
   for(const node of tree.$nodes) {
     if(!node) continue;
     const [top, right, bottom, left] = node.$AABB.$toValues();
+    const finalContours = node.$graphics.$contours
+      .map(contour => contour.outer.map(point => ({ x: point.x, y: point.y })))
+      .filter(contour => contour.length > 0);
     const finalContourBounds = boundsForPaths(node.$graphics.$contours.map(contour => contour.outer));
     result.push({
       id: node.id,
@@ -594,6 +597,7 @@ function collectNodeLayout(): NodeLayoutSpec[] {
       bounds: { top, right, bottom, left },
       ...(finalContourBounds ? {
         finalContourBounds,
+        finalContours,
         finalContourCount: node.$graphics.$contours.length
       } : {})
     });

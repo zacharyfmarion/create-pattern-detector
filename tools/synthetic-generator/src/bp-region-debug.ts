@@ -373,8 +373,10 @@ function packingPanel(spec: BPStudioAdapterSpec, adapterMetadata: AdapterMetadat
   const scale = sheetScale(sheet.width, sheet.height, size);
   const terminalLengths = terminalLengthByAdapterId(spec);
   const flaps = (layout?.flaps ?? []).map((flap) => adapterFlapMark(flap, toPanel, scale, terminalLengths.get(flap.id), "#4ade80", "#16a34a", true));
+  const contours = bpStudioFinalContourOverlay(layout?.nodes ?? [], toPanel);
   return panelFrame(size, [
     sheetGridForSheet(sheet.width, sheet.height, size),
+    contours,
     ...flaps,
   ], true, "bp-packing-clip");
 }
@@ -391,6 +393,7 @@ function candidateOverlayPanel(
   const scale = sheetScale(sheet.width, sheet.height, size);
   const terminalLengths = terminalLengthByAdapterId(spec);
   const optimizedFlaps = (layout?.flaps ?? []).map((flap) => adapterFlapMark(flap, toPanel, scale, terminalLengths.get(flap.id), "#22c55e", "#15803d", false));
+  const contours = bpStudioFinalContourOverlay(layout?.nodes ?? [], toPanel);
   const routeOverlay = compilerRouteOverlay(candidate, size);
   const failureOverlay = compilerLocalFailureOverlay(candidate, size);
   const candidateSvg = regionCandidateToSvg(candidate, size, {
@@ -403,11 +406,32 @@ function candidateOverlayPanel(
     .replace(/<\/svg>\s*$/, `</g>`);
   return panelFrame(size, [
     sheetGridForSheet(sheet.width, sheet.height, size),
+    contours,
     candidateSvg,
     routeOverlay,
     failureOverlay,
     `<g opacity="0.72">${optimizedFlaps.join("\n")}</g>`,
   ], false, "bp-candidate-overlay-clip");
+}
+
+function bpStudioFinalContourOverlay(
+  nodes: NonNullable<AdapterMetadata["optimizedLayout"]>["nodes"],
+  project: (point: { x: number; y: number }) => { x: number; y: number },
+): string {
+  const paths = (nodes ?? []).flatMap((node) =>
+    (node.finalContours ?? []).map((contour, index) => {
+      if (contour.length < 2) return "";
+      const points = contour.map(project);
+      const d = points
+        .map((point, pointIndex) => `${pointIndex === 0 ? "M" : "L"} ${round1(point.x)} ${round1(point.y)}`)
+        .join(" ");
+      const closed = contour.length > 2 ? " Z" : "";
+      const isLeaf = node.isLeaf;
+      const stroke = isLeaf ? "#0ea5e9" : "#9333ea";
+      return `<path data-bp-studio-contour="${node.id}-${index}" d="${d}${closed}" fill="none" stroke="${stroke}" stroke-width="${isLeaf ? 1.3 : 1.7}" stroke-opacity="${isLeaf ? 0.34 : 0.42}" stroke-dasharray="${isLeaf ? "4 4" : "7 5"}"/>`;
+    })
+  );
+  return `<g data-debug-overlay="bp-studio-final-contours">${paths.join("\n")}</g>`;
 }
 
 function compilerRouteOverlay(candidate: RegionCompletionCandidate, size: number): string {
@@ -732,7 +756,8 @@ function packingLegendOutside(size: number): string {
     legendBand(size, "Packing legend"),
     `<circle cx="20" cy="${y1}" r="4.2" fill="#4ade80" fill-opacity="0.9" stroke="#16a34a" stroke-width="1.6"/><line x1="12" y1="${y1}" x2="28" y2="${y1}" stroke="#16a34a" stroke-width="1.4"/><line x1="20" y1="${y1 - 8}" x2="20" y2="${y1 + 8}" stroke="#16a34a" stroke-width="1.4"/><text x="42" y="${y1 + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">optimized flap terminal point</text>`,
     `<circle cx="274" cy="${y1}" r="17" fill="none" stroke="#16a34a" stroke-width="1.6"/><text x="302" y="${y1 + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">flap length circle</text>`,
-    `<text x="18" y="${y2 + 4}" font-family="Inter, Arial, sans-serif" font-size="11" fill="#64748b">Panel shows only BP Studio optimized flap packing, not inferred hub points.</text>`,
+    `<path d="M 18 ${y2} L 62 ${y2}" fill="none" stroke="#9333ea" stroke-width="1.7" stroke-opacity="0.55" stroke-dasharray="7 5"/><text x="76" y="${y2 + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">BP Studio final contours</text>`,
+    `<text x="266" y="${y2 + 4}" font-family="Inter, Arial, sans-serif" font-size="11" fill="#64748b">No inferred hub points are shown here.</text>`,
   ].join("\n");
 }
 
@@ -743,11 +768,11 @@ function compilerLegendOutside(size: number): string {
   return [
     legendBand(size, "Compiler overlay legend"),
     `<rect x="16" y="${y1 - 9}" width="22" height="18" fill="#ffdf4d" fill-opacity="0.72" stroke="#ca8a04" stroke-width="0.8"/><text x="48" y="${y1 + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">pleat corridor</text>`,
-    `<rect x="170" y="${y1 - 9}" width="22" height="18" fill="#bfdbfe" fill-opacity="0.76" stroke="#2563eb" stroke-width="0.8"/><text x="202" y="${y1 + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">body panel</text>`,
+    `<rect x="170" y="${y1 - 9}" width="22" height="18" fill="#bfdbfe" fill-opacity="0.76" stroke="#2563eb" stroke-width="0.8"/><text x="202" y="${y1 + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">inferred body panel</text>`,
     `<line x1="342" y1="${y1}" x2="374" y2="${y1}" stroke="#ff1f1f" stroke-width="3" stroke-linecap="round"/><text x="384" y="${y1 + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">mountain</text>`,
     `<line x1="16" y1="${y2}" x2="48" y2="${y2}" stroke="#0057ff" stroke-width="3" stroke-linecap="round"/><text x="58" y="${y2 + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">valley</text>`,
-    `<line x1="170" y1="${y2}" x2="202" y2="${y2}" stroke="#0057ff" stroke-width="2" stroke-dasharray="5 4" stroke-linecap="round"/><text x="212" y="${y2 + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">debug boundary</text>`,
-    `<text x="350" y="${y2 + 4}" font-family="Inter, Arial, sans-serif" font-size="11" fill="#64748b">Fills are scaffold/debug only</text>`,
+    `<path d="M 170 ${y2} L 202 ${y2}" fill="none" stroke="#9333ea" stroke-width="1.7" stroke-opacity="0.55" stroke-dasharray="7 5"/><text x="212" y="${y2 + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">BP Studio contour</text>`,
+    `<text x="350" y="${y2 + 4}" font-family="Inter, Arial, sans-serif" font-size="11" fill="#64748b">Fills are compiler scaffold/debug only</text>`,
     `<line x1="16" y1="${y3}" x2="48" y2="${y3}" stroke="#7c3aed" stroke-width="2.2" stroke-dasharray="7 5" stroke-linecap="round"/><text x="58" y="${y3 + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">selected route lane</text>`,
     `<circle cx="184" cy="${y3}" r="4.4" fill="#f97316" stroke="#ffffff" stroke-width="1.2"/><text x="198" y="${y3 + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">circle contact</text>`,
     `<line x1="310" y1="${y3}" x2="340" y2="${y3}" stroke="#64748b" stroke-width="1.2" stroke-dasharray="3 4"/><text x="350" y="${y3 + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">center-to-port guide</text>`,
@@ -765,6 +790,10 @@ function legendBand(size: number, title: string): string {
 
 function round2(value: number): string {
   return Number.isInteger(value) ? String(value) : value.toFixed(2);
+}
+
+function round1(value: number): string {
+  return Number.isInteger(value) ? String(value) : value.toFixed(1);
 }
 
 function escapeXml(value: string): string {

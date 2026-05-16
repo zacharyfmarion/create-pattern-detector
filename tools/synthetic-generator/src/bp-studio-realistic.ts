@@ -116,6 +116,7 @@ export interface AdapterNodeLayout {
     bottom: number;
     left: number;
   };
+  finalContours?: Array<Array<{ x: number; y: number }>>;
   finalContourCount?: number;
 }
 
