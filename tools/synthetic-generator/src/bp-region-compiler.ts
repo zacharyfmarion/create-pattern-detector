@@ -105,6 +105,8 @@ export function compileRegionCandidate(layout: RegionLayout, options: CompileReg
     segments.push(...pleatSegments(strip));
   }
 
+  segments.push(...hubLaneContinuationSegments(workingLayout, dedupeSegments(segments)));
+  segments.push(...terminalBorderContinuationSegments(workingLayout, dedupeSegments(segments)));
   segments.push(...turnClosureSegmentsForKawasakiCorners(workingLayout, dedupeSegments(segments)));
   const arrangedSegments = dedupeSegments(segments);
   const rejectionReasons = [
@@ -129,7 +131,14 @@ export function probeRegionCandidateLocalFlatFoldability(
   layout: RegionLayout,
   segments: RegionCandidateSegment[],
 ): RegionLocalFlatFoldProbe {
-  const activeSegmentKinds: RegionCandidateSegment["kind"][] = ["border", "strip-pleat", "stair-boundary", "turn-closure"];
+  const activeSegmentKinds: RegionCandidateSegment["kind"][] = [
+    "border",
+    "strip-pleat",
+    "stair-boundary",
+    "turn-closure",
+    "hub-closure",
+    "terminal-closure",
+  ];
   const active = segments.filter((segmentItem) => activeSegmentKinds.includes(segmentItem.kind));
   const arranged = arrangeSegments(
     active.map((segmentItem) => ({
@@ -192,11 +201,224 @@ export function probeRegionCandidateLocalFlatFoldability(
   };
 }
 
+function terminalBorderContinuationSegments(
+  layout: RegionLayout,
+  segments: RegionCandidateSegment[],
+): RegionCandidateSegment[] {
+  const activeSegmentKinds: RegionCandidateSegment["kind"][] = ["border", "strip-pleat", "hub-closure", "terminal-closure"];
+  const active = segments.filter((segmentItem) => activeSegmentKinds.includes(segmentItem.kind));
+  const arranged = arrangeSegments(
+    active.map((segmentItem) => ({
+      p1: segmentItem.p1,
+      p2: segmentItem.p2,
+      assignment: segmentItem.assignment,
+      role: segmentItem.role,
+      source: {
+        kind: `region-${segmentItem.kind}`,
+        mandatory: true,
+        ownerId: segmentItem.regionId,
+        id: segmentItem.id,
+      },
+    })),
+    "cp-synthetic-generator/bp-region/terminal-closure-probe",
+    {
+      gridSize: layout.gridSize,
+      bpSubfamily: "bp-studio-completed-uniaxial",
+      flapCount: layout.flaps.length,
+      gadgetCount: 0,
+      ridgeCount: 1,
+      hingeCount: 1,
+      axisCount: 1,
+    },
+  ) as ReturnType<typeof arrangeSegments> & { vertices_edges?: number[][] };
+  ear.graph.populate(arranged);
+
+  const pitch = pleatPitchForGrid(layout.gridSize);
+  const seen = new Set(segments.map((segmentItem) => segmentKey(segmentItem.p1, segmentItem.p2)));
+  const result: RegionCandidateSegment[] = [];
+
+  for (const [vertex, edges] of (arranged.vertices_edges ?? []).entries()) {
+    const foldedEdges = edges.filter((edge) => arranged.edges_assignment[edge] !== "B");
+    if (foldedEdges.length !== 1) continue;
+    const pointItem = arranged.vertices_coords[vertex];
+    if (!pointItem || isSheetBoundaryPoint(pointItem)) continue;
+    const flap = layout.flaps.find((candidate) => pointInsideFlapAllocation(pointItem, candidate, pitch / 3));
+    if (!flap) continue;
+    const edge = foldedEdges[0];
+    const [a, b] = arranged.edges_vertices[edge];
+    const other = arranged.vertices_coords[a === vertex ? b : a];
+    const endpoint = terminalBorderEndpoint(pointItem, other, layout.gridSize);
+    if (!endpoint) continue;
+    if (!segmentInsideFlapAllocation(pointItem, endpoint, flap, pitch / 3)) continue;
+    const p1 = roundPoint(pointItem);
+    const p2 = roundPoint(endpoint);
+    const key = segmentKey(p1, p2);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const assignment = arranged.edges_assignment[edge] === "V" ? "V" : "M";
+    result.push({
+      id: `terminal-closure-${result.length}`,
+      regionId: flap.terminalId,
+      kind: "terminal-closure",
+      p1,
+      p2,
+      assignment,
+      role: roleForSegment(p1, p2),
+    });
+  }
+
+  return result;
+}
+
+function pointInsideFlapAllocation(pointItem: Point, flap: FlapRegion, tolerance: number): boolean {
+  if (!flap.allocationRadius) return false;
+  return Math.hypot(pointItem[0] - flap.center.x, pointItem[1] - flap.center.y) <= flap.allocationRadius + tolerance;
+}
+
+function segmentInsideFlapAllocation(start: Point, end: Point, flap: FlapRegion, tolerance: number): boolean {
+  if (!flap.allocationRadius) return false;
+  for (const t of [0, 0.25, 0.5, 0.75, 1]) {
+    const x = start[0] + (end[0] - start[0]) * t;
+    const y = start[1] + (end[1] - start[1]) * t;
+    if (Math.hypot(x - flap.center.x, y - flap.center.y) > flap.allocationRadius + tolerance) return false;
+  }
+  return true;
+}
+
+function terminalBorderEndpoint(pointItem: Point, other: Point, gridSize: number): Point | undefined {
+  const dx = Math.sign(Math.round((pointItem[0] - other[0]) * gridSize));
+  const dy = Math.sign(Math.round((pointItem[1] - other[1]) * gridSize));
+  if (dx === 0 && dy === 0) return undefined;
+  const stepX = dx / gridSize;
+  const stepY = dy / gridSize;
+  const hits: number[] = [];
+  if (dx > 0) hits.push((1 - pointItem[0]) / stepX);
+  if (dx < 0) hits.push((0 - pointItem[0]) / stepX);
+  if (dy > 0) hits.push((1 - pointItem[1]) / stepY);
+  if (dy < 0) hits.push((0 - pointItem[1]) / stepY);
+  const scale = Math.min(...hits.filter((hit) => hit > 1e-9));
+  if (!Number.isFinite(scale)) return undefined;
+  const endpoint: Point = [
+    round(pointItem[0] + stepX * scale),
+    round(pointItem[1] + stepY * scale),
+  ];
+  return pointInsideSheet(endpoint) ? endpoint : undefined;
+}
+
+function hubLaneContinuationSegments(
+  layout: RegionLayout,
+  segments: RegionCandidateSegment[],
+): RegionCandidateSegment[] {
+  const pleats = segments.filter((segmentItem) => segmentItem.kind === "strip-pleat");
+  const result: RegionCandidateSegment[] = [];
+  const seen = new Set(segments.map((segmentItem) => segmentKey(segmentItem.p1, segmentItem.p2)));
+
+  for (const orientation of ["horizontal", "vertical"] as const) {
+    const coordinateGroups = new Map<string, RegionCandidateSegment[]>();
+    for (const pleat of pleats) {
+      const horizontal = Math.abs(pleat.p1[1] - pleat.p2[1]) < 1e-9;
+      if ((orientation === "horizontal") !== horizontal) continue;
+      const coordinate = horizontal ? pleat.p1[1] : pleat.p1[0];
+      const key = `${orientation}:${coordinate.toFixed(9)}`;
+      const group = coordinateGroups.get(key) ?? [];
+      group.push(pleat);
+      coordinateGroups.set(key, group);
+    }
+
+    for (const [key, group] of coordinateGroups) {
+      if (group.length < 2) continue;
+      const coordinate = Number(key.split(":")[1]);
+      const intervals = group
+        .map((pleat) => intervalForSegment(pleat, orientation))
+        .sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+      const endpoints = sortedUnique(intervals.flat().map(round));
+
+      for (let index = 0; index < endpoints.length - 1; index += 1) {
+        const start = endpoints[index];
+        const end = endpoints[index + 1];
+        if (end - start < 1e-9) continue;
+        if (intervals.some(([a, b]) => start >= a - 1e-9 && end <= b + 1e-9)) continue;
+        if (!gapIsInsideHubManifold(layout, orientation, coordinate, start, end)) continue;
+
+        const p1: Point = orientation === "horizontal" ? [start, coordinate] : [coordinate, start];
+        const p2: Point = orientation === "horizontal" ? [end, coordinate] : [coordinate, end];
+        const segmentId = segmentKey(p1, p2);
+        if (seen.has(segmentId)) continue;
+        seen.add(segmentId);
+        result.push({
+          id: `hub-closure-${result.length}`,
+          regionId: "hub-closure",
+          kind: "hub-closure",
+          p1: roundPoint(p1),
+          p2: roundPoint(p2),
+          assignment: preferredContinuationAssignment(group, start, end, orientation),
+          role: orientation === "horizontal" ? "hinge" : "axis",
+        });
+      }
+    }
+  }
+
+  return result;
+}
+
+function intervalForSegment(segmentItem: RegionCandidateSegment, orientation: "horizontal" | "vertical"): [number, number] {
+  if (orientation === "horizontal") {
+    return [Math.min(segmentItem.p1[0], segmentItem.p2[0]), Math.max(segmentItem.p1[0], segmentItem.p2[0])];
+  }
+  return [Math.min(segmentItem.p1[1], segmentItem.p2[1]), Math.max(segmentItem.p1[1], segmentItem.p2[1])];
+}
+
+function gapIsInsideHubManifold(
+  layout: RegionLayout,
+  orientation: "horizontal" | "vertical",
+  coordinate: number,
+  start: number,
+  end: number,
+): boolean {
+  const midpoint = (start + end) / 2;
+  const pointItem = orientation === "horizontal"
+    ? point(midpoint, coordinate)
+    : point(coordinate, midpoint);
+  if (!layout.bodies.some((body) => rectContainsPoint(body.rect, pointItem))) return false;
+
+  const coveredRegions = [...layout.bodies.map((body) => body.rect), ...layout.pleatStrips.map((strip) => strip.rect)];
+  const intervals = coveredRegions.flatMap((rect): Array<[number, number]> => {
+    if (orientation === "horizontal") {
+      if (coordinate < rect.y1 - 1e-9 || coordinate > rect.y2 + 1e-9) return [];
+      return [[rect.x1, rect.x2]];
+    }
+    if (coordinate < rect.x1 - 1e-9 || coordinate > rect.x2 + 1e-9) return [];
+    return [[rect.y1, rect.y2]];
+  }).sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+
+  const merged: Array<[number, number]> = [];
+  for (const interval of intervals) {
+    const last = merged.at(-1);
+    if (last && interval[0] <= last[1] + 1e-9) last[1] = Math.max(last[1], interval[1]);
+    else merged.push([...interval]);
+  }
+  return merged.some(([a, b]) => start >= a - 1e-9 && end <= b + 1e-9);
+}
+
+function preferredContinuationAssignment(
+  group: RegionCandidateSegment[],
+  start: number,
+  end: number,
+  orientation: "horizontal" | "vertical",
+): Extract<EdgeAssignment, "M" | "V"> {
+  const left = group.find((pleat) => Math.abs(intervalForSegment(pleat, orientation)[1] - start) < 1e-9);
+  const right = group.find((pleat) => Math.abs(intervalForSegment(pleat, orientation)[0] - end) < 1e-9);
+  if (left?.assignment === right?.assignment && (left?.assignment === "M" || left?.assignment === "V")) {
+    return left.assignment;
+  }
+  return left?.assignment === "M" || left?.assignment === "V" ? left.assignment : "M";
+}
+
 function turnClosureSegmentsForKawasakiCorners(
   layout: RegionLayout,
   segments: RegionCandidateSegment[],
 ): RegionCandidateSegment[] {
-  const activeSegmentKinds: RegionCandidateSegment["kind"][] = ["border", "strip-pleat"];
+  const activeSegmentKinds: RegionCandidateSegment["kind"][] = ["border", "strip-pleat", "hub-closure"];
   const active = segments.filter((segmentItem) => activeSegmentKinds.includes(segmentItem.kind));
   const arranged = arrangeSegments(
     active.map((segmentItem) => ({
@@ -395,7 +617,7 @@ export function regionCandidateToSvg(candidate: RegionCompletionCandidate, size 
     const [x1, y1] = toPx(segment.p1);
     const [x2, y2] = toPx(segment.p2);
     const color = segment.assignment === "M" ? colors.mountain : segment.assignment === "V" ? colors.valley : colors.border;
-    const width = segment.kind === "border" ? 3.4 : segment.kind === "strip-pleat" ? 3.6 : segment.kind === "stair-boundary" || segment.kind === "turn-closure" ? 3.5 : 1.8;
+    const width = segment.kind === "border" ? 3.4 : segment.kind === "strip-pleat" ? 3.6 : segment.kind === "stair-boundary" || segment.kind === "turn-closure" || segment.kind === "hub-closure" || segment.kind === "terminal-closure" ? 3.5 : 1.8;
     const dash = segment.kind === "body-boundary" || segment.kind === "flap-boundary" ? " stroke-dasharray=\"5 4\"" : "";
     return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${color}" stroke-width="${round(width * strokeScale)}" stroke-linecap="round" stroke-opacity="0.98"${dash}/>`;
   };

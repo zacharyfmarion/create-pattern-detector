@@ -266,6 +266,28 @@ test("region compiler rejects unsatisfied strip port constraints", () => {
   expect(candidate.rejectionReasons).toContain("port-phase:port-solver-unsat");
 });
 
+test("region compiler closes collinear lane gaps through body panels", () => {
+  const candidate = compileRegionCandidate(hubContinuationLayout());
+  const closures = candidate.segments.filter((segment) => segment.kind === "hub-closure");
+
+  expect(candidate.rejectionReasons).toHaveLength(0);
+  expect(closures).toHaveLength(1);
+  expect(closures[0].p1).toEqual([7 / 16, 5 / 16]);
+  expect(closures[0].p2).toEqual([9 / 16, 5 / 16]);
+  expect(candidate.localProbe?.kawasakiBad).toBe(0);
+});
+
+test("region compiler extends terminal lanes only inside flap allocation circles", () => {
+  const candidate = compileRegionCandidate(terminalContinuationLayout());
+  const closures = candidate.segments.filter((segment) => segment.kind === "terminal-closure");
+
+  expect(candidate.rejectionReasons).toHaveLength(0);
+  expect(closures).toHaveLength(1);
+  expect(closures[0].p1).toEqual([14 / 16, 5 / 16]);
+  expect(closures[0].p2).toEqual([1, 5 / 16]);
+  expect(candidate.localProbe?.kawasakiBad).toBe(0);
+});
+
 test("sheet-sweep lab completion can make long-axis corridor lanes strict", async () => {
   const candidate = compileRegionCandidate(fixtureRegionLayout("two-flap-stretch"));
   const completion = completeRegionCandidateBySheetSweep(candidate);
@@ -332,6 +354,74 @@ function constrainedPhaseLayout(overrides: Partial<{ stripB: Partial<RegionLayou
       aSide: "end",
       bStripId: "strip-b",
       bSide: "start",
+    }],
+  };
+}
+
+function hubContinuationLayout(): RegionLayout {
+  return {
+    id: "hub-continuation-layout",
+    sourceLayoutId: "hub-continuation-layout",
+    gridSize: 16,
+    axis: "horizontal",
+    bodies: [{
+      id: "body",
+      rect: { x1: 7 / 16, y1: 4 / 16, x2: 9 / 16, y2: 6 / 16 },
+      center: { x: 0.5, y: 5 / 16 },
+    }],
+    flaps: [],
+    boundaryPorts: [],
+    pleatStrips: [
+      {
+        id: "left-strip",
+        from: "left",
+        to: "body",
+        rect: { x1: 2 / 16, y1: 4 / 16, x2: 7 / 16, y2: 6 / 16 },
+        orientation: "horizontal",
+        pitch: 1 / 16,
+        phase: 0,
+        startAssignment: "M",
+      },
+      {
+        id: "right-strip",
+        from: "body",
+        to: "right",
+        rect: { x1: 9 / 16, y1: 4 / 16, x2: 14 / 16, y2: 6 / 16 },
+        orientation: "horizontal",
+        pitch: 1 / 16,
+        phase: 0,
+        startAssignment: "M",
+      },
+    ],
+  };
+}
+
+function terminalContinuationLayout(): RegionLayout {
+  return {
+    id: "terminal-continuation-layout",
+    sourceLayoutId: "terminal-continuation-layout",
+    gridSize: 16,
+    axis: "horizontal",
+    bodies: [],
+    flaps: [{
+      id: "flap-right",
+      terminalId: "right-terminal",
+      nodeId: "right-terminal",
+      side: "right",
+      center: { x: 1, y: 5 / 16 },
+      allocationRadius: 2 / 16,
+      rect: { x1: 1, y1: 5 / 16, x2: 1, y2: 5 / 16 },
+    }],
+    boundaryPorts: [],
+    pleatStrips: [{
+      id: "right-terminal-strip",
+      from: "body",
+      to: "right-terminal",
+      rect: { x1: 8 / 16, y1: 4 / 16, x2: 14 / 16, y2: 6 / 16 },
+      orientation: "horizontal",
+      pitch: 1 / 16,
+      phase: 0,
+      startAssignment: "M",
     }],
   };
 }

@@ -294,7 +294,15 @@ export interface RegionLayout {
 export interface RegionCandidateSegment {
   id: string;
   regionId: string;
-  kind: "border" | "body-boundary" | "flap-boundary" | "strip-pleat" | "stair-boundary" | "turn-closure";
+  kind:
+    | "border"
+    | "body-boundary"
+    | "flap-boundary"
+    | "strip-pleat"
+    | "stair-boundary"
+    | "turn-closure"
+    | "hub-closure"
+    | "terminal-closure";
   p1: [number, number];
   p2: [number, number];
   assignment: Extract<EdgeAssignment, "M" | "V" | "B">;
