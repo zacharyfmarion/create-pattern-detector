@@ -1,6 +1,5 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import ear from "rabbit-ear";
 import { regularizeBPStudioLayout } from "./bp-completion.ts";
 import {
   compileRegionCandidate,
@@ -23,7 +22,6 @@ import {
   validateBPStudioPacking,
   type BPStudioPackingValidation,
 } from "./bp-studio-packing-validity.ts";
-import { arrangeSegments } from "./line-arrangement.ts";
 import type { AdapterMetadata } from "./bp-studio-realistic.ts";
 import type { RegionCompletionCandidate } from "./bp-completion-contracts.ts";
 
@@ -272,7 +270,7 @@ function threePanelSvg(
     {
       x: gutter * 3 + panelSize * 2,
       title: "3. Compiler Candidate Overlay",
-      subtitle: `${candidate.validity}, ${candidate.layout.pleatStrips.length} pleat corridors`,
+      subtitle: `${candidate.validity}, ${candidate.layout.pleatStrips.length} pleat corridors, active K/M ${candidate.localProbe?.kawasakiBad ?? "?"}/${candidate.localProbe?.maekawaBad ?? "?"}`,
       body: candidateOverlayPanel(spec, adapterMetadata, candidate, panelSize),
       legend: compilerLegendOutside(panelSize),
     },
@@ -438,42 +436,21 @@ function routePortDot(point: { x: number; y: number }, kind: "body" | "flap"): s
 }
 
 function compilerLocalFailureOverlay(candidate: RegionCompletionCandidate, size: number): string {
-  const arranged = arrangeSegments(
-    candidate.segments
-      .filter((segment) => segment.kind === "border" || segment.kind === "strip-pleat" || segment.kind === "stair-boundary")
-      .map((segment) => ({
-        p1: segment.p1,
-        p2: segment.p2,
-        assignment: segment.assignment,
-        role: segment.role,
-        source: { kind: `region-${segment.kind}`, mandatory: true, ownerId: segment.regionId },
-      })),
-    "cp-synthetic-generator/bp-region-debug/local-probe",
-    {
-      gridSize: candidate.layout.gridSize,
-      bpSubfamily: "bp-studio-completed-uniaxial",
-      flapCount: candidate.layout.flaps.length,
-      gadgetCount: candidate.stairBoundaries.length,
-      ridgeCount: 1,
-      hingeCount: 1,
-      axisCount: 1,
-    },
-  );
-  const kawasakiProbe = {
-    ...arranged,
-    edges_assignment: arranged.edges_assignment.map((assignment) => assignment === "B" ? "B" : "M"),
-  };
-  ear.graph.populate(kawasakiProbe);
-  const badVertices = (ear.singleVertex.validateKawasaki(kawasakiProbe) as number[]).slice(0, 120);
-  const dots = badVertices.flatMap((vertex) => {
-    const point = arranged.vertices_coords[vertex];
-    if (!point) return [];
-    const x = Math.round(point[0] * size);
-    const y = Math.round((1 - point[1]) * size);
+  const points = candidate.localProbe?.failurePoints.slice(0, 160) ?? [];
+  const dots = points.flatMap((point) => {
+    const x = Math.round(point.x * size);
+    const y = Math.round((1 - point.y) * size);
+    if (point.kawasaki) {
+      return [
+        `<circle cx="${x}" cy="${y}" r="5.8" fill="#d946ef" fill-opacity="0.22" stroke="#a21caf" stroke-width="1.5"/>`,
+        `<line x1="${x - 4}" y1="${y - 4}" x2="${x + 4}" y2="${y + 4}" stroke="#a21caf" stroke-width="1.2"/>`,
+        `<line x1="${x - 4}" y1="${y + 4}" x2="${x + 4}" y2="${y - 4}" stroke="#a21caf" stroke-width="1.2"/>`,
+      ];
+    }
     return [
-      `<circle cx="${x}" cy="${y}" r="5.8" fill="#d946ef" fill-opacity="0.22" stroke="#a21caf" stroke-width="1.5"/>`,
-      `<line x1="${x - 4}" y1="${y - 4}" x2="${x + 4}" y2="${y + 4}" stroke="#a21caf" stroke-width="1.2"/>`,
-      `<line x1="${x - 4}" y1="${y + 4}" x2="${x + 4}" y2="${y - 4}" stroke="#a21caf" stroke-width="1.2"/>`,
+      `<circle cx="${x}" cy="${y}" r="4.7" fill="#fb923c" fill-opacity="0.22" stroke="#ea580c" stroke-width="1.4"/>`,
+      `<line x1="${x - 4}" y1="${y}" x2="${x + 4}" y2="${y}" stroke="#ea580c" stroke-width="1.2"/>`,
+      `<line x1="${x}" y1="${y - 4}" x2="${x}" y2="${y + 4}" stroke="#ea580c" stroke-width="1.2"/>`,
     ];
   });
   if (dots.length === 0) return "";
@@ -725,7 +702,8 @@ function compilerLegendOutside(size: number): string {
     `<line x1="16" y1="${y3}" x2="48" y2="${y3}" stroke="#7c3aed" stroke-width="2.2" stroke-dasharray="7 5" stroke-linecap="round"/><text x="58" y="${y3 + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">selected route lane</text>`,
     `<circle cx="184" cy="${y3}" r="4.4" fill="#f97316" stroke="#ffffff" stroke-width="1.2"/><text x="198" y="${y3 + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">circle contact</text>`,
     `<line x1="310" y1="${y3}" x2="340" y2="${y3}" stroke="#64748b" stroke-width="1.2" stroke-dasharray="3 4"/><text x="350" y="${y3 + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">center-to-port guide</text>`,
-    `<circle cx="498" cy="${y3}" r="5.8" fill="#d946ef" fill-opacity="0.22" stroke="#a21caf" stroke-width="1.5"/><line x1="494" y1="${y3 - 4}" x2="502" y2="${y3 + 4}" stroke="#a21caf" stroke-width="1.2"/><line x1="494" y1="${y3 + 4}" x2="502" y2="${y3 - 4}" stroke="#a21caf" stroke-width="1.2"/><text x="512" y="${y3 + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">active local failure</text>`,
+    `<circle cx="498" cy="${y3}" r="5.8" fill="#d946ef" fill-opacity="0.22" stroke="#a21caf" stroke-width="1.5"/><line x1="494" y1="${y3 - 4}" x2="502" y2="${y3 + 4}" stroke="#a21caf" stroke-width="1.2"/><line x1="494" y1="${y3 + 4}" x2="502" y2="${y3 - 4}" stroke="#a21caf" stroke-width="1.2"/><text x="512" y="${y3 + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">K</text>`,
+    `<circle cx="548" cy="${y3}" r="4.7" fill="#fb923c" fill-opacity="0.22" stroke="#ea580c" stroke-width="1.4"/><line x1="544" y1="${y3}" x2="552" y2="${y3}" stroke="#ea580c" stroke-width="1.2"/><line x1="548" y1="${y3 - 4}" x2="548" y2="${y3 + 4}" stroke="#ea580c" stroke-width="1.2"/><text x="562" y="${y3 + 4}" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0f172a">M failures</text>`,
   ].join("\n");
 }
 

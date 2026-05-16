@@ -65,7 +65,8 @@ test("regularized simple quadruped corridors avoid flap allocation interiors", (
   const completionLayout = regularizeBPStudioLayout(spec, { adapterSpec, adapterMetadata: metadata });
   const candidate = compileRegionCandidate(regionLayoutFromCompletionLayout(completionLayout));
 
-  expect(candidate.validity).toBe("candidate-complete");
+  expect(candidate.validity).toBe("layout-valid");
+  expect(candidate.localProbe?.locallyFlatFoldable).toBe(false);
   expect(candidate.rejectionReasons.filter((reason) => reason.startsWith("flap-allocation-overlap"))).toHaveLength(0);
   expect(candidate.layout.pleatStrips.length).toBeGreaterThan(7);
   expect(candidate.layout.pleatStrips.every((strip) =>

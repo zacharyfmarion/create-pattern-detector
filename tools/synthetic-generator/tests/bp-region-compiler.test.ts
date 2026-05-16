@@ -22,8 +22,10 @@ test("region compiler builds fixture layouts with local pleat-strip regions", ()
 test("region compiler emits alternating M/V pleat strips on the compiler grid", () => {
   const candidate = compileRegionCandidate(fixtureRegionLayout("two-flap-stretch"));
   const pleats = candidate.segments.filter((segment) => segment.kind === "strip-pleat");
-  expect(candidate.validity).toBe("candidate-complete");
+  expect(candidate.validity).toBe("layout-valid");
   expect(candidate.rejectionReasons).toHaveLength(0);
+  expect(candidate.localProbe?.locallyFlatFoldable).toBe(false);
+  expect(candidate.localProbe?.badVertices).toBeGreaterThan(0);
   expect(pleats.length).toBeGreaterThan(8);
   expect(pleats.some((segment) => segment.assignment === "M")).toBe(true);
   expect(pleats.some((segment) => segment.assignment === "V")).toBe(true);
@@ -90,7 +92,7 @@ test("region compiler snaps optimized scaffold rectangles to visible pleat grid"
   };
 
   const candidate = compileRegionCandidate(regionLayoutFromCompletionLayout(layout));
-  expect(candidate.validity).toBe("candidate-complete");
+  expect(candidate.validity).toBe("layout-valid");
   expect(candidate.rejectionReasons).toHaveLength(0);
   const pitch = 1 / 32;
   for (const segment of candidate.segments) {
@@ -231,7 +233,7 @@ test("region compiler solves constrained pleat-strip phases before emitting crea
   const solved = compileRegionCandidate(layout);
 
   expect(firstPleat(raw, "strip-b")?.assignment).toBe("M");
-  expect(solved.validity).toBe("candidate-complete");
+  expect(solved.validity).toBe("layout-valid");
   expect(solved.layout.pleatStrips.find((strip) => strip.id === "strip-b")?.phase).toBe(1);
   expect(solved.layout.pleatStrips.find((strip) => strip.id === "strip-b")?.startAssignment).toBe("V");
   expect(firstPleat(solved, "strip-b")?.assignment).toBe("V");

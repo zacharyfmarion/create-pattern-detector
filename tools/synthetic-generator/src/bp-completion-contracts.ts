@@ -301,11 +301,30 @@ export interface RegionCandidateSegment {
   role: BPRole;
 }
 
+export interface RegionLocalFailurePoint {
+  x: number;
+  y: number;
+  kawasaki: boolean;
+  maekawa: boolean;
+}
+
+export interface RegionLocalFlatFoldProbe {
+  activeSegmentKinds: RegionCandidateSegment["kind"][];
+  arrangedVertices: number;
+  arrangedEdges: number;
+  kawasakiBad: number;
+  maekawaBad: number;
+  badVertices: number;
+  locallyFlatFoldable: boolean;
+  failurePoints: RegionLocalFailurePoint[];
+}
+
 export interface RegionCompletionCandidate {
   id: string;
   layout: RegionLayout;
   validity: CompletionCandidateValidity;
   segments: RegionCandidateSegment[];
   stairBoundaries: StairBoundary[];
+  localProbe?: RegionLocalFlatFoldProbe;
   rejectionReasons: string[];
 }

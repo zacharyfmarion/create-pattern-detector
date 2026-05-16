@@ -1,3 +1,4 @@
+import ear from "rabbit-ear";
 import { fixtureCompletionLayout } from "./bp-completion.ts";
 import {
   alternatingSequence,
@@ -20,10 +21,12 @@ import type {
   PleatStripRegion,
   RegionCandidateSegment,
   RegionCompletionCandidate,
+  RegionLocalFlatFoldProbe,
   RegionLayout,
   RegionRect,
   StairBoundary,
 } from "./bp-completion-contracts.ts";
+import { arrangeSegments } from "./line-arrangement.ts";
 import type { EdgeAssignment } from "./types.ts";
 
 type Point = [number, number];
@@ -121,14 +124,76 @@ export function compileRegionCandidate(layout: RegionLayout, options: CompileReg
     ...offGridRejections(arrangedSegments, layout.gridSize),
     ...overlapRejections(workingLayout),
   ];
+  const localProbe = probeRegionCandidateLocalFlatFoldability(workingLayout, arrangedSegments);
 
   return {
     id: `${workingLayout.id}-candidate`,
     layout: workingLayout,
-    validity: rejectionReasons.length ? "rejected" : "candidate-complete",
+    validity: rejectionReasons.length ? "rejected" : localProbe.locallyFlatFoldable ? "locally-valid" : "layout-valid",
     segments: arrangedSegments,
     stairBoundaries,
+    localProbe,
     rejectionReasons,
+  };
+}
+
+export function probeRegionCandidateLocalFlatFoldability(
+  layout: RegionLayout,
+  segments: RegionCandidateSegment[],
+): RegionLocalFlatFoldProbe {
+  const activeSegmentKinds: RegionCandidateSegment["kind"][] = ["border", "strip-pleat", "stair-boundary"];
+  const active = segments.filter((segmentItem) => activeSegmentKinds.includes(segmentItem.kind));
+  const arranged = arrangeSegments(
+    active.map((segmentItem) => ({
+      p1: segmentItem.p1,
+      p2: segmentItem.p2,
+      assignment: segmentItem.assignment,
+      role: segmentItem.role,
+      source: {
+        kind: `region-${segmentItem.kind}`,
+        mandatory: true,
+        ownerId: segmentItem.regionId,
+      },
+    })),
+    "cp-synthetic-generator/bp-region/local-probe",
+    {
+      gridSize: layout.gridSize,
+      bpSubfamily: "bp-studio-completed-uniaxial",
+      flapCount: layout.flaps.length,
+      gadgetCount: segments.filter((segmentItem) => segmentItem.kind === "stair-boundary").length,
+      ridgeCount: 1,
+      hingeCount: 1,
+      axisCount: 1,
+    },
+  );
+  const kawasakiProbe = {
+    ...arranged,
+    edges_assignment: arranged.edges_assignment.map((assignment) => assignment === "B" ? "B" : "M"),
+  };
+  ear.graph.populate(kawasakiProbe);
+  ear.graph.populate(arranged);
+  const kawasakiBadVertices = sortedUnique(ear.singleVertex.validateKawasaki(kawasakiProbe) as number[]);
+  const maekawaBadVertices = sortedUnique(ear.singleVertex.validateMaekawa(arranged) as number[]);
+  const badVertexSet = new Set([...kawasakiBadVertices, ...maekawaBadVertices]);
+  const failurePoints = [...badVertexSet].sort((a, b) => a - b).slice(0, 240).flatMap((vertex) => {
+    const pointItem = arranged.vertices_coords[vertex];
+    if (!pointItem) return [];
+    return [{
+      x: round(pointItem[0]),
+      y: round(pointItem[1]),
+      kawasaki: kawasakiBadVertices.includes(vertex),
+      maekawa: maekawaBadVertices.includes(vertex),
+    }];
+  });
+  return {
+    activeSegmentKinds,
+    arrangedVertices: arranged.vertices_coords.length,
+    arrangedEdges: arranged.edges_vertices.length,
+    kawasakiBad: kawasakiBadVertices.length,
+    maekawaBad: maekawaBadVertices.length,
+    badVertices: badVertexSet.size,
+    locallyFlatFoldable: badVertexSet.size === 0,
+    failurePoints,
   };
 }
 
@@ -1041,6 +1106,10 @@ function rectContainsPoint(container: RegionRect, inner: CompletionPoint): boole
 
 function rectArea(rect: RegionRect): number {
   return Math.max(0, rect.x2 - rect.x1) * Math.max(0, rect.y2 - rect.y1);
+}
+
+function sortedUnique(values: readonly number[]): number[] {
+  return [...new Set(values)].sort((a, b) => a - b);
 }
 
 function alternate(start: Extract<EdgeAssignment, "M" | "V">, index: number): Extract<EdgeAssignment, "M" | "V"> {
