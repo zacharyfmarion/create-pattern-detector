@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 from dataclasses import asdict, dataclass, field
 
 import numpy as np
 from scipy.optimize import linear_sum_assignment
 
-from src.data.fold_parser import CreasePattern, FOLDParser
+from src.data.fold_parser import FOLDParser
 from src.vectorization.planar_graph_builder import PlanarGraphResult
 
 
@@ -272,6 +273,17 @@ def _ratio(numerator: int | float, denominator: int | float) -> float:
 def _no_illegal_crossings(result: PlanarGraphResult) -> bool:
     vertices = result.pixel_vertices
     edges = result.edges_vertices
+    candidate_pairs = _candidate_crossing_pairs(vertices, edges)
+    if candidate_pairs:
+        for i, j in candidate_pairs:
+            a0, a1 = int(edges[i][0]), int(edges[i][1])
+            b0, b1 = int(edges[j][0]), int(edges[j][1])
+            if len({a0, a1, b0, b1}) < 4:
+                continue
+            if _segments_intersect(vertices[a0], vertices[a1], vertices[b0], vertices[b1]):
+                return False
+        return True
+
     for i, edge_a in enumerate(edges):
         a0, a1 = int(edge_a[0]), int(edge_a[1])
         for edge_b in edges[i + 1 :]:
@@ -281,6 +293,42 @@ def _no_illegal_crossings(result: PlanarGraphResult) -> bool:
             if _segments_intersect(vertices[a0], vertices[a1], vertices[b0], vertices[b1]):
                 return False
     return True
+
+
+def _candidate_crossing_pairs(
+    vertices: np.ndarray,
+    edges: np.ndarray,
+    cell_size: float = 32.0,
+    min_edges_for_index: int = 256,
+) -> set[tuple[int, int]]:
+    if len(edges) < min_edges_for_index:
+        return set()
+
+    cells: dict[tuple[int, int], list[int]] = defaultdict(list)
+    for edge_idx, (v1, v2) in enumerate(edges):
+        p0 = vertices[int(v1)]
+        p1 = vertices[int(v2)]
+        min_xy = np.minimum(p0, p1)
+        max_xy = np.maximum(p0, p1)
+        x0 = int(np.floor(min_xy[0] / cell_size))
+        x1 = int(np.floor(max_xy[0] / cell_size))
+        y0 = int(np.floor(min_xy[1] / cell_size))
+        y1 = int(np.floor(max_xy[1] / cell_size))
+        for x in range(x0, x1 + 1):
+            for y in range(y0, y1 + 1):
+                cells[(x, y)].append(edge_idx)
+
+    pairs: set[tuple[int, int]] = set()
+    for bucket in cells.values():
+        if len(bucket) < 2:
+            continue
+        for pos, first in enumerate(bucket[:-1]):
+            for second in bucket[pos + 1 :]:
+                if first < second:
+                    pairs.add((first, second))
+                else:
+                    pairs.add((second, first))
+    return pairs
 
 
 def _segments_intersect(a: np.ndarray, b: np.ndarray, c: np.ndarray, d: np.ndarray) -> bool:

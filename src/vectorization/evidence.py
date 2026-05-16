@@ -75,6 +75,13 @@ def render_vectorizer_evidence(
     for vertex_idx, vertex in enumerate(pixel_vertices):
         if degrees[vertex_idx] >= 1:
             _add_gaussian(heatmap, vertex, sigma=junction_sigma, radius=junction_radius)
+            _add_impulse(heatmap, vertex)
+
+    canonical_edges, canonical_assignments = _canonicalize_metric_edges(
+        pixel_vertices,
+        cp.edges,
+        cp.assignments,
+    )
 
     return RenderedVectorizerEvidence(
         evidence=VectorizerEvidence(
@@ -84,8 +91,8 @@ def render_vectorizer_evidence(
             assignment_labels=assignment_labels,
         ),
         pixel_vertices=pixel_vertices,
-        edges=cp.edges,
-        assignments=cp.assignments,
+        edges=canonical_edges,
+        assignments=canonical_assignments,
     )
 
 
@@ -114,6 +121,14 @@ def _add_gaussian(
     )
 
 
+def _add_impulse(heatmap: np.ndarray, center: np.ndarray) -> None:
+    h, w = heatmap.shape
+    x = int(round(float(center[0])))
+    y = int(round(float(center[1])))
+    if 0 <= x < w and 0 <= y < h:
+        heatmap[y, x] = 1.0
+
+
 def _assignment_priority(label: int) -> int:
     # labels are segmentation-style: 1=M, 2=V, 3=B, 4=U.
     if label in (1, 2):
@@ -121,5 +136,85 @@ def _assignment_priority(label: int) -> int:
     if label == 4:
         return 2
     if label == 3:
+        return 1
+    return 0
+
+
+def _canonicalize_metric_edges(
+    pixel_vertices: np.ndarray,
+    edges: np.ndarray,
+    assignments: np.ndarray,
+    vertex_distance_px: float = 2.0,
+    min_edge_length_px: float = 3.0,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Split and dedupe raw FOLD edges for metric comparisons.
+
+    Some scraped FOLD files include long border or crease spans that pass
+    through explicit vertices already connected by shorter edges. The
+    deterministic builder emits the canonical planar adjacency graph, so metrics
+    use that same adjacency convention while rendering still uses the original
+    geometry as evidence.
+    """
+    edge_map: dict[tuple[int, int], int] = {}
+    for edge, assignment in zip(edges, assignments):
+        sequence = _vertices_on_segment(
+            pixel_vertices,
+            int(edge[0]),
+            int(edge[1]),
+            vertex_distance_px=vertex_distance_px,
+            min_edge_length_px=min_edge_length_px,
+        )
+        for v1, v2 in zip(sequence[:-1], sequence[1:]):
+            if v1 == v2:
+                continue
+            if np.linalg.norm(pixel_vertices[v1] - pixel_vertices[v2]) < min_edge_length_px:
+                continue
+            key = (min(v1, v2), max(v1, v2))
+            previous = edge_map.get(key)
+            if previous is None or _metric_assignment_priority(int(assignment)) > _metric_assignment_priority(previous):
+                edge_map[key] = int(assignment)
+
+    if not edge_map:
+        return np.empty((0, 2), dtype=np.int64), np.empty(0, dtype=np.int8)
+    return (
+        np.array(list(edge_map.keys()), dtype=np.int64),
+        np.array(list(edge_map.values()), dtype=np.int8),
+    )
+
+
+def _vertices_on_segment(
+    vertices: np.ndarray,
+    v1: int,
+    v2: int,
+    vertex_distance_px: float,
+    min_edge_length_px: float,
+) -> list[int]:
+    p0 = vertices[v1]
+    p1 = vertices[v2]
+    segment = p1 - p0
+    length = float(np.linalg.norm(segment))
+    if length <= 1e-6:
+        return [v1, v2]
+    direction = segment / length
+    rel = vertices - p0[None, :]
+    projection = rel @ direction
+    between = (projection > min_edge_length_px) & (projection < length - min_edge_length_px)
+    perp = np.abs(rel[:, 0] * direction[1] - rel[:, 1] * direction[0])
+    close = perp <= vertex_distance_px
+    close[v1] = False
+    close[v2] = False
+    intermediate = np.where(between & close)[0]
+    if len(intermediate) == 0:
+        return [v1, v2]
+    ordered = sorted((int(idx) for idx in intermediate), key=lambda idx: float(projection[idx]))
+    return [v1, *ordered, v2]
+
+
+def _metric_assignment_priority(assignment: int) -> int:
+    if assignment in (0, 1):
+        return 3
+    if assignment == 3:
+        return 2
+    if assignment == 2:
         return 1
     return 0

@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import sys
+from collections import defaultdict
 from pathlib import Path
 from time import perf_counter
 from typing import Any
@@ -156,6 +158,102 @@ def save_contact_sheet(overlay_paths: list[Path], output_path: Path, columns: in
     sheet.save(output_path)
 
 
+def save_ranked_contact_sheet(
+    rows: list[dict[str, Any]],
+    output_path: Path,
+    sort_key: str,
+    reverse: bool = False,
+    limit: int = 12,
+) -> None:
+    ranked = sorted(rows, key=lambda row: float(row.get(sort_key, 0.0)), reverse=reverse)
+    paths = [Path(row["overlay_path"]) for row in ranked[:limit]]
+    save_contact_sheet(paths, output_path)
+
+
+def copy_failure_overlays(rows: list[dict[str, Any]], output_dir: Path) -> None:
+    failures_dir = output_dir / "failures"
+    failures_dir.mkdir(parents=True, exist_ok=True)
+    for row in rows:
+        structural = row.get("structural_validity", {})
+        failed_metrics = (
+            float(row["vertex_recall"]) < 0.99
+            or float(row["vertex_precision"]) < 0.99
+            or float(row["edge_recall"]) < 0.98
+            or float(row["edge_precision"]) < 0.98
+            or float(row["assignment_accuracy"]) < 0.99
+            or not bool(structural.get("valid", False))
+        )
+        if not failed_metrics:
+            continue
+        source = Path(row["overlay_path"])
+        if source.exists():
+            shutil.copy2(source, failures_dir / source.name)
+
+
+def bucket_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    by_bucket: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in rows:
+        by_bucket[str(row["bucket"])].append(row)
+    return {bucket: summarize_rows(items) for bucket, items in sorted(by_bucket.items())}
+
+
+def failure_summary(rows: list[dict[str, Any]]) -> dict[str, int]:
+    summary = {
+        "vertex_precision_below_99": 0,
+        "vertex_recall_below_99": 0,
+        "edge_precision_below_98": 0,
+        "edge_recall_below_98": 0,
+        "assignment_accuracy_below_99": 0,
+        "structural_invalid": 0,
+    }
+    structural_errors: dict[str, int] = defaultdict(int)
+    for row in rows:
+        summary["vertex_precision_below_99"] += int(float(row["vertex_precision"]) < 0.99)
+        summary["vertex_recall_below_99"] += int(float(row["vertex_recall"]) < 0.99)
+        summary["edge_precision_below_98"] += int(float(row["edge_precision"]) < 0.98)
+        summary["edge_recall_below_98"] += int(float(row["edge_recall"]) < 0.98)
+        summary["assignment_accuracy_below_99"] += int(float(row["assignment_accuracy"]) < 0.99)
+        structural = row.get("structural_validity", {})
+        if not bool(structural.get("valid", False)):
+            summary["structural_invalid"] += 1
+            for error in structural.get("errors", []):
+                structural_errors[str(error)] += 1
+    return {**summary, **{f"structural_error:{key}": value for key, value in structural_errors.items()}}
+
+
+def summarize_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    if not rows:
+        return {}
+    totals = {
+        "files": len(rows),
+        "gt_vertices": sum(int(row["gt_vertices"]) for row in rows),
+        "pred_vertices": sum(int(row["pred_vertices"]) for row in rows),
+        "matched_vertices": sum(int(row["matched_vertices"]) for row in rows),
+        "gt_edges": sum(int(row["gt_edges"]) for row in rows),
+        "pred_edges": sum(int(row["pred_edges"]) for row in rows),
+        "matched_edges": sum(int(row["matched_edges"]) for row in rows),
+        "assignment_total": sum(int(row["assignment_total"]) for row in rows),
+        "assignment_correct": sum(int(row["assignment_correct"]) for row in rows),
+        "structurally_valid_files": sum(bool(row["structural_validity"]["valid"]) for row in rows),
+        "elapsed_seconds": sum(float(row["elapsed_seconds"]) for row in rows),
+    }
+    return {
+        **totals,
+        "vertex_precision": ratio(totals["matched_vertices"], totals["pred_vertices"]),
+        "vertex_recall": ratio(totals["matched_vertices"], totals["gt_vertices"]),
+        "edge_precision": ratio(totals["matched_edges"], totals["pred_edges"]),
+        "edge_recall": ratio(totals["matched_edges"], totals["gt_edges"]),
+        "assignment_accuracy": ratio(totals["assignment_correct"], totals["assignment_total"]),
+        "structural_validity_rate": ratio(totals["structurally_valid_files"], totals["files"]),
+        "mean_elapsed_seconds": float(np.mean([float(row["elapsed_seconds"]) for row in rows])),
+        "max_elapsed_seconds": float(np.max([float(row["elapsed_seconds"]) for row in rows])),
+    }
+
+
+def ratio(numerator: int | float, denominator: int | float) -> float:
+    return float(numerator / denominator) if denominator else 0.0
+
+
 def run(args: argparse.Namespace) -> None:
     records = load_manifest(args.manifest)
     if args.max_edges is not None:
@@ -185,6 +283,9 @@ def run(args: argparse.Namespace) -> None:
             direct_edge_fallback=not args.disable_direct_edge_fallback,
             direct_edge_max_length_px=args.direct_edge_max_length_px,
             direct_edge_min_support=args.direct_edge_min_support,
+            direct_edge_max_vertices=args.direct_edge_max_vertices,
+            direct_edge_short_max_length_px=args.direct_edge_short_max_length_px,
+            direct_edge_short_max_vertices=args.direct_edge_short_max_vertices,
             planar_cleanup=not args.disable_planar_cleanup,
             planar_cleanup_max_edges=args.planar_cleanup_max_edges,
             planar_split_vertex_distance_px=args.planar_split_vertex_distance_px,
@@ -240,6 +341,7 @@ def run(args: argparse.Namespace) -> None:
             metrics,
         )
         overlay_paths.append(overlay_path)
+        row["overlay_path"] = overlay_path.as_posix()
         print(
             f"[{index}/{len(records)}] {record['bucket']} "
             f"V-R {metrics.vertex_recall:.3f} E-R {metrics.edge_recall:.3f} "
@@ -251,11 +353,58 @@ def run(args: argparse.Namespace) -> None:
     summary["manifest"] = args.manifest.as_posix()
     summary["image_size"] = args.image_size
     summary["records"] = len(records)
+    summary["config"] = {
+        "padding": args.padding,
+        "line_width": args.line_width,
+        "junction_sigma": args.junction_sigma,
+        "vertex_tolerance": args.vertex_tolerance,
+        "hough_threshold": args.hough_threshold,
+        "hough_min_line_length": args.hough_min_line_length,
+        "hough_max_line_gap": args.hough_max_line_gap,
+        "min_edge_support": args.min_edge_support,
+        "line_vertex_distance_px": args.line_vertex_distance_px,
+        "junction_threshold": args.junction_threshold,
+        "junction_nms_radius": args.junction_nms_radius,
+        "vertex_merge_px": args.vertex_merge_px,
+        "max_intersection_lines": args.max_intersection_lines,
+        "add_intersection_vertices": args.add_intersection_vertices,
+        "direct_edge_fallback": not args.disable_direct_edge_fallback,
+        "direct_edge_max_length_px": args.direct_edge_max_length_px,
+        "direct_edge_min_support": args.direct_edge_min_support,
+        "direct_edge_max_vertices": args.direct_edge_max_vertices,
+        "direct_edge_short_max_length_px": args.direct_edge_short_max_length_px,
+        "direct_edge_short_max_vertices": args.direct_edge_short_max_vertices,
+        "planar_cleanup": not args.disable_planar_cleanup,
+        "planar_cleanup_max_edges": args.planar_cleanup_max_edges,
+        "planar_split_vertex_distance_px": args.planar_split_vertex_distance_px,
+    }
+    summary["bucket_summary"] = bucket_summary(metrics_rows)
+    summary["failure_summary"] = failure_summary(metrics_rows)
     (output_dir / "summary.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
     with (output_dir / "per_file_metrics.jsonl").open("w", encoding="utf-8") as handle:
         for row in metrics_rows:
             handle.write(json.dumps(row) + "\n")
-    save_contact_sheet(overlay_paths, output_dir / "smoke_contact_sheet.png")
+    save_contact_sheet(overlay_paths[: args.contact_sheet_limit], output_dir / "contact_sheet.png")
+    save_ranked_contact_sheet(
+        metrics_rows,
+        output_dir / "worst_vertex_recall_contact_sheet.png",
+        sort_key="vertex_recall",
+        limit=args.worst_limit,
+    )
+    save_ranked_contact_sheet(
+        metrics_rows,
+        output_dir / "worst_edge_recall_contact_sheet.png",
+        sort_key="edge_recall",
+        limit=args.worst_limit,
+    )
+    save_ranked_contact_sheet(
+        metrics_rows,
+        output_dir / "slowest_contact_sheet.png",
+        sort_key="elapsed_seconds",
+        reverse=True,
+        limit=args.worst_limit,
+    )
+    copy_failure_overlays(metrics_rows, output_dir)
     print(json.dumps(summary, indent=2))
 
 
@@ -281,11 +430,16 @@ def main() -> None:
     parser.add_argument("--max-intersection-lines", type=int, default=250)
     parser.add_argument("--add-intersection-vertices", action="store_true")
     parser.add_argument("--disable-direct-edge-fallback", action="store_true")
-    parser.add_argument("--direct-edge-max-length-px", type=float, default=96.0)
+    parser.add_argument("--direct-edge-max-length-px", type=float, default=1024.0)
     parser.add_argument("--direct-edge-min-support", type=float, default=0.9)
+    parser.add_argument("--direct-edge-max-vertices", type=int, default=256)
+    parser.add_argument("--direct-edge-short-max-length-px", type=float, default=180.0)
+    parser.add_argument("--direct-edge-short-max-vertices", type=int, default=800)
     parser.add_argument("--disable-planar-cleanup", action="store_true")
     parser.add_argument("--planar-cleanup-max-edges", type=int, default=3000)
     parser.add_argument("--planar-split-vertex-distance-px", type=float, default=2.0)
+    parser.add_argument("--contact-sheet-limit", type=int, default=24)
+    parser.add_argument("--worst-limit", type=int, default=12)
     args = parser.parse_args()
     run(args)
 

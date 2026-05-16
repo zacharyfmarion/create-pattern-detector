@@ -63,3 +63,47 @@ visualizations/phase2_vectorizer/<run-id>/
 ```
 
 This path is ignored by git. Important images can be shown in chat during checkpoint review, but they should not be committed.
+
+## Current Best Run
+
+Best deterministic settings as of the first full real-corpus run:
+
+- 1024px render size with 32px padding.
+- Canonicalized metric-side GT edges, splitting raw FOLD spans that pass through explicit vertices.
+- Long direct-edge fallback up to 1024px for <=256 vertices.
+- Short direct-edge fallback up to 180px for <=800 vertices.
+- Planar cleanup enabled, splitting edges through vertices and removing weaker true crossings.
+
+Key artifacts:
+
+- Curated gate: `visualizations/phase2_vectorizer/curated_gate_final_v2/`
+- Full stress: `visualizations/phase2_vectorizer/full_stress_final/`
+
+Curated gate, all 60 records:
+
+- Vertex precision: 99.99%
+- Vertex recall: 98.68%
+- Edge precision: 94.62%
+- Edge recall: 85.48%
+- Assignment accuracy: 100.00%
+- Structural validity: 96.67%
+
+Curated gate, non-stress records only (52 records), which is the current practical gate slice:
+
+- Vertex precision: 100.00%
+- Vertex recall: 99.67%
+- Edge precision: 98.82%
+- Edge recall: 98.61%
+- Assignment accuracy: 100.00%
+- Structural validity: 100.00%
+
+Full real stress, all 582 records:
+
+- Vertex precision: 99.997%
+- Vertex recall: 97.91%
+- Edge precision: 93.60%
+- Edge recall: 85.80%
+- Assignment accuracy: 99.999%
+- Structural validity: 96.74%
+
+The high-stress tail remains non-blocking telemetry. Failures are concentrated in dense diagrams above roughly 1.7k edges plus a few style-specific outliers in the large bucket.

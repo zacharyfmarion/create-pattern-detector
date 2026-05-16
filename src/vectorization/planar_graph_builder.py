@@ -49,9 +49,11 @@ class PlanarGraphBuilderConfig:
     edge_sample_width_px: int = 3
     min_edge_support: float = 0.58
     direct_edge_fallback: bool = True
-    direct_edge_max_length_px: float = 96.0
+    direct_edge_max_length_px: float = 1024.0
     direct_edge_min_support: float = 0.9
-    direct_edge_max_vertices: int = 800
+    direct_edge_max_vertices: int = 256
+    direct_edge_short_max_length_px: float = 180.0
+    direct_edge_short_max_vertices: int = 800
     direct_edge_vertex_distance_px: float = 2.5
     assignment_min_confidence: float = 0.75
     planar_cleanup: bool = True
@@ -391,7 +393,13 @@ class PlanarGraphBuilder:
         line_prob: np.ndarray,
         assignment_labels: np.ndarray | None,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        if len(vertices) < 2 or len(vertices) > self.config.direct_edge_max_vertices:
+        if len(vertices) < 2:
+            return edges, edge_support, edge_assignments
+        if len(vertices) <= self.config.direct_edge_max_vertices:
+            max_length = self.config.direct_edge_max_length_px
+        elif len(vertices) <= self.config.direct_edge_short_max_vertices:
+            max_length = self.config.direct_edge_short_max_length_px
+        else:
             return edges, edge_support, edge_assignments
 
         edge_map: dict[tuple[int, int], tuple[float, int]] = {
@@ -399,7 +407,7 @@ class PlanarGraphBuilder:
             for (a, b), support, assignment in zip(edges, edge_support, edge_assignments)
         }
         tree = cKDTree(vertices)
-        pairs = tree.query_pairs(self.config.direct_edge_max_length_px, output_type="ndarray")
+        pairs = tree.query_pairs(max_length, output_type="ndarray")
 
         for v1, v2 in pairs:
             key = (int(min(v1, v2)), int(max(v1, v2)))
@@ -636,22 +644,17 @@ class PlanarGraphBuilder:
         if length <= 1e-6:
             return 0.0
         perp = np.array([-direction[1], direction[0]], dtype=np.float32) / length
-        hits = 0
-        total = 0
         half_width = self.config.edge_sample_width_px // 2
-        for point in samples:
-            sample_hit = False
-            for offset in range(-half_width, half_width + 1):
-                sample = point + perp * offset
-                x = int(round(float(sample[0])))
-                y = int(round(float(sample[1])))
-                if 0 <= x < w and 0 <= y < h:
-                    total += 1
-                    if line_prob[y, x] >= self.config.line_threshold:
-                        sample_hit = True
-            if sample_hit:
-                hits += 1
-        return hits / max(len(samples), 1) if total > 0 else 0.0
+        offsets = np.arange(-half_width, half_width + 1, dtype=np.float32)
+        coords = samples[:, None, :] + offsets[None, :, None] * perp[None, None, :]
+        xs = np.rint(coords[:, :, 0]).astype(np.int32)
+        ys = np.rint(coords[:, :, 1]).astype(np.int32)
+        valid = (xs >= 0) & (xs < w) & (ys >= 0) & (ys < h)
+        if not np.any(valid):
+            return 0.0
+        hits = np.zeros(valid.shape, dtype=bool)
+        hits[valid] = line_prob[ys[valid], xs[valid]] >= self.config.line_threshold
+        return float(np.mean(np.any(hits, axis=1)))
 
     def _vote_assignment(
         self,
