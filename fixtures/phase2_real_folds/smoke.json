@@ -1,0 +1,153 @@
+{
+  "name": "smoke",
+  "description": "Phase 2 deterministic vectorizer real-FOLD fixture manifest.",
+  "generated_by": "scripts/vectorization/build_phase2_real_fixtures.py",
+  "generated_from": "data/output/scraped/final/native_files/fold",
+  "record_count": 12,
+  "records": [
+    {
+      "id": "cpoogle-1o1riGe9Uc0dXlk0sPkKVpJtjUY1ZPRWd-cpoogle-1o1riGe9Uc0dXlk0sPkKVpJtjUY1ZPRWd-Crescent-Moon-Crescent-Moon-by-Rokishi_cello",
+      "path": "data/output/scraped/final/native_files/fold/cpoogle-1o1riGe9Uc0dXlk0sPkKVpJtjUY1ZPRWd-cpoogle-1o1riGe9Uc0dXlk0sPkKVpJtjUY1ZPRWd-Crescent-Moon-Crescent-Moon-by-Rokishi_cello.fold",
+      "content_sha256": "81b547c2c41b0d3e0f10a1aa2c2aebefba74fa4e92ebc108f8356d8795d43fe0",
+      "vertices": 15,
+      "edges": 32,
+      "assignments": {
+        "B": 2,
+        "U": 30
+      },
+      "bucket": "tiny"
+    },
+    {
+      "id": "cpoogle-1IaiGeTk_znYf5esZ1Te24HvdLm8XOo1X-cpoogle-1IaiGeTk_znYf5esZ1Te24HvdLm8XOo1X-Dragon-dragon",
+      "path": "data/output/scraped/final/native_files/fold/cpoogle-1IaiGeTk_znYf5esZ1Te24HvdLm8XOo1X-cpoogle-1IaiGeTk_znYf5esZ1Te24HvdLm8XOo1X-Dragon-dragon.fold",
+      "content_sha256": "c6cfd3068f6500213f358259fe1e0a56a2b8fec849dc05d851826b353c447835",
+      "vertices": 46,
+      "edges": 99,
+      "assignments": {
+        "B": 4,
+        "U": 95
+      },
+      "bucket": "tiny"
+    },
+    {
+      "id": "cpoogle-1Jm7buGajVit5fhOlKAjhGZDpa2alfMeP-cpoogle-1Jm7buGajVit5fhOlKAjhGZDpa2alfMeP-Cartoon-Scorpion-Cartoon-Scorpion-by-Tao-Qinggen",
+      "path": "data/output/scraped/final/native_files/fold/cpoogle-1Jm7buGajVit5fhOlKAjhGZDpa2alfMeP-cpoogle-1Jm7buGajVit5fhOlKAjhGZDpa2alfMeP-Cartoon-Scorpion-Cartoon-Scorpion-by-Tao-Qinggen.fold",
+      "content_sha256": "7e31011517935b53d5e56e567b958b7b6d7ffaf10e2c229403a6a433afa13527",
+      "vertices": 50,
+      "edges": 101,
+      "assignments": {
+        "B": 4,
+        "U": 97
+      },
+      "bucket": "small"
+    },
+    {
+      "id": "cpoogle-1kPRG4w-30i9yK2qeo-Q_7jiulRcQ4999-cpoogle-1kPRG4w-30i9yK2qeo-Q_7jiulRcQ4999-Rat-Rat-by-Zhao-Yanjie",
+      "path": "data/output/scraped/final/native_files/fold/cpoogle-1kPRG4w-30i9yK2qeo-Q_7jiulRcQ4999-cpoogle-1kPRG4w-30i9yK2qeo-Q_7jiulRcQ4999-Rat-Rat-by-Zhao-Yanjie.fold",
+      "content_sha256": "916718d143473016a67157253b7ad52742777ed60d41511a5cb0e166e8308c82",
+      "vertices": 114,
+      "edges": 249,
+      "assignments": {
+        "B": 4,
+        "U": 245
+      },
+      "bucket": "small"
+    },
+    {
+      "id": "cpoogle-1d5uK3_zxCWeGlddtYOm4LF64BfGjcBjZ-cpoogle-1d5uK3_zxCWeGlddtYOm4LF64BfGjcBjZ-Frog-Frog-by-Mineo-Shotaro",
+      "path": "data/output/scraped/final/native_files/fold/cpoogle-1d5uK3_zxCWeGlddtYOm4LF64BfGjcBjZ-cpoogle-1d5uK3_zxCWeGlddtYOm4LF64BfGjcBjZ-Frog-Frog-by-Mineo-Shotaro.fold",
+      "content_sha256": "22024a7b0902286260244e2518f59260cfc325f497aa50e184177aaa2111b9ab",
+      "vertices": 112,
+      "edges": 251,
+      "assignments": {
+        "B": 4,
+        "U": 247
+      },
+      "bucket": "medium"
+    },
+    {
+      "id": "cpoogle-19RX_AXgKFXQXNEttYRbhEZIl-qgPbvaq-cpoogle-19RX_AXgKFXQXNEttYRbhEZIl-qgPbvaq-Jiba-Nyan-Jiba-Nyan-by-Mineo-Shotaro",
+      "path": "data/output/scraped/final/native_files/fold/cpoogle-19RX_AXgKFXQXNEttYRbhEZIl-qgPbvaq-cpoogle-19RX_AXgKFXQXNEttYRbhEZIl-qgPbvaq-Jiba-Nyan-Jiba-Nyan-by-Mineo-Shotaro.fold",
+      "content_sha256": "8399b30d313c4d4076ad3c49dd6ca517c2604b8a3552159d21a168a57756fd7a",
+      "vertices": 163,
+      "edges": 360,
+      "assignments": {
+        "B": 4,
+        "U": 356
+      },
+      "bucket": "medium"
+    },
+    {
+      "id": "cpoogle-1Wb5I5l8jmZZnl9aEPlqyFMV_aKMK9DMv-cpoogle-1Wb5I5l8jmZZnl9aEPlqyFMV_aKMK9DMv-Dragon-and-Knight-Dragon-and-Knight-by-Xiao-Dai",
+      "path": "data/output/scraped/final/native_files/fold/cpoogle-1Wb5I5l8jmZZnl9aEPlqyFMV_aKMK9DMv-cpoogle-1Wb5I5l8jmZZnl9aEPlqyFMV_aKMK9DMv-Dragon-and-Knight-Dragon-and-Knight-by-Xiao-Dai.fold",
+      "content_sha256": "90cb944f42eb5c84bbcf4d13ace1114bc419e757fd802b3dcf2431c861920d0f",
+      "vertices": 254,
+      "edges": 595,
+      "assignments": {
+        "B": 4,
+        "U": 591
+      },
+      "bucket": "medium"
+    },
+    {
+      "id": "cpoogle-1jbcmVuKf_1RNZGS4nYebuglBHia1hUPe-cpoogle-1jbcmVuKf_1RNZGS4nYebuglBHia1hUPe-Spider-Spider-by-tera_origami",
+      "path": "data/output/scraped/final/native_files/fold/cpoogle-1jbcmVuKf_1RNZGS4nYebuglBHia1hUPe-cpoogle-1jbcmVuKf_1RNZGS4nYebuglBHia1hUPe-Spider-Spider-by-tera_origami.fold",
+      "content_sha256": "3437084115430c15bd62085ceaebc7a8a0d9921abbf09be4ff8578801620836d",
+      "vertices": 289,
+      "edges": 600,
+      "assignments": {
+        "B": 4,
+        "U": 596
+      },
+      "bucket": "large"
+    },
+    {
+      "id": "cpoogle-1zPrEWnnhkR3KsKIkaoM9AkLBZo7_43RD-cpoogle-1zPrEWnnhkR3KsKIkaoM9AkLBZo7_43RD-Ladybug-Ladybug-by-Bodo-Haag",
+      "path": "data/output/scraped/final/native_files/fold/cpoogle-1zPrEWnnhkR3KsKIkaoM9AkLBZo7_43RD-cpoogle-1zPrEWnnhkR3KsKIkaoM9AkLBZo7_43RD-Ladybug-Ladybug-by-Bodo-Haag.fold",
+      "content_sha256": "e41e5f3e08be1e1ce10c8a68e4aa3c59f97bc775d59246d37f3465ee9c9e60a1",
+      "vertices": 422,
+      "edges": 928,
+      "assignments": {
+        "B": 4,
+        "U": 924
+      },
+      "bucket": "large"
+    },
+    {
+      "id": "cpoogle-1EiXbsvGRLTGWAq-FsN0oHi9DyCntNN-cpoogle-1EiXbsvGRLTGWAq-FsN0oHi9DyCntNN-Alice-Margatroid-Touhou-Alice-Margatroid-Touhou-by-dhujs",
+      "path": "data/output/scraped/final/native_files/fold/cpoogle-1EiXbsvGRLTGWAq-FsN0oHi9DyCntNN-cpoogle-1EiXbsvGRLTGWAq-FsN0oHi9DyCntNN-Alice-Margatroid-Touhou-Alice-Margatroid-Touhou-by-dhujs.fold",
+      "content_sha256": "ca6baa3f35c610a15607963aac045d04001a6698b353f35b6c4eb267d8305f73",
+      "vertices": 702,
+      "edges": 1486,
+      "assignments": {
+        "B": 4,
+        "U": 1482
+      },
+      "bucket": "large"
+    },
+    {
+      "id": "cpoogle-1J2Ndo72HIcCZZExvdzLfRD1gwHl9jGnt-cpoogle-1J2Ndo72HIcCZZExvdzLfRD1gwHl9jGnt-Stegosaurus-skeleton-Stegosaurus-Skeleton-by-Bodo-Haag",
+      "path": "data/output/scraped/final/native_files/fold/cpoogle-1J2Ndo72HIcCZZExvdzLfRD1gwHl9jGnt-cpoogle-1J2Ndo72HIcCZZExvdzLfRD1gwHl9jGnt-Stegosaurus-skeleton-Stegosaurus-Skeleton-by-Bodo-Haag.fold",
+      "content_sha256": "a1c7087bcb4b72d183adaf8fadce2309af7b3516285bfe03c74c05ea19629f9e",
+      "vertices": 741,
+      "edges": 1544,
+      "assignments": {
+        "B": 4,
+        "U": 1540
+      },
+      "bucket": "stress"
+    },
+    {
+      "id": "cpoogle-1Sc9_V5cFmUsbq1pyHnJpBklYpZE_vEP0-cpoogle-1Sc9_V5cFmUsbq1pyHnJpBklYpZE_vEP0-Tokyo-skytree-Tokyo-Skytree-by-Akihiro-Kosuge",
+      "path": "data/output/scraped/final/native_files/fold/cpoogle-1Sc9_V5cFmUsbq1pyHnJpBklYpZE_vEP0-cpoogle-1Sc9_V5cFmUsbq1pyHnJpBklYpZE_vEP0-Tokyo-skytree-Tokyo-Skytree-by-Akihiro-Kosuge.fold",
+      "content_sha256": "9fb41f9cd7858def29b6d2d27dabd06a6b22a1fab886e46ab8784af92e8bb67d",
+      "vertices": 4675,
+      "edges": 9400,
+      "assignments": {
+        "B": 4,
+        "U": 9396
+      },
+      "bucket": "stress"
+    }
+  ]
+}

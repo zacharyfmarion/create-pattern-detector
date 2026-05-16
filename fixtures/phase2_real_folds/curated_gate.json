@@ -1,0 +1,727 @@
+{
+  "name": "curated_gate",
+  "description": "Phase 2 deterministic vectorizer real-FOLD fixture manifest.",
+  "generated_by": "scripts/vectorization/build_phase2_real_fixtures.py",
+  "generated_from": "data/output/scraped/final/native_files/fold",
+  "record_count": 60,
+  "records": [
+    {
+      "id": "cpoogle-1o1riGe9Uc0dXlk0sPkKVpJtjUY1ZPRWd-cpoogle-1o1riGe9Uc0dXlk0sPkKVpJtjUY1ZPRWd-Crescent-Moon-Crescent-Moon-by-Rokishi_cello",
+      "path": "data/output/scraped/final/native_files/fold/cpoogle-1o1riGe9Uc0dXlk0sPkKVpJtjUY1ZPRWd-cpoogle-1o1riGe9Uc0dXlk0sPkKVpJtjUY1ZPRWd-Crescent-Moon-Crescent-Moon-by-Rokishi_cello.fold",
+      "content_sha256": "81b547c2c41b0d3e0f10a1aa2c2aebefba74fa4e92ebc108f8356d8795d43fe0",
+      "vertices": 15,
+      "edges": 32,
+      "assignments": {
+        "B": 2,
+        "U": 30
+      },
+      "bucket": "tiny"
+    },
+    {
+      "id": "cpoogle-1tXUqarDmGOuNH1mmSiZMGxEtrXurv-zm-cpoogle-1tXUqarDmGOuNH1mmSiZMGxEtrXurv-zm-Kingfisher-Kingfisher-by-Sh-saku-Uto",
+      "path": "data/output/scraped/final/native_files/fold/cpoogle-1tXUqarDmGOuNH1mmSiZMGxEtrXurv-zm-cpoogle-1tXUqarDmGOuNH1mmSiZMGxEtrXurv-zm-Kingfisher-Kingfisher-by-Sh-saku-Uto.fold",
+      "content_sha256": "502f9e8303d4506df9831d9109fc47e26a4e73256b1919e35b62e098fd0c55a8",
+      "vertices": 27,
+      "edges": 54,
+      "assignments": {
+        "B": 4,
+        "U": 50
+      },
+      "bucket": "tiny"
+    },
+    {
+      "id": "cpoogle-1GkeQcgQ59JI1fmEHRYoVqTy8T-lZXOYV-cpoogle-1GkeQcgQ59JI1fmEHRYoVqTy8T-lZXOYV-Awareness-Ribbon-Angel-Awareness-Ribbon-Angel-v2-by-Mi",
+      "path": "data/output/scraped/final/native_files/fold/cpoogle-1GkeQcgQ59JI1fmEHRYoVqTy8T-lZXOYV-cpoogle-1GkeQcgQ59JI1fmEHRYoVqTy8T-lZXOYV-Awareness-Ribbon-Angel-Awareness-Ribbon-Angel-v2-by-Mi.fold",
+      "content_sha256": "37834e565ed7e672ecce6e842aed8fe3f7b04cc53d83f7a8717bc2968e7149fd",
+      "vertices": 31,
+      "edges": 69,
+      "assignments": {
+        "B": 3,
+        "U": 66
+      },
+      "bucket": "tiny"
+    },
+    {
+      "id": "cpoogle-1RO0tNdptt8g48QcycDpOCtGH2Ynuzawy-cpoogle-1RO0tNdptt8g48QcycDpOCtGH2Ynuzawy-Simple-cat-Simple-Cat-by-Tatsumi-1proto",
+      "path": "data/output/scraped/final/native_files/fold/cpoogle-1RO0tNdptt8g48QcycDpOCtGH2Ynuzawy-cpoogle-1RO0tNdptt8g48QcycDpOCtGH2Ynuzawy-Simple-cat-Simple-Cat-by-Tatsumi-1proto.fold",
+      "content_sha256": "99ee1a10b3199b4ebfbb839a43f3647038fbe36ca8d54c70498c7027ed25571a",
+      "vertices": 36,
+      "edges": 76,
+      "assignments": {
+        "B": 4,
+        "U": 72
+      },
+      "bucket": "tiny"
+    },
+    {
+      "id": "cpoogle-1wzu0YAOI4rvvUdPaQ71JlO6hQbOWg_Ga-cpoogle-1wzu0YAOI4rvvUdPaQ71JlO6hQbOWg_Ga-Mystery-hand-Mystery-Hand-by-Noah",
+      "path": "data/output/scraped/final/native_files/fold/cpoogle-1wzu0YAOI4rvvUdPaQ71JlO6hQbOWg_Ga-cpoogle-1wzu0YAOI4rvvUdPaQ71JlO6hQbOWg_Ga-Mystery-hand-Mystery-Hand-by-Noah.fold",
+      "content_sha256": "756deead8c97786b8ba5bbcec8c504fb24feaead3b751b213ccf271f273551be",
+      "vertices": 36,
+      "edges": 80,
+      "assignments": {
+        "B": 4,
+        "U": 76
+      },
+      "bucket": "tiny"
+    },
+    {
+      "id": "cpoogle-1KObWtD_mqjk_PeahnFhZJZPXHApdqXv0-cpoogle-1KObWtD_mqjk_PeahnFhZJZPXHApdqXv0-Frog-Frog-by-Juanfran-Carrillo",
+      "path": "data/output/scraped/final/native_files/fold/cpoogle-1KObWtD_mqjk_PeahnFhZJZPXHApdqXv0-cpoogle-1KObWtD_mqjk_PeahnFhZJZPXHApdqXv0-Frog-Frog-by-Juanfran-Carrillo.fold",
+      "content_sha256": "bb9f5d3af76ef920ae818839893e4f612b31e36f54339c3f35d1dd7a66f4d92c",
+      "vertices": 36,
+      "edges": 90,
+      "assignments": {
+        "B": 3,
+        "U": 87
+      },
+      "bucket": "tiny"
+    },
+    {
+      "id": "cpoogle-1cfIOQlNK0IzMFltU5rNSl5nzC0ZgnsNS-cpoogle-1cfIOQlNK0IzMFltU5rNSl5nzC0ZgnsNS-Pig-Pig-by-Gen-Hagiwara",
+      "path": "data/output/scraped/final/native_files/fold/cpoogle-1cfIOQlNK0IzMFltU5rNSl5nzC0ZgnsNS-cpoogle-1cfIOQlNK0IzMFltU5rNSl5nzC0ZgnsNS-Pig-Pig-by-Gen-Hagiwara.fold",
+      "content_sha256": "14c354021d184f73974f5d33b519349737787caae2482941a1b60a49dca4770a",
+      "vertices": 43,
+      "edges": 98,
+      "assignments": {
+        "B": 4,
+        "U": 94
+      },
+      "bucket": "tiny"
+    },
+    {
+      "id": "cpoogle-1IaiGeTk_znYf5esZ1Te24HvdLm8XOo1X-cpoogle-1IaiGeTk_znYf5esZ1Te24HvdLm8XOo1X-Dragon-dragon",
+      "path": "data/output/scraped/final/native_files/fold/cpoogle-1IaiGeTk_znYf5esZ1Te24HvdLm8XOo1X-cpoogle-1IaiGeTk_znYf5esZ1Te24HvdLm8XOo1X-Dragon-dragon.fold",
+      "content_sha256": "c6cfd3068f6500213f358259fe1e0a56a2b8fec849dc05d851826b353c447835",
+      "vertices": 46,
+      "edges": 99,
+      "assignments": {
+        "B": 4,
+        "U": 95
+      },
+      "bucket": "tiny"
+    },
+    {
+      "id": "cpoogle-1Jm7buGajVit5fhOlKAjhGZDpa2alfMeP-cpoogle-1Jm7buGajVit5fhOlKAjhGZDpa2alfMeP-Cartoon-Scorpion-Cartoon-Scorpion-by-Tao-Qinggen",
+      "path": "data/output/scraped/final/native_files/fold/cpoogle-1Jm7buGajVit5fhOlKAjhGZDpa2alfMeP-cpoogle-1Jm7buGajVit5fhOlKAjhGZDpa2alfMeP-Cartoon-Scorpion-Cartoon-Scorpion-by-Tao-Qinggen.fold",
+      "content_sha256": "7e31011517935b53d5e56e567b958b7b6d7ffaf10e2c229403a6a433afa13527",
+      "vertices": 50,
+      "edges": 101,
+      "assignments": {
+        "B": 4,
+        "U": 97
+      },
+      "bucket": "small"
+    },
+    {
+      "id": "cpoogle-1u6Uk5GaxKzG6fOSGCGELzWIK2SkZ56qI-cpoogle-1u6Uk5GaxKzG6fOSGCGELzWIK2SkZ56qI-Meerkat-Meerkat-by-Hiroaki-Kobayashi",
+      "path": "data/output/scraped/final/native_files/fold/cpoogle-1u6Uk5GaxKzG6fOSGCGELzWIK2SkZ56qI-cpoogle-1u6Uk5GaxKzG6fOSGCGELzWIK2SkZ56qI-Meerkat-Meerkat-by-Hiroaki-Kobayashi.fold",
+      "content_sha256": "b856ecf1a2e3adc46520d13fc94dff46319ab7a5d0cd6963b4aa44f11f4f078f",
+      "vertices": 56,
+      "edges": 115,
+      "assignments": {
+        "B": 4,
+        "U": 111
+      },
+      "bucket": "small"
+    },
+    {
+      "id": "cpoogle-1RHOU90q0uGDNegfm5DagTmN0mvk8TKIA-cpoogle-1RHOU90q0uGDNegfm5DagTmN0mvk8TKIA-Mash-Kyrielight-Mash-Kyrielight-Unsunken-by-Obelisk",
+      "path": "data/output/scraped/final/native_files/fold/cpoogle-1RHOU90q0uGDNegfm5DagTmN0mvk8TKIA-cpoogle-1RHOU90q0uGDNegfm5DagTmN0mvk8TKIA-Mash-Kyrielight-Mash-Kyrielight-Unsunken-by-Obelisk.fold",
+      "content_sha256": "57cc1f6e75267ea5bb99351f1b110cbd7c52fb95f08df6ad4b0d479206f7ec5d",
+      "vertices": 57,
+      "edges": 130,
+      "assignments": {
+        "B": 4,
+        "U": 126
+      },
+      "bucket": "small"
+    },
+    {
+      "id": "cpoogle-12-ItEwONaCr8LvcgzuFCn0hq-3K1zjRw-cpoogle-12-ItEwONaCr8LvcgzuFCn0hq-3K1zjRw-Chibi-t-rex-Chibi-T-Rex-by-Hiroaki-Kobayashi",
+      "path": "data/output/scraped/final/native_files/fold/cpoogle-12-ItEwONaCr8LvcgzuFCn0hq-3K1zjRw-cpoogle-12-ItEwONaCr8LvcgzuFCn0hq-3K1zjRw-Chibi-t-rex-Chibi-T-Rex-by-Hiroaki-Kobayashi.fold",
+      "content_sha256": "51e04515f81d68a8f20e0ec3d1c16fe8250a4853b739f9bc6d90c77430148e29",
+      "vertices": 62,
+      "edges": 141,
+      "assignments": {
+        "B": 4,
+        "U": 137
+      },
+      "bucket": "small"
+    },
+    {
+      "id": "cpoogle-1FDggWKeqVA666yv5M9z5lJSJ3dNt054K-cpoogle-1FDggWKeqVA666yv5M9z5lJSJ3dNt054K-Globe-algae-Volvox-Globe-Algae-Volvox-by-tera_origami",
+      "path": "data/output/scraped/final/native_files/fold/cpoogle-1FDggWKeqVA666yv5M9z5lJSJ3dNt054K-cpoogle-1FDggWKeqVA666yv5M9z5lJSJ3dNt054K-Globe-algae-Volvox-Globe-Algae-Volvox-by-tera_origami.fold",
+      "content_sha256": "8741f6a4d0b4edf6840c43891217753c7564b752884f44dbdccb7a55a59b13fc",
+      "vertices": 70,
+      "edges": 152,
+      "assignments": {
+        "B": 4,
+        "U": 148
+      },
+      "bucket": "small"
+    },
+    {
+      "id": "cpoogle-1Ver0g94wO6OajxgZMg5qMdwmtx7fecwF-cpoogle-1Ver0g94wO6OajxgZMg5qMdwmtx7fecwF-Fish-Fish-by-Bodo-Haag",
+      "path": "data/output/scraped/final/native_files/fold/cpoogle-1Ver0g94wO6OajxgZMg5qMdwmtx7fecwF-cpoogle-1Ver0g94wO6OajxgZMg5qMdwmtx7fecwF-Fish-Fish-by-Bodo-Haag.fold",
+      "content_sha256": "aa06aa001e542735aeb820b1f180a1dc8f8ab6bd04ff8b56ff8f23ac82786bc6",
+      "vertices": 72,
+      "edges": 163,
+      "assignments": {
+        "B": 4,
+        "U": 159
+      },
+      "bucket": "small"
+    },
+    {
+      "id": "cpoogle-13C4B-xmq9RBqyCHtQRyk66TzcDWMZfVq-cpoogle-13C4B-xmq9RBqyCHtQRyk66TzcDWMZfVq-Chinchilla-Chinchilla-by-David-Llaque",
+      "path": "data/output/scraped/final/native_files/fold/cpoogle-13C4B-xmq9RBqyCHtQRyk66TzcDWMZfVq-cpoogle-13C4B-xmq9RBqyCHtQRyk66TzcDWMZfVq-Chinchilla-Chinchilla-by-David-Llaque.fold",
+      "content_sha256": "d10d3b8e8fbab7d997e3d078c8314d76f873865657cb6778a210e62a60a0bed4",
+      "vertices": 86,
+      "edges": 179,
+      "assignments": {
+        "B": 4,
+        "U": 175
+      },
+      "bucket": "small"
+    },
+    {
+      "id": "cpoogle-1-FOUcgvvu7P2YPL1La7yNjj9IeFGfDbK-cpoogle-1-FOUcgvvu7P2YPL1La7yNjj9IeFGfDbK-Cat-Catching-Fish-2.0-Cat-Catching-Fish-2.0-by-Ikuno-R",
+      "path": "data/output/scraped/final/native_files/fold/cpoogle-1-FOUcgvvu7P2YPL1La7yNjj9IeFGfDbK-cpoogle-1-FOUcgvvu7P2YPL1La7yNjj9IeFGfDbK-Cat-Catching-Fish-2.0-Cat-Catching-Fish-2.0-by-Ikuno-R.fold",
+      "content_sha256": "a63862300ead89b83f81dd74b54dbad840e08107bf7ab58c0ea5640413f4223c",
+      "vertices": 94,
+      "edges": 193,
+      "assignments": {
+        "B": 4,
+        "U": 189
+      },
+      "bucket": "small"
+    },
+    {
+      "id": "cpoogle-1zRimJ-aMqdZ7ubryiA5u6TNcg1BBXKc0-cpoogle-1zRimJ-aMqdZ7ubryiA5u6TNcg1BBXKc0-Gorilla-Gorilla-by-Gen-Hagiwara",
+      "path": "data/output/scraped/final/native_files/fold/cpoogle-1zRimJ-aMqdZ7ubryiA5u6TNcg1BBXKc0-cpoogle-1zRimJ-aMqdZ7ubryiA5u6TNcg1BBXKc0-Gorilla-Gorilla-by-Gen-Hagiwara.fold",
+      "content_sha256": "53b77d0e5db54d636a5ca8e95bc8150e4b96805ba1242ccc7baa74472cbfae43",
+      "vertices": 88,
+      "edges": 207,
+      "assignments": {
+        "B": 4,
+        "U": 203
+      },
+      "bucket": "small"
+    },
+    {
+      "id": "cpoogle-10CHNIzOws6HVa_b1AFrd54j60vY2kbkl-cpoogle-10CHNIzOws6HVa_b1AFrd54j60vY2kbkl-Crane-with-eyes-Crane-with-Eyes-by-Hiroaki-Kobayashi",
+      "path": "data/output/scraped/final/native_files/fold/cpoogle-10CHNIzOws6HVa_b1AFrd54j60vY2kbkl-cpoogle-10CHNIzOws6HVa_b1AFrd54j60vY2kbkl-Crane-with-eyes-Crane-with-Eyes-by-Hiroaki-Kobayashi.fold",
+      "content_sha256": "2b510d54fe10cfb01518c46cbd3ee0fe3c94665e8a05c1f20836b945949051f7",
+      "vertices": 97,
+      "edges": 220,
+      "assignments": {
+        "B": 4,
+        "U": 216
+      },
+      "bucket": "small"
+    },
+    {
+      "id": "cpoogle-1BnbXabJlHCtQlioz1ds4Ct-qTHYdQGIV-cpoogle-1BnbXabJlHCtQlioz1ds4Ct-qTHYdQGIV-Moon-Knight-Moon-Knight-by-Juanfran-Carrillo",
+      "path": "data/output/scraped/final/native_files/fold/cpoogle-1BnbXabJlHCtQlioz1ds4Ct-qTHYdQGIV-cpoogle-1BnbXabJlHCtQlioz1ds4Ct-qTHYdQGIV-Moon-Knight-Moon-Knight-by-Juanfran-Carrillo.fold",
+      "content_sha256": "0b099469b4cbbb3ab5651096680b4c5302dec428a344b7ea7b9d023766709a11",
+      "vertices": 107,
+      "edges": 233,
+      "assignments": {
+        "B": 4,
+        "U": 229
+      },
+      "bucket": "small"
+    },
+    {
+      "id": "cpoogle-1kPRG4w-30i9yK2qeo-Q_7jiulRcQ4999-cpoogle-1kPRG4w-30i9yK2qeo-Q_7jiulRcQ4999-Rat-Rat-by-Zhao-Yanjie",
+      "path": "data/output/scraped/final/native_files/fold/cpoogle-1kPRG4w-30i9yK2qeo-Q_7jiulRcQ4999-cpoogle-1kPRG4w-30i9yK2qeo-Q_7jiulRcQ4999-Rat-Rat-by-Zhao-Yanjie.fold",
+      "content_sha256": "916718d143473016a67157253b7ad52742777ed60d41511a5cb0e166e8308c82",
+      "vertices": 114,
+      "edges": 249,
+      "assignments": {
+        "B": 4,
+        "U": 245
+      },
+      "bucket": "small"
+    },
+    {
+      "id": "cpoogle-1d5uK3_zxCWeGlddtYOm4LF64BfGjcBjZ-cpoogle-1d5uK3_zxCWeGlddtYOm4LF64BfGjcBjZ-Frog-Frog-by-Mineo-Shotaro",
+      "path": "data/output/scraped/final/native_files/fold/cpoogle-1d5uK3_zxCWeGlddtYOm4LF64BfGjcBjZ-cpoogle-1d5uK3_zxCWeGlddtYOm4LF64BfGjcBjZ-Frog-Frog-by-Mineo-Shotaro.fold",
+      "content_sha256": "22024a7b0902286260244e2518f59260cfc325f497aa50e184177aaa2111b9ab",
+      "vertices": 112,
+      "edges": 251,
+      "assignments": {
+        "B": 4,
+        "U": 247
+      },
+      "bucket": "medium"
+    },
+    {
+      "id": "cpoogle-1-yp2kdxVVdCfXJ_xBPZ_NezgYLSBXXP8-cpoogle-1-yp2kdxVVdCfXJ_xBPZ_NezgYLSBXXP8-Kamuysaurus-Kamuysaurus-by-tkg_origami",
+      "path": "data/output/scraped/final/native_files/fold/cpoogle-1-yp2kdxVVdCfXJ_xBPZ_NezgYLSBXXP8-cpoogle-1-yp2kdxVVdCfXJ_xBPZ_NezgYLSBXXP8-Kamuysaurus-Kamuysaurus-by-tkg_origami.fold",
+      "content_sha256": "037c179d89172c8e344ad401eedc38057a75b7d63ad81eb6064d3e45934c4262",
+      "vertices": 115,
+      "edges": 270,
+      "assignments": {
+        "B": 4,
+        "U": 266
+      },
+      "bucket": "medium"
+    },
+    {
+      "id": "cpoogle-1R0mA-Xx5sSGjBKRq2XDP8jv31ok1ZjTO-cpoogle-1R0mA-Xx5sSGjBKRq2XDP8jv31ok1ZjTO-Dilophosaurus-Dilophosaurus-by-Juanfran-Carillo",
+      "path": "data/output/scraped/final/native_files/fold/cpoogle-1R0mA-Xx5sSGjBKRq2XDP8jv31ok1ZjTO-cpoogle-1R0mA-Xx5sSGjBKRq2XDP8jv31ok1ZjTO-Dilophosaurus-Dilophosaurus-by-Juanfran-Carillo.fold",
+      "content_sha256": "538de111edc0960d3046d6fdc8f0f99afcd7585d82908090c342f580cb04cb74",
+      "vertices": 130,
+      "edges": 287,
+      "assignments": {
+        "B": 4,
+        "U": 283
+      },
+      "bucket": "medium"
+    },
+    {
+      "id": "cpoogle-1VjIkPUYtWfgO63asl3QXV2ZFPZoLaaUJ-cpoogle-1VjIkPUYtWfgO63asl3QXV2ZFPZoLaaUJ-Camel-Camel-by-Bodo-Haag",
+      "path": "data/output/scraped/final/native_files/fold/cpoogle-1VjIkPUYtWfgO63asl3QXV2ZFPZoLaaUJ-cpoogle-1VjIkPUYtWfgO63asl3QXV2ZFPZoLaaUJ-Camel-Camel-by-Bodo-Haag.fold",
+      "content_sha256": "143ba8a2ff021c24146e129dbbe3f39ce56d47274ef79206ae8372e16e1e35b2",
+      "vertices": 129,
+      "edges": 302,
+      "assignments": {
+        "B": 4,
+        "U": 298
+      },
+      "bucket": "medium"
+    },
+    {
+      "id": "cpoogle-1Lc4Dstqmcg2_YQtUwX6Ckh6zVLIL_v1l-cpoogle-1Lc4Dstqmcg2_YQtUwX6Ckh6zVLIL_v1l-Stegosaurus-Stegosaurus-by-Xiao-Dai",
+      "path": "data/output/scraped/final/native_files/fold/cpoogle-1Lc4Dstqmcg2_YQtUwX6Ckh6zVLIL_v1l-cpoogle-1Lc4Dstqmcg2_YQtUwX6Ckh6zVLIL_v1l-Stegosaurus-Stegosaurus-by-Xiao-Dai.fold",
+      "content_sha256": "9eb1d7687a2659f741629519fd120fc8a7bce06e72619a185f6ca43fd4c4817e",
+      "vertices": 132,
+      "edges": 315,
+      "assignments": {
+        "B": 4,
+        "U": 311
+      },
+      "bucket": "medium"
+    },
+    {
+      "id": "cpoogle-1Ynk1ZCbeVvdCLoPiPgcyI29KGSuF6TS5-cpoogle-1Ynk1ZCbeVvdCLoPiPgcyI29KGSuF6TS5-Tiger-Tiger-by-Shirasu_mikan",
+      "path": "data/output/scraped/final/native_files/fold/cpoogle-1Ynk1ZCbeVvdCLoPiPgcyI29KGSuF6TS5-cpoogle-1Ynk1ZCbeVvdCLoPiPgcyI29KGSuF6TS5-Tiger-Tiger-by-Shirasu_mikan.fold",
+      "content_sha256": "79243177ab7fcc10bd57dcff80d11bd5043ca2cc2622cf6534fe8ddcaa8d1582",
+      "vertices": 144,
+      "edges": 323,
+      "assignments": {
+        "B": 4,
+        "U": 319
+      },
+      "bucket": "medium"
+    },
+    {
+      "id": "cpoogle-1pHMzAIdCCITHxS-NaXihSvTVFzEe4Jx1-cpoogle-1pHMzAIdCCITHxS-NaXihSvTVFzEe4Jx1-Dorcus-Hopei-Pupa-Dorcus-Hopei-Pupa-by-dmc_origami",
+      "path": "data/output/scraped/final/native_files/fold/cpoogle-1pHMzAIdCCITHxS-NaXihSvTVFzEe4Jx1-cpoogle-1pHMzAIdCCITHxS-NaXihSvTVFzEe4Jx1-Dorcus-Hopei-Pupa-Dorcus-Hopei-Pupa-by-dmc_origami.fold",
+      "content_sha256": "663405ceca8839684e96ad0464030bf328b0006226e96c716edb980269f4269a",
+      "vertices": 146,
+      "edges": 339,
+      "assignments": {
+        "B": 4,
+        "U": 335
+      },
+      "bucket": "medium"
+    },
+    {
+      "id": "cpoogle-1n_li_H9nTaU14Wmb61IHq-GMjiSHVj1j-cpoogle-1n_li_H9nTaU14Wmb61IHq-GMjiSHVj1j-Wolpertinger-Wolpertinger-by-Lorbeer",
+      "path": "data/output/scraped/final/native_files/fold/cpoogle-1n_li_H9nTaU14Wmb61IHq-GMjiSHVj1j-cpoogle-1n_li_H9nTaU14Wmb61IHq-GMjiSHVj1j-Wolpertinger-Wolpertinger-by-Lorbeer.fold",
+      "content_sha256": "f731588e37d4353d563cde6df414452dbf1733d157f3ed1307557e9d660498c0",
+      "vertices": 148,
+      "edges": 355,
+      "assignments": {
+        "B": 4,
+        "U": 351
+      },
+      "bucket": "medium"
+    },
+    {
+      "id": "cpoogle-1Jt_gkfV6U1y9oy4gXWNfaNJJEiPHABYS-cpoogle-1Jt_gkfV6U1y9oy4gXWNfaNJJEiPHABYS-Rhino-beetle-Rhino-Beetle-by-Folder951hekai",
+      "path": "data/output/scraped/final/native_files/fold/cpoogle-1Jt_gkfV6U1y9oy4gXWNfaNJJEiPHABYS-cpoogle-1Jt_gkfV6U1y9oy4gXWNfaNJJEiPHABYS-Rhino-beetle-Rhino-Beetle-by-Folder951hekai.fold",
+      "content_sha256": "eee0a84482428bb9bb2002587980e15587a862cba0918152851d5e9bfc53eb3a",
+      "vertices": 166,
+      "edges": 366,
+      "assignments": {
+        "B": 4,
+        "U": 362
+      },
+      "bucket": "medium"
+    },
+    {
+      "id": "cpoogle-18TzWZst9e3rU1c6-eUcP5RXrk32rUVE8-cpoogle-18TzWZst9e3rU1c6-eUcP5RXrk32rUVE8-Butterfly-Butterfly-by-Ziliang",
+      "path": "data/output/scraped/final/native_files/fold/cpoogle-18TzWZst9e3rU1c6-eUcP5RXrk32rUVE8-cpoogle-18TzWZst9e3rU1c6-eUcP5RXrk32rUVE8-Butterfly-Butterfly-by-Ziliang.fold",
+      "content_sha256": "e57185b26b5a47719903b9d5ae37bd24fad638e8715c4579f18c927e4739cc44",
+      "vertices": 178,
+      "edges": 381,
+      "assignments": {
+        "B": 4,
+        "U": 377
+      },
+      "bucket": "medium"
+    },
+    {
+      "id": "cpoogle-12G0ww_xgyCzjaIm9ur17ij8mPHoS1MsG-cpoogle-12G0ww_xgyCzjaIm9ur17ij8mPHoS1MsG-Axolotl-Axolotl-by-Ikuno-Riku",
+      "path": "data/output/scraped/final/native_files/fold/cpoogle-12G0ww_xgyCzjaIm9ur17ij8mPHoS1MsG-cpoogle-12G0ww_xgyCzjaIm9ur17ij8mPHoS1MsG-Axolotl-Axolotl-by-Ikuno-Riku.fold",
+      "content_sha256": "70760dcbdd0909dbdcece7edc71109bef21b74b94cfd17d63a56be5567c20d98",
+      "vertices": 199,
+      "edges": 412,
+      "assignments": {
+        "B": 4,
+        "U": 408
+      },
+      "bucket": "medium"
+    },
+    {
+      "id": "cpoogle-1cKu9vBjVR8lMqxTUSUL5ad7ViyPSJJhf-cpoogle-1cKu9vBjVR8lMqxTUSUL5ad7ViyPSJJhf-Dachshund-2.0-Dachshund-2.0-by-Ikuno-Riko",
+      "path": "data/output/scraped/final/native_files/fold/cpoogle-1cKu9vBjVR8lMqxTUSUL5ad7ViyPSJJhf-cpoogle-1cKu9vBjVR8lMqxTUSUL5ad7ViyPSJJhf-Dachshund-2.0-Dachshund-2.0-by-Ikuno-Riko.fold",
+      "content_sha256": "5dd006032b43f15c3ca598174d1fdce27f0e6957eccbfac5ec64209a097a184f",
+      "vertices": 206,
+      "edges": 437,
+      "assignments": {
+        "B": 4,
+        "U": 433
+      },
+      "bucket": "medium"
+    },
+    {
+      "id": "cpoogle-1rbgWh27gzpY8190Yo8pDAMv2zXZN8TYE-cpoogle-1rbgWh27gzpY8190Yo8pDAMv2zXZN8TYE-Pteranodon-Pteranodon-by-tkg_origami",
+      "path": "data/output/scraped/final/native_files/fold/cpoogle-1rbgWh27gzpY8190Yo8pDAMv2zXZN8TYE-cpoogle-1rbgWh27gzpY8190Yo8pDAMv2zXZN8TYE-Pteranodon-Pteranodon-by-tkg_origami.fold",
+      "content_sha256": "e6f073d4ae377989ce9644647511f531ca974c359e5b6205d4a63f9f25b27b6f",
+      "vertices": 224,
+      "edges": 474,
+      "assignments": {
+        "B": 4,
+        "U": 470
+      },
+      "bucket": "medium"
+    },
+    {
+      "id": "cpoogle-1ZvyVlk2SglK1PoUG7DqMxnB_KWtT5yJJ-cpoogle-1ZvyVlk2SglK1PoUG7DqMxnB_KWtT5yJJ-Mosquito-Mosquito-by-Mineo-Shotaro",
+      "path": "data/output/scraped/final/native_files/fold/cpoogle-1ZvyVlk2SglK1PoUG7DqMxnB_KWtT5yJJ-cpoogle-1ZvyVlk2SglK1PoUG7DqMxnB_KWtT5yJJ-Mosquito-Mosquito-by-Mineo-Shotaro.fold",
+      "content_sha256": "8a658d37e2dc91c1d22362b232743bee08fbe0674ec8e1c4244ac20ffec9f882",
+      "vertices": 240,
+      "edges": 518,
+      "assignments": {
+        "B": 4,
+        "U": 514
+      },
+      "bucket": "medium"
+    },
+    {
+      "id": "cpoogle-1O5tuRCJfXrJHmm-gXpkxXf3cSB_86EoV-cpoogle-1O5tuRCJfXrJHmm-gXpkxXf3cSB_86EoV-BarnOwl-Barn-Owl-by-Seth-Friedman",
+      "path": "data/output/scraped/final/native_files/fold/cpoogle-1O5tuRCJfXrJHmm-gXpkxXf3cSB_86EoV-cpoogle-1O5tuRCJfXrJHmm-gXpkxXf3cSB_86EoV-BarnOwl-Barn-Owl-by-Seth-Friedman.fold",
+      "content_sha256": "1a7747e20b61982da1fd7951ec01d56d3a4d6e1867dd0772f1bd2a0e7459f2bd",
+      "vertices": 253,
+      "edges": 551,
+      "assignments": {
+        "B": 4,
+        "U": 547
+      },
+      "bucket": "medium"
+    },
+    {
+      "id": "cpoogle-1Wb5I5l8jmZZnl9aEPlqyFMV_aKMK9DMv-cpoogle-1Wb5I5l8jmZZnl9aEPlqyFMV_aKMK9DMv-Dragon-and-Knight-Dragon-and-Knight-by-Xiao-Dai",
+      "path": "data/output/scraped/final/native_files/fold/cpoogle-1Wb5I5l8jmZZnl9aEPlqyFMV_aKMK9DMv-cpoogle-1Wb5I5l8jmZZnl9aEPlqyFMV_aKMK9DMv-Dragon-and-Knight-Dragon-and-Knight-by-Xiao-Dai.fold",
+      "content_sha256": "90cb944f42eb5c84bbcf4d13ace1114bc419e757fd802b3dcf2431c861920d0f",
+      "vertices": 254,
+      "edges": 595,
+      "assignments": {
+        "B": 4,
+        "U": 591
+      },
+      "bucket": "medium"
+    },
+    {
+      "id": "cpoogle-1jbcmVuKf_1RNZGS4nYebuglBHia1hUPe-cpoogle-1jbcmVuKf_1RNZGS4nYebuglBHia1hUPe-Spider-Spider-by-tera_origami",
+      "path": "data/output/scraped/final/native_files/fold/cpoogle-1jbcmVuKf_1RNZGS4nYebuglBHia1hUPe-cpoogle-1jbcmVuKf_1RNZGS4nYebuglBHia1hUPe-Spider-Spider-by-tera_origami.fold",
+      "content_sha256": "3437084115430c15bd62085ceaebc7a8a0d9921abbf09be4ff8578801620836d",
+      "vertices": 289,
+      "edges": 600,
+      "assignments": {
+        "B": 4,
+        "U": 596
+      },
+      "bucket": "large"
+    },
+    {
+      "id": "cpoogle-1onr4pZC980XEeIcAfbF3JzkzP3RgUf2g-cpoogle-1onr4pZC980XEeIcAfbF3JzkzP3RgUf2g-Girl-3-Girl-3-by-dhujsi-eR",
+      "path": "data/output/scraped/final/native_files/fold/cpoogle-1onr4pZC980XEeIcAfbF3JzkzP3RgUf2g-cpoogle-1onr4pZC980XEeIcAfbF3JzkzP3RgUf2g-Girl-3-Girl-3-by-dhujsi-eR.fold",
+      "content_sha256": "b7f0b0bb8552c079e594022e69b6c20aff84387bb5bb761d361b4b5f1a40da46",
+      "vertices": 310,
+      "edges": 628,
+      "assignments": {
+        "B": 4,
+        "U": 624
+      },
+      "bucket": "large"
+    },
+    {
+      "id": "cpoogle-1mW4ZYCTw0QqxzYLYwNinLoSgniGUil9t-cpoogle-1mW4ZYCTw0QqxzYLYwNinLoSgniGUil9t-Little-Red-Riding-Hood-Werewolf-Version-Little-Red-Rid",
+      "path": "data/output/scraped/final/native_files/fold/cpoogle-1mW4ZYCTw0QqxzYLYwNinLoSgniGUil9t-cpoogle-1mW4ZYCTw0QqxzYLYwNinLoSgniGUil9t-Little-Red-Riding-Hood-Werewolf-Version-Little-Red-Rid.fold",
+      "content_sha256": "4a9f45d43efb625ccb0d787c97d275d4f179b511398f9ffc8ccfa7a4572edfe0",
+      "vertices": 331,
+      "edges": 712,
+      "assignments": {
+        "B": 4,
+        "U": 708
+      },
+      "bucket": "large"
+    },
+    {
+      "id": "cpoogle-1e5rm7ea82nFJFhvl96rgqIHzkBFEu3Ff-cpoogle-1e5rm7ea82nFJFhvl96rgqIHzkBFEu3Ff-Chameleon-4.0-PD-Chameleon-4.0-by-Akihiro-Kosuge",
+      "path": "data/output/scraped/final/native_files/fold/cpoogle-1e5rm7ea82nFJFhvl96rgqIHzkBFEu3Ff-cpoogle-1e5rm7ea82nFJFhvl96rgqIHzkBFEu3Ff-Chameleon-4.0-PD-Chameleon-4.0-by-Akihiro-Kosuge.fold",
+      "content_sha256": "ab3adefefc973dd53a628797b0cb65ad15e696af2abc7baaa2a9ac93c50bc8a7",
+      "vertices": 346,
+      "edges": 725,
+      "assignments": {
+        "B": 4,
+        "U": 721
+      },
+      "bucket": "large"
+    },
+    {
+      "id": "cpoogle-1HKQbvcCepLU9Jbp8LBLD7hq_o-9-dm9l-cpoogle-1HKQbvcCepLU9Jbp8LBLD7hq_o-9-dm9l-Dragon-Dragon-by-Takuro-Kashiwamura",
+      "path": "data/output/scraped/final/native_files/fold/cpoogle-1HKQbvcCepLU9Jbp8LBLD7hq_o-9-dm9l-cpoogle-1HKQbvcCepLU9Jbp8LBLD7hq_o-9-dm9l-Dragon-Dragon-by-Takuro-Kashiwamura.fold",
+      "content_sha256": "d9e1e0a29940d6f82bffd6362ca019c704a97d7f0f903559f7790d29bc820fb3",
+      "vertices": 337,
+      "edges": 769,
+      "assignments": {
+        "B": 4,
+        "U": 765
+      },
+      "bucket": "large"
+    },
+    {
+      "id": "cpoogle-1oMo6OfbzJp_vMFsDSnJo8lR_xJseF6pS-cpoogle-1oMo6OfbzJp_vMFsDSnJo8lR_xJseF6pS-Iguana-Iguana-by-Ikuno-Riku",
+      "path": "data/output/scraped/final/native_files/fold/cpoogle-1oMo6OfbzJp_vMFsDSnJo8lR_xJseF6pS-cpoogle-1oMo6OfbzJp_vMFsDSnJo8lR_xJseF6pS-Iguana-Iguana-by-Ikuno-Riku.fold",
+      "content_sha256": "fd802c05f4babb8d5bbfcc00045ae0de3ec49fa357a01d15c04f71dad0e93ca3",
+      "vertices": 397,
+      "edges": 828,
+      "assignments": {
+        "B": 4,
+        "U": 824
+      },
+      "bucket": "large"
+    },
+    {
+      "id": "cpoogle-17flTpF7aIcHkVJ5HS1L2kbhgCmQ2dZ1I-cpoogle-17flTpF7aIcHkVJ5HS1L2kbhgCmQ2dZ1I-Kabutomushi-PD-Kabutomushi-by-Bodo-Haag",
+      "path": "data/output/scraped/final/native_files/fold/cpoogle-17flTpF7aIcHkVJ5HS1L2kbhgCmQ2dZ1I-cpoogle-17flTpF7aIcHkVJ5HS1L2kbhgCmQ2dZ1I-Kabutomushi-PD-Kabutomushi-by-Bodo-Haag.fold",
+      "content_sha256": "8f47abf4ea793f6ce4a7fd5843c785fbe6dc7a5cb457906dcf93fe4058eb12f1",
+      "vertices": 401,
+      "edges": 869,
+      "assignments": {
+        "B": 4,
+        "U": 865
+      },
+      "bucket": "large"
+    },
+    {
+      "id": "cpoogle-1sUzYHJvWpDjKgk165joorKLPMxLC4swF-cpoogle-1sUzYHJvWpDjKgk165joorKLPMxLC4swF-Leopard-frog-Leapord-Frog-by-Bodo-Haag",
+      "path": "data/output/scraped/final/native_files/fold/cpoogle-1sUzYHJvWpDjKgk165joorKLPMxLC4swF-cpoogle-1sUzYHJvWpDjKgk165joorKLPMxLC4swF-Leopard-frog-Leapord-Frog-by-Bodo-Haag.fold",
+      "content_sha256": "3f2891c9d5f80e5bacefca065ef485cd4bd336cbe8eb9c34d7fe32da043893e4",
+      "vertices": 425,
+      "edges": 922,
+      "assignments": {
+        "B": 4,
+        "U": 918
+      },
+      "bucket": "large"
+    },
+    {
+      "id": "cpoogle-11z0vJC4ht3_J_smkIX9sI5xYicUfqC09-cpoogle-11z0vJC4ht3_J_smkIX9sI5xYicUfqC09-Octopus-Octopus-by-Shirasu_mikan",
+      "path": "data/output/scraped/final/native_files/fold/cpoogle-11z0vJC4ht3_J_smkIX9sI5xYicUfqC09-cpoogle-11z0vJC4ht3_J_smkIX9sI5xYicUfqC09-Octopus-Octopus-by-Shirasu_mikan.fold",
+      "content_sha256": "843acb6fea515f7652e337c09b655d8fbeab8389d3160cbf5a13161755b459bb",
+      "vertices": 453,
+      "edges": 956,
+      "assignments": {
+        "B": 4,
+        "U": 952
+      },
+      "bucket": "large"
+    },
+    {
+      "id": "cpoogle-1WyUzgcf387ST2Efsdw5aPNCVnvUukATE-cpoogle-1WyUzgcf387ST2Efsdw5aPNCVnvUukATE-Psuedoscorpion-Pseudoscorpion-by-Bodo-Haag",
+      "path": "data/output/scraped/final/native_files/fold/cpoogle-1WyUzgcf387ST2Efsdw5aPNCVnvUukATE-cpoogle-1WyUzgcf387ST2Efsdw5aPNCVnvUukATE-Psuedoscorpion-Pseudoscorpion-by-Bodo-Haag.fold",
+      "content_sha256": "97d1d7cf53f40478c89f537828c43da0818a2e60633aa3465746cd57c901fba5",
+      "vertices": 486,
+      "edges": 997,
+      "assignments": {
+        "B": 4,
+        "U": 993
+      },
+      "bucket": "large"
+    },
+    {
+      "id": "cpoogle-15tfMO20iznpwo2yU_03_fcBgqjnljvrh-cpoogle-15tfMO20iznpwo2yU_03_fcBgqjnljvrh-Guan-Yu-Horseback-Guan_Yu_with_Horse",
+      "path": "data/output/scraped/final/native_files/fold/cpoogle-15tfMO20iznpwo2yU_03_fcBgqjnljvrh-cpoogle-15tfMO20iznpwo2yU_03_fcBgqjnljvrh-Guan-Yu-Horseback-Guan_Yu_with_Horse.fold",
+      "content_sha256": "17f6172bd981e071c9bdf2b7b2a2794b7b9cb261597548231f036835efd7b0a2",
+      "vertices": 541,
+      "edges": 1050,
+      "assignments": {
+        "B": 4,
+        "U": 1046
+      },
+      "bucket": "large"
+    },
+    {
+      "id": "cpoogle-1Ng3XqZ4ks_GuI81qu5l4qQbsAhMHvhn-cpoogle-1Ng3XqZ4ks_GuI81qu5l4qQbsAhMHvhn-Shigure-Kantai-Collection-Shigure-Kantai-Collection-by",
+      "path": "data/output/scraped/final/native_files/fold/cpoogle-1Ng3XqZ4ks_GuI81qu5l4qQbsAhMHvhn-cpoogle-1Ng3XqZ4ks_GuI81qu5l4qQbsAhMHvhn-Shigure-Kantai-Collection-Shigure-Kantai-Collection-by.fold",
+      "content_sha256": "d973f4a965839f5a96d8b74a7b796beb730458bafb9bc1d33601170c459cf8e5",
+      "vertices": 530,
+      "edges": 1099,
+      "assignments": {
+        "B": 4,
+        "U": 1095
+      },
+      "bucket": "large"
+    },
+    {
+      "id": "cpoogle-1ADUgQi6WyNPpuDslobvTv_bYW6QY0Hph-cpoogle-1ADUgQi6WyNPpuDslobvTv_bYW6QY0Hph-Eurasian-Lynx-Eurasian-Lynx-by-Busi12341",
+      "path": "data/output/scraped/final/native_files/fold/cpoogle-1ADUgQi6WyNPpuDslobvTv_bYW6QY0Hph-cpoogle-1ADUgQi6WyNPpuDslobvTv_bYW6QY0Hph-Eurasian-Lynx-Eurasian-Lynx-by-Busi12341.fold",
+      "content_sha256": "af79f5eba5b8ecf8ff604b6e370ae778c3bae808e59177ed7fa17012c0c1ad57",
+      "vertices": 614,
+      "edges": 1234,
+      "assignments": {
+        "U": 1234
+      },
+      "bucket": "large"
+    },
+    {
+      "id": "cpoogle-1ZYQ_pcmEwBOlEj4wKwTWHtszvRoax0aj-cpoogle-1ZYQ_pcmEwBOlEj4wKwTWHtszvRoax0aj-Girl-4-Girl-4-by-dhujsi-eR",
+      "path": "data/output/scraped/final/native_files/fold/cpoogle-1ZYQ_pcmEwBOlEj4wKwTWHtszvRoax0aj-cpoogle-1ZYQ_pcmEwBOlEj4wKwTWHtszvRoax0aj-Girl-4-Girl-4-by-dhujsi-eR.fold",
+      "content_sha256": "5b2bd951b2e57420e570da873e23035e32510bf892a086b0e5a24f6a7005a903",
+      "vertices": 616,
+      "edges": 1286,
+      "assignments": {
+        "B": 4,
+        "U": 1282
+      },
+      "bucket": "large"
+    },
+    {
+      "id": "cpoogle-1fskBGK4UBQT2wZVSzKqluiihG1KO4T6H-cpoogle-1fskBGK4UBQT2wZVSzKqluiihG1KO4T6H-Lobster-Lobster-by-Jesse-Barr",
+      "path": "data/output/scraped/final/native_files/fold/cpoogle-1fskBGK4UBQT2wZVSzKqluiihG1KO4T6H-cpoogle-1fskBGK4UBQT2wZVSzKqluiihG1KO4T6H-Lobster-Lobster-by-Jesse-Barr.fold",
+      "content_sha256": "d1f04ca97d3e7f035bba14700213e87a17fc7b5fc5fe60eb869b268fd329f431",
+      "vertices": 751,
+      "edges": 1388,
+      "assignments": {
+        "B": 4,
+        "U": 1384
+      },
+      "bucket": "large"
+    },
+    {
+      "id": "cpoogle-1EiXbsvGRLTGWAq-FsN0oHi9DyCntNN-cpoogle-1EiXbsvGRLTGWAq-FsN0oHi9DyCntNN-Alice-Margatroid-Touhou-Alice-Margatroid-Touhou-by-dhujs",
+      "path": "data/output/scraped/final/native_files/fold/cpoogle-1EiXbsvGRLTGWAq-FsN0oHi9DyCntNN-cpoogle-1EiXbsvGRLTGWAq-FsN0oHi9DyCntNN-Alice-Margatroid-Touhou-Alice-Margatroid-Touhou-by-dhujs.fold",
+      "content_sha256": "ca6baa3f35c610a15607963aac045d04001a6698b353f35b6c4eb267d8305f73",
+      "vertices": 702,
+      "edges": 1486,
+      "assignments": {
+        "B": 4,
+        "U": 1482
+      },
+      "bucket": "large"
+    },
+    {
+      "id": "cpoogle-1J2Ndo72HIcCZZExvdzLfRD1gwHl9jGnt-cpoogle-1J2Ndo72HIcCZZExvdzLfRD1gwHl9jGnt-Stegosaurus-skeleton-Stegosaurus-Skeleton-by-Bodo-Haag",
+      "path": "data/output/scraped/final/native_files/fold/cpoogle-1J2Ndo72HIcCZZExvdzLfRD1gwHl9jGnt-cpoogle-1J2Ndo72HIcCZZExvdzLfRD1gwHl9jGnt-Stegosaurus-skeleton-Stegosaurus-Skeleton-by-Bodo-Haag.fold",
+      "content_sha256": "a1c7087bcb4b72d183adaf8fadce2309af7b3516285bfe03c74c05ea19629f9e",
+      "vertices": 741,
+      "edges": 1544,
+      "assignments": {
+        "B": 4,
+        "U": 1540
+      },
+      "bucket": "stress"
+    },
+    {
+      "id": "cpoogle-1oXjMrK1YFSTFxCzNWb2OWy8HziGtYXTJ-cpoogle-1oXjMrK1YFSTFxCzNWb2OWy8HziGtYXTJ-Platynus-Livens-Platynus-Livens-by-Samuel-Nhoung",
+      "path": "data/output/scraped/final/native_files/fold/cpoogle-1oXjMrK1YFSTFxCzNWb2OWy8HziGtYXTJ-cpoogle-1oXjMrK1YFSTFxCzNWb2OWy8HziGtYXTJ-Platynus-Livens-Platynus-Livens-by-Samuel-Nhoung.fold",
+      "content_sha256": "9e02c123a920ddd38d38e265f5be883e2fb674ad3ca367f6418d7c6397f7a288",
+      "vertices": 790,
+      "edges": 1691,
+      "assignments": {
+        "B": 4,
+        "U": 1687
+      },
+      "bucket": "stress"
+    },
+    {
+      "id": "cpoogle-1_t2wxof3zNSNZLZYW7BflxLn7OKkNxnB-cpoogle-1_t2wxof3zNSNZLZYW7BflxLn7OKkNxnB-Sun-Wukong-Sun-Wukong-by-Zhu9002",
+      "path": "data/output/scraped/final/native_files/fold/cpoogle-1_t2wxof3zNSNZLZYW7BflxLn7OKkNxnB-cpoogle-1_t2wxof3zNSNZLZYW7BflxLn7OKkNxnB-Sun-Wukong-Sun-Wukong-by-Zhu9002.fold",
+      "content_sha256": "90c7592df783ed2b33d79215744a510fee4896940a58fdcbc8336fbd7bc03fc4",
+      "vertices": 984,
+      "edges": 2027,
+      "assignments": {
+        "B": 4,
+        "U": 2023
+      },
+      "bucket": "stress"
+    },
+    {
+      "id": "cpoogle-16JMcIa1ocD85RqSrSXxRdwWSLKz5lBYb-cpoogle-16JMcIa1ocD85RqSrSXxRdwWSLKz5lBYb-Flamingo-Flamingo-by-Bodo-Haag",
+      "path": "data/output/scraped/final/native_files/fold/cpoogle-16JMcIa1ocD85RqSrSXxRdwWSLKz5lBYb-cpoogle-16JMcIa1ocD85RqSrSXxRdwWSLKz5lBYb-Flamingo-Flamingo-by-Bodo-Haag.fold",
+      "content_sha256": "526ad28530730ba7bdd2e742012438abe05c31ba6ba19398756443b94c6ad90d",
+      "vertices": 1137,
+      "edges": 2290,
+      "assignments": {
+        "U": 2290
+      },
+      "bucket": "stress"
+    },
+    {
+      "id": "cpoogle-1spnRkZn_dF6G3gIx_n9R_s0GtjGe3ECE-cpoogle-1spnRkZn_dF6G3gIx_n9R_s0GtjGe3ECE-Eagle-2024-Eagle-2024-by-Ikuno-Riku",
+      "path": "data/output/scraped/final/native_files/fold/cpoogle-1spnRkZn_dF6G3gIx_n9R_s0GtjGe3ECE-cpoogle-1spnRkZn_dF6G3gIx_n9R_s0GtjGe3ECE-Eagle-2024-Eagle-2024-by-Ikuno-Riku.fold",
+      "content_sha256": "c3c44b6b3991302caa23b61a4e7046627919c073969055be9b1badc35a3deffd",
+      "vertices": 1304,
+      "edges": 2629,
+      "assignments": {
+        "B": 4,
+        "U": 2625
+      },
+      "bucket": "stress"
+    },
+    {
+      "id": "cpoogle-1j-1LnjS68xRI-Pn-kHEByqnnMxhBt6-9-cpoogle-1j-1LnjS68xRI-Pn-kHEByqnnMxhBt6-9-Bodojin-32-Bodojin-32-by-Bodo-Haag",
+      "path": "data/output/scraped/final/native_files/fold/cpoogle-1j-1LnjS68xRI-Pn-kHEByqnnMxhBt6-9-cpoogle-1j-1LnjS68xRI-Pn-kHEByqnnMxhBt6-9-Bodojin-32-Bodojin-32-by-Bodo-Haag.fold",
+      "content_sha256": "b2cbebc01640e6f6bcc3204e3014fee733e40814dde2b1ddb2e42fb030a49bc1",
+      "vertices": 1508,
+      "edges": 3191,
+      "assignments": {
+        "B": 4,
+        "U": 3187
+      },
+      "bucket": "stress"
+    },
+    {
+      "id": "cpoogle-1CnNWlJjfc8pDQWAE-tGDpSCvvzJXy2fr-cpoogle-1CnNWlJjfc8pDQWAE-tGDpSCvvzJXy2fr-Pleoticus-Muelleri-Pleoticus-Muelleri-by-Samuel-Nhoung",
+      "path": "data/output/scraped/final/native_files/fold/cpoogle-1CnNWlJjfc8pDQWAE-tGDpSCvvzJXy2fr-cpoogle-1CnNWlJjfc8pDQWAE-tGDpSCvvzJXy2fr-Pleoticus-Muelleri-Pleoticus-Muelleri-by-Samuel-Nhoung.fold",
+      "content_sha256": "975679f59e7ccf31ab2eb9768823965ec0a7c3be881a6642dfd02f9ce38f0582",
+      "vertices": 2644,
+      "edges": 5641,
+      "assignments": {
+        "B": 4,
+        "U": 5637
+      },
+      "bucket": "stress"
+    },
+    {
+      "id": "cpoogle-1Sc9_V5cFmUsbq1pyHnJpBklYpZE_vEP0-cpoogle-1Sc9_V5cFmUsbq1pyHnJpBklYpZE_vEP0-Tokyo-skytree-Tokyo-Skytree-by-Akihiro-Kosuge",
+      "path": "data/output/scraped/final/native_files/fold/cpoogle-1Sc9_V5cFmUsbq1pyHnJpBklYpZE_vEP0-cpoogle-1Sc9_V5cFmUsbq1pyHnJpBklYpZE_vEP0-Tokyo-skytree-Tokyo-Skytree-by-Akihiro-Kosuge.fold",
+      "content_sha256": "9fb41f9cd7858def29b6d2d27dabd06a6b22a1fab886e46ab8784af92e8bb67d",
+      "vertices": 4675,
+      "edges": 9400,
+      "assignments": {
+        "B": 4,
+        "U": 9396
+      },
+      "bucket": "stress"
+    }
+  ]
+}

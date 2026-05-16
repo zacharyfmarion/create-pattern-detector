@@ -5,10 +5,11 @@ A deep learning model for detecting and classifying crease patterns in origami d
 ## Installation
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -e .
+scripts/setup_python_env.sh
 ```
+
+The setup script reuses a shared dependency virtualenv across git worktrees and
+links it into the current worktree as `.venv`.
 
 ## Usage
 

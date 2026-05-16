@@ -1,5 +1,42 @@
 # Agent Notes
 
+## Python Environment
+
+Use the shared setup script instead of building a fresh dependency environment in
+each worktree:
+
+```bash
+scripts/setup_python_env.sh
+```
+
+The script creates or reuses a shared virtualenv under:
+
+```text
+~/.cache/create-pattern-detector/venvs
+```
+
+Then it links the current worktree to that environment:
+
+```text
+.venv -> ~/.cache/create-pattern-detector/venvs/py<version>-dev
+```
+
+If a worktree already has a local `.venv` directory from manual setup, run:
+
+```bash
+scripts/setup_python_env.sh --adopt-local
+```
+
+or, to discard that local environment and use the shared one:
+
+```bash
+scripts/setup_python_env.sh --replace-local
+```
+
+After setup, use `.venv/bin/python` and `.venv/bin/pytest` for local commands.
+Set `CP_PYTHON`, `CP_PYTHON_ENV_ROOT`, or `CP_PYTHON_VENV` only when a machine
+needs a custom interpreter or environment location.
+
 ## Shared Scraped Dataset
 
 Do not copy the scraped real-world crease pattern dataset into each git worktree.
@@ -38,4 +75,3 @@ scripts/data/link_shared_scraped_data.sh
 The script refuses to replace a non-empty `data/output/scraped` directory unless it only contains metadata such as `.DS_Store`.
 
 Keep raw dataset files, crops, manifests, and generated reports out of git. Commit small code, docs, config examples, tests, and deterministic fixture manifests instead.
-
