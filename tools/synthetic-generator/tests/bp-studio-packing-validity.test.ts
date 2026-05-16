@@ -45,12 +45,46 @@ test("regularized compiler grid is a multiple of BP Studio optimized sheet units
   expect(layout.terminals.find((terminal) => terminal.id === "head")).toMatchObject({
     x: 4 / 7,
     y: 6 / 7,
+    sourceContour: {
+      x1: 3 / 7,
+      y1: 5 / 7,
+      x2: 5 / 7,
+      y2: 1,
+      source: "bp-studio-final-contour",
+    },
   });
   expect(layout.terminals.find((terminal) => terminal.id === "tail")).toMatchObject({
     x: 3 / 7,
     y: 0,
+    sourceContour: {
+      x1: 0,
+      y1: 0,
+      x2: 6 / 7,
+      y2: 3 / 7,
+      source: "bp-studio-final-contour",
+    },
   });
   expect(layout.regions.find((body) => body.id === "front-hub")?.x1).not.toBe(15 / 32);
+});
+
+test("region layout carries BP Studio terminal contour bounds as source metadata", () => {
+  const spec = simpleQuadrupedBPStudioSpec(7);
+  const adapterSpec = toAdapterSpec(spec);
+  adapterSpec.optimizeLayout = true;
+  adapterSpec.optimizerLayout = "view";
+  adapterSpec.optimizerSeed = 7;
+  adapterSpec.optimizerUseBH = true;
+
+  const { metadata } = runBPStudioAdapter(adapterSpec);
+  const completionLayout = regularizeBPStudioLayout(spec, { adapterSpec, adapterMetadata: metadata });
+  const regionLayout = regionLayoutFromCompletionLayout(completionLayout);
+  const head = regionLayout.flaps.find((flap) => flap.terminalId === "head");
+
+  expect(head?.sourceContourRect?.x1).toBeCloseTo(3 / 7, 8);
+  expect(head?.sourceContourRect?.y1).toBeCloseTo(5 / 7, 8);
+  expect(head?.sourceContourRect?.x2).toBeCloseTo(5 / 7, 8);
+  expect(head?.sourceContourRect?.y2).toBe(1);
+  expect(head?.rect).not.toEqual(head?.sourceContourRect);
 });
 
 test("regularized simple quadruped uses tangent lanes and downgrades inferred-body overlap", () => {

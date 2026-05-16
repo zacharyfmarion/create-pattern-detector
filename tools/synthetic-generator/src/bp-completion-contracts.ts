@@ -36,6 +36,13 @@ export interface CompletionTerminal {
   width: number;
   height: number;
   allocationRadius?: number;
+  sourceContour?: {
+    x1: number;
+    y1: number;
+    x2: number;
+    y2: number;
+    source: "bp-studio-final-contour";
+  };
   priority: number;
 }
 
@@ -219,6 +226,7 @@ export interface FlapRegion {
   nodeId: string;
   side: CompletionTerminal["side"];
   rect: RegionRect;
+  sourceContourRect?: RegionRect;
   center: CompletionPoint;
   allocationRadius?: number;
 }

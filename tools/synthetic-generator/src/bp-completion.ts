@@ -11,7 +11,7 @@ import {
 import { buildBPStudioLayoutGraph } from "./bp-studio-layout-graph.ts";
 import { scoreFoldRealism } from "./realism-metrics.ts";
 import type { BPStudioAdapterSpec } from "./bp-studio-spec.ts";
-import type { AdapterMetadata, AdapterSpec } from "./bp-studio-realistic.ts";
+import type { AdapterMetadata, AdapterNodeLayout, AdapterSpec } from "./bp-studio-realistic.ts";
 import type {
   CompletionAxis,
   CompletionCorridor,
@@ -153,6 +153,7 @@ export function regularizeBPStudioLayout(
   const sheetHeight = Math.max(1, sheet.height);
   const gridSize = options.gridSize ?? compilerGridSizeForSheet(sheetWidth, sheetHeight);
   const terminalByNodeId = new Map(spec.layout.flaps.map((terminal) => [terminal.nodeId, terminal]));
+  const adapterNodeLayoutById = new Map((adapterLayout?.nodes ?? []).map((node) => [node.id, node]));
   const optimizedTerminalNodes = graph?.nodes.filter((node) => node.kind === "terminal") ?? [];
   const terminals: CompletionTerminal[] = (optimizedTerminalNodes.length ? optimizedTerminalNodes : spec.layout.flaps.map((terminal) => ({
     adapterId: -1,
@@ -166,6 +167,12 @@ export function regularizeBPStudioLayout(
     const x = snap(clamp(node.normalized.x, 0, 1), gridSize);
     const y = snap(clamp(node.normalized.y, 0, 1), gridSize);
     const radius = terminalAllocationRadius(spec, sourceTerminal?.nodeId ?? node.nodeId, sheetWidth, sheetHeight);
+    const sourceContour = sourceContourForAdapterNode(
+      adapterNodeLayoutById.get(node.adapterId),
+      sheetWidth,
+      sheetHeight,
+      gridSize,
+    );
     return {
       id: sourceTerminal?.nodeId ?? `flap-${node.adapterId}`,
       nodeId: String(node.adapterId),
@@ -175,6 +182,7 @@ export function regularizeBPStudioLayout(
       width: snap(Math.max(1 / (gridSize * 2), (sourceTerminal?.width ?? 0) / sheetWidth), gridSize),
       height: snap(Math.max(1 / (gridSize * 2), (sourceTerminal?.height ?? 0) / sheetHeight), gridSize),
       allocationRadius: radius ? snap(radius, gridSize) : undefined,
+      ...(sourceContour ? { sourceContour } : {}),
       priority: sourceTerminal?.priority ?? index,
     };
   });
@@ -951,6 +959,40 @@ function terminalAllocationRadius(
   const radius = edge?.length ?? spec.layout.flaps.find((flap) => flap.nodeId === nodeId)?.terminalRadius;
   if (!radius || radius <= 0) return undefined;
   return radius / Math.max(sheetWidth, sheetHeight);
+}
+
+function sourceContourForAdapterNode(
+  node: AdapterNodeLayout | undefined,
+  sheetWidth: number,
+  sheetHeight: number,
+  gridSize: number,
+): CompletionTerminal["sourceContour"] | undefined {
+  const bounds = node?.finalContourBounds;
+  if (!bounds) return undefined;
+  const rect = normalizeContourBounds(bounds, sheetWidth, sheetHeight, gridSize);
+  if (rect.x2 - rect.x1 <= 1e-9 || rect.y2 - rect.y1 <= 1e-9) return undefined;
+  return {
+    ...rect,
+    source: "bp-studio-final-contour",
+  };
+}
+
+function normalizeContourBounds(
+  bounds: { top: number; right: number; bottom: number; left: number },
+  sheetWidth: number,
+  sheetHeight: number,
+  gridSize: number,
+): { x1: number; y1: number; x2: number; y2: number } {
+  const x1 = snap(clamp(Math.min(bounds.left, bounds.right) / sheetWidth, 0, 1), gridSize);
+  const x2 = snap(clamp(Math.max(bounds.left, bounds.right) / sheetWidth, 0, 1), gridSize);
+  const y1 = snap(clamp(Math.min(bounds.bottom, bounds.top) / sheetHeight, 0, 1), gridSize);
+  const y2 = snap(clamp(Math.max(bounds.bottom, bounds.top) / sheetHeight, 0, 1), gridSize);
+  return {
+    x1: Math.min(x1, x2),
+    y1: Math.min(y1, y2),
+    x2: Math.max(x1, x2),
+    y2: Math.max(y1, y2),
+  };
 }
 
 function orientationForPoints(a: CompletionPoint | undefined, b: CompletionPoint | undefined, fallback: CompletionAxis): CompletionAxis {

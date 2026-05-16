@@ -1400,6 +1400,14 @@ function flapRegion(terminal: CompletionTerminal, gridSize: number): FlapRegion 
   const center = point(snapToStep(terminal.x, pitch), snapToStep(terminal.y, pitch));
   const width = snapEvenDistanceToStep(clamp(Math.max(terminal.width, 1 / 16), 1 / 16, 3 / 16), pitch);
   const height = snapEvenDistanceToStep(clamp(Math.max(terminal.height, 1 / 16), 1 / 16, 3 / 16), pitch);
+  const sourceContourRect = terminal.sourceContour
+    ? snapRectToStep({
+        x1: terminal.sourceContour.x1,
+        y1: terminal.sourceContour.y1,
+        x2: terminal.sourceContour.x2,
+        y2: terminal.sourceContour.y2,
+      }, pitch)
+    : undefined;
   return {
     id: `flap-${terminal.id}`,
     terminalId: terminal.id,
@@ -1407,6 +1415,7 @@ function flapRegion(terminal: CompletionTerminal, gridSize: number): FlapRegion 
     side: terminal.side,
     center,
     allocationRadius: terminal.allocationRadius,
+    ...(sourceContourRect ? { sourceContourRect } : {}),
     rect: snapRectToStep(rectAround(center, width, height), pitch),
   };
 }
