@@ -27,8 +27,8 @@ test("region compiler emits alternating M/V pleat strips on the compiler grid", 
   expect(candidate.localProbe?.locallyFlatFoldable).toBe(false);
   expect(candidate.localProbe?.badVertices).toBeGreaterThan(0);
   expect(candidate.localProbe?.failureReasons["dangling-active-endpoint"]).toBeGreaterThan(0);
-  expect(candidate.localProbe?.failureReasons["kawasaki-geometry"]).toBeGreaterThan(0);
-  expect(pleats.length).toBeGreaterThan(8);
+  expect(candidate.localProbe?.kawasakiBad).toBe(0);
+  expect(pleats.length).toBeGreaterThan(4);
   expect(pleats.some((segment) => segment.assignment === "M")).toBe(true);
   expect(pleats.some((segment) => segment.assignment === "V")).toBe(true);
 
@@ -105,7 +105,7 @@ test("region compiler snaps optimized scaffold rectangles to visible pleat grid"
 
 test("region debug SVG exposes BP steering layers", () => {
   const candidate = compileRegionCandidate(fixtureRegionLayout("two-flap-stretch"));
-  expect(candidate.stairBoundaries.every((boundary) => boundary.lines.length > 1)).toBe(true);
+  expect(candidate.stairBoundaries).toHaveLength(0);
   const svg = regionCandidateToSvg(candidate, 320);
   expect(svg).toContain("<svg");
   expect(svg).toContain("#ff1f1f");

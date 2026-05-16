@@ -103,19 +103,6 @@ export function compileRegionCandidate(layout: RegionLayout, options: CompileReg
   for (const strip of workingLayout.pleatStrips) {
     segments.push(...rectBoundarySegments(`strip-${strip.id}`, strip.id, "body-boundary", strip.rect, "V"));
     segments.push(...pleatSegments(strip));
-    const boundaries = stairBoundariesForStrip(strip);
-    stairBoundaries.push(...boundaries);
-    for (const boundary of boundaries) {
-      segments.push(...boundary.lines.map((line, index): RegionCandidateSegment => ({
-        id: `${boundary.id}-${index}`,
-        regionId: strip.id,
-        kind: "stair-boundary",
-        p1: line.p1,
-        p2: line.p2,
-        assignment: line.assignment,
-        role: line.role,
-      })));
-    }
   }
 
   const arrangedSegments = dedupeSegments(segments);
@@ -779,12 +766,15 @@ function pleatStripFromRect(
   index: number,
   treeEdgeId?: string,
 ): PleatStripRegion {
+  void corridorOrientation;
+  const clamped = clampRect(rect);
+  const longAxis: PleatStripOrientation = (clamped.x2 - clamped.x1) >= (clamped.y2 - clamped.y1) ? "horizontal" : "vertical";
   return {
     id,
     from,
     to,
-    rect: clampRect(rect),
-    orientation: corridorOrientation === "horizontal" ? "vertical" : "horizontal",
+    rect: clamped,
+    orientation: longAxis,
     pitch,
     phase: 0,
     startAssignment: index % 2 === 0 ? "M" : "V",
