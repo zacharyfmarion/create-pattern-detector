@@ -1,0 +1,48 @@
+name: rabbit_ear_fold_program_v1
+seed: 99170
+imageSize: 768
+padding: 42
+
+splits:
+  train: 0.85
+  val: 0.10
+  test: 0.05
+
+families:
+  rabbit-ear-fold-program: 1.0
+
+complexityBuckets:
+  - name: small
+    minCreases: 40
+    maxCreases: 90
+    weight: 0.45
+  - name: medium
+    minCreases: 90
+    maxCreases: 220
+    weight: 0.45
+  - name: dense
+    minCreases: 220
+    maxCreases: 700
+    weight: 0.10
+
+validation:
+  strictGlobal: true
+  globalBackend: rabbit-ear-solver
+  minVertexDistance: 0.00001
+  maxVertices: 4000
+  maxEdges: 4000
+  requireDense: false
+  requireTreeMaker: false
+  requireRabbitEarFoldProgram: true
+  requireLocalFlatFoldability: true
+
+renderVariants:
+  - name: rabbit_ear_assignment_clean
+    assignmentVisibility: visible
+    count: 1
+  - name: rabbit_ear_active_only
+    assignmentVisibility: active-only
+    count: 1
+  - name: monochrome_ink
+    assignmentVisibility: hidden
+    count: 1

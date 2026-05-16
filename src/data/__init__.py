@@ -1,7 +1,5 @@
 """Data loading and processing utilities."""
 
-from .fold_parser import FOLDParser, CreasePattern
-
 __all__ = [
     "FOLDParser",
     "CreasePattern",
@@ -11,7 +9,11 @@ __all__ = [
 
 
 def __getattr__(name: str):
-    """Lazy-load OpenCV-dependent data helpers only when requested."""
+    """Lazy-load optional-heavy data helpers only when requested."""
+    if name in {"FOLDParser", "CreasePattern"}:
+        from .fold_parser import CreasePattern, FOLDParser
+
+        return {"FOLDParser": FOLDParser, "CreasePattern": CreasePattern}[name]
     if name == "GroundTruthGenerator":
         from .annotations import GroundTruthGenerator
 
