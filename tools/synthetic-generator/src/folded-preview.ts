@@ -10,6 +10,7 @@ interface CliArgs {
   limit: number;
   out?: string;
   family?: string;
+  skipFailures: boolean;
 }
 
 interface RawRow {
@@ -47,9 +48,19 @@ async function main(): Promise<void> {
   }
 
   const rows: FoldedPreviewRow[] = [];
+  const failures: Array<{ id: string; family: string; originalFoldPath: string; error: string }> = [];
   for (const row of selectedRows) {
     const fold = await readJson<FOLDFormat>(join(args.root, row.foldPath));
-    const preview = makeFlatFoldedPreview(fold);
+    let preview: ReturnType<typeof makeFlatFoldedPreview>;
+    try {
+      preview = makeFlatFoldedPreview(fold);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      failures.push({ id: row.id, family: row.family, originalFoldPath: row.foldPath, error: message });
+      if (!args.skipFailures) throw error;
+      console.warn(`[${rows.length + failures.length}/${selectedRows.length}] skipped ${row.id}: ${message}`);
+      continue;
+    }
     const foldedFoldPath = join(foldsDir, `${row.id}--flat-folded.fold`);
     await writeJson(foldedFoldPath, preview.foldedFold);
     rows.push({
@@ -74,6 +85,7 @@ async function main(): Promise<void> {
   await writeJson(join(outDir, "folded-qa.json"), {
     root: args.root,
     rows: rows.length,
+    failures,
     families: countBy(rows, (row) => row.family),
     bpSubfamilies: countBy(rows.filter((row) => row.bpSubfamily), (row) => row.bpSubfamily ?? "unknown"),
     solverRootOrders: summarize(rows.map((row) => row.solverRootOrders)),
@@ -132,15 +144,16 @@ export function makeFlatFoldedPreview(fold: FOLDFormat): {
 }
 
 function parseArgs(argv: string[]): CliArgs {
-  const args: CliArgs = { root: "", limit: 12 };
+  const args: CliArgs = { root: "", limit: 12, skipFailures: false };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === "--root") args.root = argv[++i];
     else if (arg === "--limit") args.limit = Number(argv[++i]);
     else if (arg === "--out") args.out = argv[++i];
     else if (arg === "--family") args.family = argv[++i];
+    else if (arg === "--skip-failures") args.skipFailures = true;
     else if (arg === "--help" || arg === "-h") {
-      console.log("Usage: bun run folded-preview -- --root <dataset-root> [--limit 12] [--family box-pleat]");
+      console.log("Usage: bun run folded-preview -- --root <dataset-root> [--limit 12] [--family treemaker-tree] [--skip-failures]");
       process.exit(0);
     } else {
       throw new Error(`Unknown argument: ${arg}`);
