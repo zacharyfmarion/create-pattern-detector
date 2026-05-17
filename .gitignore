@@ -11,6 +11,7 @@ tools/synthetic-generator/node_modules
 .venv
 .venv/
 configs/scraping.env
+configs/runpod.env
 */**/__pycache__/**
 .DS_Store
 checkpoints/

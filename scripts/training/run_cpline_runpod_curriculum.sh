@@ -20,6 +20,7 @@ LR="${LR:-0.0003}"
 SEED="${SEED:-7}"
 EVAL_THRESHOLDS="${EVAL_THRESHOLDS:-0.5,0.65,0.8}"
 GRAPH_EVAL_COUNT="${GRAPH_EVAL_COUNT:-}"
+LOG_EVERY="${LOG_EVERY:-50}"
 
 STEPS_LIGHT="${STEPS_LIGHT:-3000}"
 STEPS_PRINT="${STEPS_PRINT:-1800}"
@@ -51,6 +52,7 @@ run_stage() {
     --num-workers "$NUM_WORKERS"
     --lr "$LR"
     --seed "$SEED"
+    --log-every "$LOG_EVERY"
     --augment-profile "$profile"
     --eval-augment-profile "$profile"
     --eval-thresholds "$EVAL_THRESHOLDS"
@@ -61,8 +63,10 @@ run_stage() {
   if [[ -n "$init_checkpoint" ]]; then
     args+=(--init-checkpoint "$init_checkpoint")
   fi
-  echo "=== Running $profile -> $output_dir ==="
-  TQDM_DISABLE="${TQDM_DISABLE:-1}" "$PYTHON" "${args[@]}"
+  mkdir -p "$output_dir"
+  local log_path="$output_dir/train.log"
+  echo "=== Running $profile -> $output_dir ===" | tee "$log_path"
+  TQDM_DISABLE="${TQDM_DISABLE:-1}" "$PYTHON" "${args[@]}" 2>&1 | tee -a "$log_path"
 }
 
 run_stage "stage-light" "$STEPS_LIGHT" "$OUTPUT_ROOT/stage-light"

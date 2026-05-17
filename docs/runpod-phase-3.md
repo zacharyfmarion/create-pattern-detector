@@ -36,6 +36,34 @@ MPS memory path are proven.
 
 ## RunPod Setup
 
+### Local API key setup
+
+Create a restricted RunPod API key and keep it out of git:
+
+- `api.runpod.io/graphql`: `Read / Write`
+- `api.runpod.ai`: `None` unless you also plan to manage Serverless endpoints
+
+This Phase 3 flow uses `runpodctl` for Pods, GPU availability, account info, and
+file transfer; the CLI defaults to `https://api.runpod.io/graphql`. `Read only`
+is not enough because we need to create/start/stop Pods. Avoid `All` unless the
+restricted key proves insufficient.
+
+Store the key locally:
+
+```bash
+cp configs/runpod.env.example configs/runpod.env
+# Paste RUNPOD_API_KEY into configs/runpod.env. Do not paste it into chat.
+set -a; source configs/runpod.env; set +a
+runpodctl config --apiKey "$RUNPOD_API_KEY"
+runpodctl user
+```
+
+Alternatively, `runpodctl doctor` can prompt for the key and set up SSH. The
+env-file path is easier to audit per worktree, while `runpodctl config` stores
+the key in your user-level RunPod CLI config.
+
+### Pod bootstrap
+
 From a fresh pod:
 
 ```bash
@@ -84,7 +112,60 @@ The script runs:
 Set `RUN_MIXED=1` only after reviewing the `stage-dark-grid` summary.
 
 Each stage writes `summary.json`, `latest.pt`, `run_config.json`, and prediction
-cache artifacts under its output directory.
+cache artifacts under its output directory. It also streams step metrics to
+`train_history.jsonl` and mirrors stdout/stderr to `train.log`.
+
+## Monitoring
+
+From your laptop, check Pod status:
+
+```bash
+set -a; source configs/runpod.env; set +a
+runpodctl pod list
+runpodctl pod get "$RUNPOD_POD_ID" --include-machine
+runpodctl ssh info "$RUNPOD_POD_ID"
+```
+
+On the Pod, run the curriculum inside `tmux` so disconnects do not stop
+training:
+
+```bash
+tmux new -s cpline
+OUTPUT_ROOT=checkpoints/runpod_phase3_curriculum \
+MANIFEST=data/generated/synthetic/cp_training_mix_v1/raw-manifest.jsonl \
+TRAIN_COUNT=512 \
+VAL_COUNT=64 \
+BATCH_SIZE=1 \
+NUM_WORKERS=4 \
+IMAGE_SIZE=1024 \
+BACKBONE=hrnet_w18 \
+RUN_MIXED=0 \
+LOG_EVERY=50 \
+scripts/training/run_cpline_runpod_curriculum.sh
+```
+
+Detach with `Ctrl-b d`, then reattach with:
+
+```bash
+tmux attach -t cpline
+```
+
+Watch live logs and step metrics from another shell on the Pod:
+
+```bash
+tail -f checkpoints/runpod_phase3_curriculum/stage-light/train.log
+tail -f checkpoints/runpod_phase3_curriculum/stage-light/train_history.jsonl
+watch -n 5 nvidia-smi
+```
+
+After a stage finishes, inspect its summary:
+
+```bash
+.venv/bin/python -m json.tool checkpoints/runpod_phase3_curriculum/stage-light/summary.json | less
+```
+
+For the staged run, change `stage-light` to `stage-print`, `stage-dark`, or
+`stage-dark-grid` as each stage begins.
 
 ## Review Gates
 

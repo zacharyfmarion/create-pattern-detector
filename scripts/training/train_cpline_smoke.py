@@ -65,6 +65,12 @@ def parse_args() -> argparse.Namespace:
         help="Optional cap per split for expensive PlanarGraphBuilder eval; pixel loss still uses the full validation slice.",
     )
     parser.add_argument("--lr", type=float, default=3e-4)
+    parser.add_argument(
+        "--log-every",
+        type=int,
+        default=50,
+        help="Write a JSONL training row every N steps. Set to 0 to disable.",
+    )
     parser.add_argument("--backbone", type=str, default="tiny")
     parser.add_argument("--hidden-channels", type=int, default=128)
     parser.add_argument(
@@ -230,6 +236,7 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         "image_size": args.image_size,
         "batch_size": args.batch_size,
         "max_steps": args.max_steps,
+        "log_every": args.log_every,
         "graph_eval_count": args.graph_eval_count,
         "backbone": args.backbone,
         "hidden_channels": args.hidden_channels,
@@ -243,6 +250,8 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
     }
     (output_dir / "run_config.json").write_text(json.dumps(run_config, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(run_config, indent=2), flush=True)
+    history_path = output_dir / "train_history.jsonl"
+    history_path.write_text("", encoding="utf-8")
 
     model.train()
     history: list[dict[str, float]] = []
@@ -262,6 +271,11 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         row = {"step": float(step), **scalar_losses(losses)}
         history.append(row)
         progress.set_postfix({"loss": f"{row['total']:.4f}", "line": f"{row['line']:.4f}"})
+        if args.log_every > 0 and (step == 1 or step % args.log_every == 0 or step == args.max_steps):
+            log_row = {**row, "elapsed_seconds": perf_counter() - start}
+            with history_path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(log_row) + "\n")
+            print(json.dumps({"event": "train_step", **log_row}), flush=True)
 
     torch.save(
         {
