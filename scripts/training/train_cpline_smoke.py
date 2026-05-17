@@ -6,6 +6,8 @@ fold-only raw-manifest `.fold` geometry and evaluates through
 PlanarGraphBuilder.
 """
 
+# ruff: noqa: E402
+
 from __future__ import annotations
 
 import argparse
@@ -31,7 +33,7 @@ sys.path.insert(0, str(REPO_ROOT))
 from src.data.cpline_augmentations import AUGMENT_PROFILES, normalize_augment_profile
 from src.data.cpline_dataset import CplineFoldDataset, cpline_collate
 from src.models import CPLineNet
-from src.models.losses import CPLineLoss
+from src.models.losses import CPLineLoss, CPLineLossConfig
 from src.vectorization import (
     PlanarGraphBuilder,
     PlanarGraphBuilderConfig,
@@ -70,6 +72,24 @@ def parse_args() -> argparse.Namespace:
         help="Skip PlanarGraphBuilder eval and write pixel-loss summaries only.",
     )
     parser.add_argument("--lr", type=float, default=3e-4)
+    parser.add_argument(
+        "--line-hard-negative-weight",
+        type=float,
+        default=0.25,
+        help="Extra loss weight for highest-loss background line pixels.",
+    )
+    parser.add_argument(
+        "--line-hard-negative-ratio",
+        type=float,
+        default=0.05,
+        help="Maximum background fraction mined for hard-negative line loss.",
+    )
+    parser.add_argument(
+        "--line-hard-negative-multiplier",
+        type=float,
+        default=4.0,
+        help="Maximum hard-negative pixels as a multiple of positive line pixels.",
+    )
     parser.add_argument(
         "--log-every",
         type=int,
@@ -153,7 +173,9 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
 
     device = select_device(args.device)
     manifest = args.manifest if args.manifest.is_absolute() else REPO_ROOT / args.manifest
-    augment_profile = normalize_augment_profile(args.augment_profile, render_noise=args.render_noise)
+    augment_profile = normalize_augment_profile(
+        args.augment_profile, render_noise=args.render_noise
+    )
 
     train_dataset = CplineFoldDataset(
         manifest,
@@ -227,10 +249,18 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
     ).to(device)
     init_checkpoint = args.init_checkpoint
     if init_checkpoint is not None:
-        init_checkpoint = init_checkpoint if init_checkpoint.is_absolute() else REPO_ROOT / init_checkpoint
+        init_checkpoint = (
+            init_checkpoint if init_checkpoint.is_absolute() else REPO_ROOT / init_checkpoint
+        )
         loaded = torch.load(init_checkpoint, map_location=device, weights_only=False)
         model.load_state_dict(loaded["model_state_dict"])
-    criterion = CPLineLoss()
+    criterion = CPLineLoss(
+        CPLineLossConfig(
+            line_hard_negative_weight=args.line_hard_negative_weight,
+            line_hard_negative_ratio=args.line_hard_negative_ratio,
+            line_hard_negative_multiplier=args.line_hard_negative_multiplier,
+        )
+    )
     optimizer = torch.optim.AdamW(model.get_param_groups(args.lr), lr=args.lr, weight_decay=1e-4)
 
     run_config = {
@@ -252,9 +282,14 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         "render_noise": args.render_noise,
         "max_edges": args.max_edges,
         "lr": args.lr,
+        "line_hard_negative_weight": args.line_hard_negative_weight,
+        "line_hard_negative_ratio": args.line_hard_negative_ratio,
+        "line_hard_negative_multiplier": args.line_hard_negative_multiplier,
         "seed": args.seed,
     }
-    (output_dir / "run_config.json").write_text(json.dumps(run_config, indent=2) + "\n", encoding="utf-8")
+    (output_dir / "run_config.json").write_text(
+        json.dumps(run_config, indent=2) + "\n", encoding="utf-8"
+    )
     print(json.dumps(run_config, indent=2), flush=True)
     history_path = output_dir / "train_history.jsonl"
     history_path.write_text("", encoding="utf-8")
@@ -277,7 +312,9 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         row = {"step": float(step), **scalar_losses(losses)}
         history.append(row)
         progress.set_postfix({"loss": f"{row['total']:.4f}", "line": f"{row['line']:.4f}"})
-        if args.log_every > 0 and (step == 1 or step % args.log_every == 0 or step == args.max_steps):
+        if args.log_every > 0 and (
+            step == 1 or step % args.log_every == 0 or step == args.max_steps
+        ):
             log_row = {**row, "elapsed_seconds": perf_counter() - start}
             with history_path.open("a", encoding="utf-8") as handle:
                 handle.write(json.dumps(log_row) + "\n")
@@ -409,7 +446,9 @@ def evaluate_vectorizer_sweep(
         )
         key = f"{threshold:.2f}"
         summary["edge_f1"] = f1(summary.get("edge_precision", 0.0), summary.get("edge_recall", 0.0))
-        summary["vertex_f1"] = f1(summary.get("vertex_precision", 0.0), summary.get("vertex_recall", 0.0))
+        summary["vertex_f1"] = f1(
+            summary.get("vertex_precision", 0.0), summary.get("vertex_recall", 0.0)
+        )
         by_threshold[key] = summary
         score = summary["edge_f1"] + 0.1 * summary.get("structural_validity_rate", 0.0)
         if score > best_score:
@@ -491,8 +530,12 @@ def evaluate_vectorizer(
             break
 
     summary = metrics_from_results(metrics)
-    (output_dir / "per_file_metrics.json").write_text(json.dumps(rows, indent=2) + "\n", encoding="utf-8")
-    (output_dir / "graph_summary.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
+    (output_dir / "per_file_metrics.json").write_text(
+        json.dumps(rows, indent=2) + "\n", encoding="utf-8"
+    )
+    (output_dir / "graph_summary.json").write_text(
+        json.dumps(summary, indent=2) + "\n", encoding="utf-8"
+    )
     model.train()
     return summary
 

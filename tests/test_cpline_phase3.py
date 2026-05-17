@@ -6,10 +6,16 @@ import sys
 import numpy as np
 import torch
 
-from src.data.cpline_dataset import CplineFoldDataset, render_cpline_sample, render_input_image, select_records
 from src.data.cpline_augmentations import AUGMENT_MIXES, NON_IDENTITY_SQUARE_SYMMETRIES
+from src.data.cpline_dataset import (
+    CplineFoldDataset,
+    render_cpline_sample,
+    render_input_image,
+    select_records,
+)
 from src.data.fold_parser import CreasePattern, FOLDParser
 from src.models import CPLineNet
+from src.models.losses import CPLineLoss, CPLineLossConfig
 from src.vectorization import cpline_outputs_to_evidence
 
 
@@ -81,7 +87,9 @@ def test_cpline_renderer_keeps_unassigned_geometry_visible():
 
 def test_cpline_clean_profile_matches_compatibility_renderer():
     cp = simple_mv_cp()
-    sample = render_cpline_sample(cp, image_size=128, padding=8, line_width=2, augment_profile="clean")
+    sample = render_cpline_sample(
+        cp, image_size=128, padding=8, line_width=2, augment_profile="clean"
+    )
     image = render_input_image(cp, image_size=128, padding=8, line_width=2, render_noise="clean")
 
     assert np.array_equal(sample.image, image)
@@ -91,7 +99,9 @@ def test_cpline_clean_profile_matches_compatibility_renderer():
 
 def test_cpline_dark_mode_preserves_geometry_targets():
     cp = simple_mv_cp()
-    clean = render_cpline_sample(cp, image_size=128, padding=8, line_width=2, augment_profile="clean")
+    clean = render_cpline_sample(
+        cp, image_size=128, padding=8, line_width=2, augment_profile="clean"
+    )
     dark = render_cpline_sample(
         cp,
         image_size=128,
@@ -112,7 +122,9 @@ def test_cpline_dark_mode_preserves_geometry_targets():
 
 def test_cpline_dark_mode_grid_is_not_line_target():
     cp = simple_mv_cp()
-    clean = render_cpline_sample(cp, image_size=128, padding=8, line_width=2, augment_profile="clean")
+    clean = render_cpline_sample(
+        cp, image_size=128, padding=8, line_width=2, augment_profile="clean"
+    )
     dark = render_cpline_sample(
         cp,
         image_size=128,
@@ -133,7 +145,9 @@ def test_cpline_dark_mode_grid_is_not_line_target():
 
 def test_cpline_square_symmetry_transforms_vertices_and_targets():
     cp = asymmetric_mv_cp()
-    clean = render_cpline_sample(cp, image_size=128, padding=8, line_width=2, augment_profile="clean")
+    clean = render_cpline_sample(
+        cp, image_size=128, padding=8, line_width=2, augment_profile="clean"
+    )
     rotated = render_cpline_sample(
         cp,
         image_size=128,
@@ -143,7 +157,9 @@ def test_cpline_square_symmetry_transforms_vertices_and_targets():
         square_symmetry="rotate90",
         seed=3,
     )
-    expected_vertices = np.stack([127.0 - clean.pixel_vertices[:, 1], clean.pixel_vertices[:, 0]], axis=1)
+    expected_vertices = np.stack(
+        [127.0 - clean.pixel_vertices[:, 1], clean.pixel_vertices[:, 0]], axis=1
+    )
 
     assert rotated.metadata["selected_profile"] == "square-symmetry"
     assert rotated.metadata["square_symmetry"] == "rotate90"
@@ -156,8 +172,12 @@ def test_cpline_square_symmetry_transforms_vertices_and_targets():
 
 def test_cpline_photo_light_geometric_augmentation_recomputes_targets():
     cp = simple_mv_cp()
-    clean = render_cpline_sample(cp, image_size=128, padding=8, line_width=2, augment_profile="clean")
-    photo = render_cpline_sample(cp, image_size=128, padding=8, line_width=2, augment_profile="photo-light", seed=3)
+    clean = render_cpline_sample(
+        cp, image_size=128, padding=8, line_width=2, augment_profile="clean"
+    )
+    photo = render_cpline_sample(
+        cp, image_size=128, padding=8, line_width=2, augment_profile="photo-light", seed=3
+    )
 
     assert photo.metadata["geometry_applied"] is True
     assert not np.allclose(photo.pixel_vertices, clean.pixel_vertices)
@@ -167,12 +187,53 @@ def test_cpline_photo_light_geometric_augmentation_recomputes_targets():
 
 def test_cpline_seeded_augmentation_is_reproducible():
     cp = simple_mv_cp()
-    first = render_cpline_sample(cp, image_size=128, padding=8, line_width=2, augment_profile="print-medium", seed=9)
-    second = render_cpline_sample(cp, image_size=128, padding=8, line_width=2, augment_profile="print-medium", seed=9)
+    first = render_cpline_sample(
+        cp, image_size=128, padding=8, line_width=2, augment_profile="print-medium", seed=9
+    )
+    second = render_cpline_sample(
+        cp, image_size=128, padding=8, line_width=2, augment_profile="print-medium", seed=9
+    )
 
     assert np.array_equal(first.image, second.image)
     assert np.array_equal(first.line_prob, second.line_prob)
     assert first.metadata["params"] == second.metadata["params"]
+
+
+def test_cpline_loss_hard_negative_penalizes_background_false_positives():
+    targets = {
+        "line_prob": torch.zeros((1, 1, 16, 16), dtype=torch.float32),
+        "angle": torch.zeros((1, 2, 16, 16), dtype=torch.float32),
+        "junction_heatmap": torch.zeros((1, 1, 16, 16), dtype=torch.float32),
+        "junction_offset": torch.zeros((1, 2, 16, 16), dtype=torch.float32),
+        "junction_mask": torch.zeros((1, 16, 16), dtype=torch.bool),
+        "assignment": torch.full((1, 16, 16), -100, dtype=torch.long),
+    }
+    targets["line_prob"][:, :, 1, 1] = 1.0
+    targets["angle"][:, 0, 1, 1] = 1.0
+    targets["assignment"][:, 1, 1] = 0
+    outputs = {
+        "line_logits": torch.zeros((1, 1, 16, 16), dtype=torch.float32),
+        "angle": torch.zeros((1, 2, 16, 16), dtype=torch.float32),
+        "junction_logits": torch.zeros((1, 1, 16, 16), dtype=torch.float32),
+        "junction_offset": torch.zeros((1, 2, 16, 16), dtype=torch.float32),
+        "assignment_logits": torch.zeros((1, 4, 16, 16), dtype=torch.float32),
+    }
+    noisy_outputs = {key: value.clone() for key, value in outputs.items()}
+    noisy_outputs["line_logits"][:, :, 4:12, 4:12] = 6.0
+    criterion = CPLineLoss(
+        CPLineLossConfig(
+            line_hard_negative_weight=1.0,
+            line_hard_negative_ratio=0.25,
+            line_hard_negative_multiplier=8.0,
+            line_hard_negative_min_pixels=8,
+        )
+    )
+
+    clean_losses = criterion(outputs, targets)
+    noisy_losses = criterion(noisy_outputs, targets)
+
+    assert noisy_losses["line_hard_negative"] > clean_losses["line_hard_negative"]
+    assert noisy_losses["total"] > clean_losses["total"]
 
 
 def test_cpline_stage_light_samples_only_stage_one_profiles():
@@ -219,8 +280,12 @@ def test_cpline_stage_dark_pins_dark_mode_without_grid():
 
 def test_cpline_style_profiles_do_not_apply_square_symmetry_by_default():
     cp = asymmetric_mv_cp()
-    clean = render_cpline_sample(cp, image_size=96, padding=8, line_width=2, augment_profile="clean")
-    styled = render_cpline_sample(cp, image_size=96, padding=8, line_width=2, augment_profile="line-style", seed=2)
+    clean = render_cpline_sample(
+        cp, image_size=96, padding=8, line_width=2, augment_profile="clean"
+    )
+    styled = render_cpline_sample(
+        cp, image_size=96, padding=8, line_width=2, augment_profile="line-style", seed=2
+    )
 
     assert styled.metadata["square_symmetry"] == "identity"
     assert styled.metadata["geometry_applied"] is False
@@ -266,7 +331,13 @@ def test_cpline_dataset_does_not_cache_random_augmented_tensors(tmp_path):
 
 def test_cpline_dataset_limit_samples_across_ordered_mixed_manifest():
     records = [
-        {"id": f"tree-{idx}", "foldPath": f"tree-{idx}.fold", "split": "train", "family": "treemaker-tree", "edges": 8}
+        {
+            "id": f"tree-{idx}",
+            "foldPath": f"tree-{idx}.fold",
+            "split": "train",
+            "family": "treemaker-tree",
+            "edges": 8,
+        }
         for idx in range(100)
     ] + [
         {
@@ -348,7 +419,9 @@ def test_cpline_square_symmetry_visualization_script_smoke(tmp_path):
     assert sidecar.exists()
     data = json.loads(sidecar.read_text(encoding="utf-8"))
     assert len(data["rows"]) == len(NON_IDENTITY_SQUARE_SYMMETRIES)
-    assert {row["augmentation"]["square_symmetry"] for row in data["rows"]} == set(NON_IDENTITY_SQUARE_SYMMETRIES)
+    assert {row["augmentation"]["square_symmetry"] for row in data["rows"]} == set(
+        NON_IDENTITY_SQUARE_SYMMETRIES
+    )
 
 
 def test_cpline_training_script_dark_mode_smoke(tmp_path):
