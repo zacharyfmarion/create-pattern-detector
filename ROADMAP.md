@@ -338,6 +338,10 @@ Tasks:
 - Add configurable augmentation mixes so curriculum stages can sample only the
   approved profiles for that stage instead of jumping straight to full `mixed`:
   `stage-light`, `stage-print`, `stage-dark`, and `stage-dark-grid`.
+- Use the generated fold-only `raw-manifest.jsonl` contract for CPLine training:
+  rows provide `foldPath` relative to the manifest root plus explicit
+  train/val/test `split` values. The old Phase 2 `records[].path` fixture format
+  remains only for deterministic vectorizer telemetry.
 - Evaluate through the full vectorizer, not only pixel IoU.
 - Cache predictions and graph-builder intermediate artifacts for reproducibility.
 

@@ -58,7 +58,10 @@ flag remains only as a compatibility alias.
 Generate contact sheets before increasing image size or training duration:
 
 ```bash
+scripts/data/link_shared_synthetic_data.sh cp_training_mix_v1
+
 .venv/bin/python scripts/visualize/cpline_augmentations.py \
+  --manifest data/generated/synthetic/cp_training_mix_v1/raw-manifest.jsonl \
   --profiles all \
   --num-samples 2 \
   --image-size 384 \
@@ -69,6 +72,7 @@ For the square rotation/flip sheet:
 
 ```bash
 .venv/bin/python scripts/visualize/cpline_augmentations.py \
+  --manifest data/generated/synthetic/cp_training_mix_v1/raw-manifest.jsonl \
   --profiles square-symmetry \
   --num-samples 1 \
   --image-size 384 \
@@ -111,5 +115,12 @@ is a stress test, not the intended curriculum.
 The RunPod handoff and staged GPU script are documented in
 `docs/runpod-phase-3.md`.
 
-When synthetic M/V-rich examples land, run them through the same profiles and
-evaluate assignment accuracy separately from geometry.
+CPLine training reads fold-only `raw-manifest.jsonl` datasets directly. The
+current default is the linked mixed release at
+`data/generated/synthetic/cp_training_mix_v1/raw-manifest.jsonl`. When
+`--train-count` or `--val-count` limits a split, CPLine samples a seeded subset
+across the whole split so small local runs still include both TreeMaker and
+Rabbit Ear rows from the mixed manifest.
+
+Run synthetic M/V-rich examples through the same profiles and evaluate
+assignment accuracy separately from geometry.

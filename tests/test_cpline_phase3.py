@@ -6,7 +6,7 @@ import sys
 import numpy as np
 import torch
 
-from src.data.cpline_dataset import CplineFoldDataset, render_cpline_sample, render_input_image
+from src.data.cpline_dataset import CplineFoldDataset, render_cpline_sample, render_input_image, select_records
 from src.data.cpline_augmentations import AUGMENT_MIXES, NON_IDENTITY_SQUARE_SYMMETRIES
 from src.data.fold_parser import CreasePattern, FOLDParser
 from src.models import CPLineNet
@@ -251,8 +251,7 @@ def test_cpline_dataset_does_not_cache_random_augmented_tensors(tmp_path):
     dataset = CplineFoldDataset(
         manifest,
         split="train",
-        train_count=1,
-        val_count=1,
+        limit=1,
         max_edges=20,
         image_size=96,
         augment_profile="print-medium",
@@ -263,6 +262,27 @@ def test_cpline_dataset_does_not_cache_random_augmented_tensors(tmp_path):
     second = dataset[0]["image"]
 
     assert not torch.equal(first, second)
+
+
+def test_cpline_dataset_limit_samples_across_ordered_mixed_manifest():
+    records = [
+        {"id": f"tree-{idx}", "foldPath": f"tree-{idx}.fold", "split": "train", "family": "treemaker-tree", "edges": 8}
+        for idx in range(100)
+    ] + [
+        {
+            "id": f"rabbit-{idx}",
+            "foldPath": f"rabbit-{idx}.fold",
+            "split": "train",
+            "family": "rabbit-ear-fold-program",
+            "edges": 8,
+        }
+        for idx in range(100)
+    ]
+
+    selected = select_records(records, split="train", limit=50, max_edges=20, seed=7)
+    families = {record["family"] for record in selected}
+
+    assert families == {"treemaker-tree", "rabbit-ear-fold-program"}
 
 
 def test_cpline_augmentation_visualization_script_smoke(tmp_path):
@@ -436,17 +456,23 @@ def test_cpline_outputs_convert_to_vectorizer_evidence():
 
 def _write_manifest(tmp_path, *, count: int) -> str:
     records = []
+    folds_dir = tmp_path / "folds"
+    folds_dir.mkdir()
     for idx in range(count):
-        fold_path = tmp_path / f"sample_{idx}.fold"
+        fold_path = folds_dir / f"sample_{idx}.fold"
         FOLDParser.save_fold(simple_mv_cp(), fold_path)
         records.append(
             {
                 "id": f"sample-{idx}",
-                "path": str(fold_path),
+                "foldPath": str(fold_path.relative_to(tmp_path)),
+                "metadataPath": f"metadata/sample_{idx}.json",
+                "split": "train" if idx % 2 == 0 else "val",
+                "family": "test",
                 "bucket": "test",
+                "vertices": 5,
                 "edges": 8,
             }
         )
-    manifest = tmp_path / "manifest.json"
-    manifest.write_text(json.dumps({"records": records}, indent=2) + "\n", encoding="utf-8")
+    manifest = tmp_path / "raw-manifest.jsonl"
+    manifest.write_text("".join(json.dumps(record) + "\n" for record in records), encoding="utf-8")
     return str(manifest)

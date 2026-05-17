@@ -5,7 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT_DIR"
 
 PYTHON="${PYTHON:-.venv/bin/python}"
-MANIFEST="${MANIFEST:-fixtures/phase2_real_folds/full_stress.json}"
+MANIFEST="${MANIFEST:-data/generated/synthetic/cp_training_mix_v1/raw-manifest.jsonl}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-checkpoints/runpod_phase3_curriculum}"
 DEVICE="${DEVICE:-cuda}"
 BACKBONE="${BACKBONE:-hrnet_w18}"
@@ -69,4 +69,3 @@ run_stage "stage-dark-grid" "$STEPS_DARK_GRID" "$OUTPUT_ROOT/stage-dark-grid" "$
 if [[ "$RUN_MIXED" == "1" ]]; then
   run_stage "mixed" "$STEPS_MIXED" "$OUTPUT_ROOT/mixed" "$OUTPUT_ROOT/stage-dark-grid/latest.pt"
 fi
-

@@ -2,7 +2,8 @@
 """Local-first Phase 3 CPLineNet smoke training.
 
 This is the roadmap-native training path. It trains dense CPLineNet fields from
-real scraped `.fold` geometry and evaluates through PlanarGraphBuilder.
+fold-only raw-manifest `.fold` geometry and evaluates through
+PlanarGraphBuilder.
 """
 
 from __future__ import annotations
@@ -42,7 +43,12 @@ from src.vectorization.metrics import metrics_from_results
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--manifest", type=Path, default=Path("fixtures/phase2_real_folds/full_stress.json"))
+    parser.add_argument(
+        "--manifest",
+        type=Path,
+        default=Path("data/generated/synthetic/cp_training_mix_v1/raw-manifest.jsonl"),
+        help="CPLine raw-manifest JSONL path. Rows must include foldPath, split, id, and edges.",
+    )
     parser.add_argument("--output-dir", type=Path, default=Path("checkpoints/phase3_local_smoke"))
     parser.add_argument("--device", choices=["auto", "mps", "cuda", "cpu"], default="auto")
     parser.add_argument("--image-size", type=int, default=256)
@@ -135,8 +141,7 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
     train_dataset = CplineFoldDataset(
         manifest,
         split="train",
-        train_count=args.train_count,
-        val_count=args.val_count,
+        limit=args.train_count,
         max_edges=args.max_edges,
         image_size=args.image_size,
         augment_profile=augment_profile,
@@ -145,8 +150,7 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
     val_dataset = CplineFoldDataset(
         manifest,
         split="val",
-        train_count=args.train_count,
-        val_count=args.val_count,
+        limit=args.val_count,
         max_edges=args.max_edges,
         image_size=args.image_size,
         augment_profile="clean",
@@ -157,8 +161,7 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         aug_val_dataset = CplineFoldDataset(
             manifest,
             split="val",
-            train_count=args.train_count,
-            val_count=args.val_count,
+            limit=args.val_count,
             max_edges=args.max_edges,
             image_size=args.image_size,
             augment_profile=args.eval_augment_profile,

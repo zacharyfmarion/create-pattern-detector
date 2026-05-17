@@ -15,9 +15,6 @@ from src.data.cpline_augmentations import normalize_augment_profile, render_augm
 from src.data.fold_parser import FOLDParser, transform_coords
 
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-
-
 @dataclass(frozen=True)
 class CplineSample:
     image: np.ndarray
@@ -34,41 +31,57 @@ class CplineSample:
 
 
 def load_manifest_records(manifest_path: str | Path) -> list[dict[str, Any]]:
-    data = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
-    return list(data["records"])
+    """Load CPLineNet raw-manifest JSONL rows."""
+    path = Path(manifest_path)
+    records: list[dict[str, Any]] = []
+    with path.open("r", encoding="utf-8") as handle:
+        for line_number, line in enumerate(handle, start=1):
+            stripped = line.strip()
+            if not stripped:
+                continue
+            record = json.loads(stripped)
+            if "foldPath" not in record:
+                raise ValueError(f"Expected raw-manifest row with foldPath at {path}:{line_number}")
+            records.append(record)
+    return records
 
 
-def resolve_fold_path(path_value: str | Path) -> Path:
-    path = Path(path_value)
-    return path if path.is_absolute() else REPO_ROOT / path
+def resolve_fold_path(record: dict[str, Any], manifest_path: str | Path) -> Path:
+    path = Path(record["foldPath"])
+    if path.is_absolute():
+        return path
+    return Path(manifest_path).parent / path
 
 
 def select_records(
     records: list[dict[str, Any]],
     *,
     split: str,
-    train_count: int,
-    val_count: int,
+    limit: int | None,
     max_edges: int | None,
+    seed: int | None = None,
 ) -> list[dict[str, Any]]:
-    filtered = [record for record in records if max_edges is None or int(record["edges"]) <= max_edges]
-    if split == "train":
-        return filtered[:train_count]
-    if split == "val":
-        return filtered[train_count : train_count + val_count]
-    raise ValueError(f"Unsupported split: {split}")
+    filtered = [
+        record
+        for record in records
+        if record.get("split") == split and (max_edges is None or int(record["edges"]) <= max_edges)
+    ]
+    if limit is None or limit >= len(filtered):
+        return filtered
+    rng = np.random.default_rng(0 if seed is None else seed)
+    selected = rng.choice(len(filtered), size=limit, replace=False)
+    return [filtered[int(index)] for index in selected]
 
 
 class CplineFoldDataset(Dataset):
-    """Dataset that renders CPLineNet inputs and dense targets from real `.fold` files."""
+    """Dataset that renders CPLineNet inputs and dense targets from raw-manifest `.fold` rows."""
 
     def __init__(
         self,
         manifest_path: str | Path,
         *,
         split: str,
-        train_count: int = 8,
-        val_count: int = 4,
+        limit: int | None = None,
         max_edges: int | None = 250,
         image_size: int = 256,
         padding: int | None = None,
@@ -89,9 +102,9 @@ class CplineFoldDataset(Dataset):
         self.records = select_records(
             load_manifest_records(self.manifest_path),
             split=split,
-            train_count=train_count,
-            val_count=val_count,
+            limit=limit,
             max_edges=max_edges,
+            seed=seed,
         )
         if not self.records:
             raise ValueError(f"No records selected from {manifest_path} for split={split}")
@@ -102,7 +115,7 @@ class CplineFoldDataset(Dataset):
     def __getitem__(self, index: int) -> dict[str, Any]:
         record = self.records[index]
         cp, base_pixel_vertices = self._load_base_geometry(index)
-        fold_path = resolve_fold_path(record["path"])
+        fold_path = resolve_fold_path(record, self.manifest_path)
         sample = render_cpline_sample(
             cp,
             image_size=self.image_size,
@@ -128,6 +141,8 @@ class CplineFoldDataset(Dataset):
             "meta": {
                 "id": str(record["id"]),
                 "bucket": str(record.get("bucket", "")),
+                "split": str(record.get("split", "")),
+                "family": str(record.get("family", "")),
                 "fold_path": str(fold_path),
                 "edges": int(record.get("edges", len(sample.edges))),
                 "augmentation": sample.metadata,
@@ -138,7 +153,7 @@ class CplineFoldDataset(Dataset):
     def _load_base_geometry(self, index: int) -> tuple[Any, np.ndarray]:
         if index not in self._geometry_cache:
             record = self.records[index]
-            cp = self.parser.parse(resolve_fold_path(record["path"]))
+            cp = self.parser.parse(resolve_fold_path(record, self.manifest_path))
             pixel_vertices, _ = transform_coords(cp.vertices, image_size=self.image_size, padding=self.padding)
             self._geometry_cache[index] = (cp, pixel_vertices)
         return self._geometry_cache[index]

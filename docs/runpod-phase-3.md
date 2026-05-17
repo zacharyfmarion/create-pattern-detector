@@ -7,9 +7,12 @@ initialization between stages.
 
 ## Local Status
 
-Local gates used the real scraped FOLD manifest at
-`fixtures/phase2_real_folds/full_stress.json`, 32 train examples, 8 validation
-examples, 384px, tiny backbone, and MPS.
+Local gates used the Phase 2 real scraped FOLD fixture before the synthetic
+raw-manifest release was available. CPLine training now reads fold-only
+`raw-manifest.jsonl` datasets directly, with `foldPath` relative to the manifest
+root and `split` selecting train/val/test rows. Use the linked
+`cp_training_mix_v1` root for the next run so both TreeMaker and Rabbit Ear rows
+are available.
 
 | Stage | Init | Clean edge F1 | Aug edge F1 | Structural validity |
 | --- | --- | ---: | ---: | ---: |
@@ -33,16 +36,16 @@ From a fresh pod:
 ```bash
 git checkout codex/phase3-real-folds
 scripts/setup_python_env.sh
-scripts/data/link_shared_scraped_data.sh
+scripts/data/link_shared_synthetic_data.sh cp_training_mix_v1
 .venv/bin/python -m pytest tests/test_cpline_phase3.py -q
 ```
 
-If the scraped dataset is mounted somewhere other than the default shared path,
+If the synthetic dataset is mounted somewhere other than the default shared path,
 set one of these first:
 
 ```bash
 export CP_SHARED_DATA_ROOT=/path/to/create-pattern-detector-datasets
-export CP_SCRAPED_DATASET=/path/to/create-pattern-detector-datasets/scraped
+export CP_SYNTHETIC_DATASET=/path/to/create-pattern-detector-datasets/synthetic/cp_training_mix_v1
 ```
 
 ## First Run
@@ -51,6 +54,7 @@ For a 24GB GPU, start conservatively:
 
 ```bash
 OUTPUT_ROOT=checkpoints/runpod_phase3_curriculum \
+MANIFEST=data/generated/synthetic/cp_training_mix_v1/raw-manifest.jsonl \
 TRAIN_COUNT=512 \
 VAL_COUNT=64 \
 BATCH_SIZE=1 \

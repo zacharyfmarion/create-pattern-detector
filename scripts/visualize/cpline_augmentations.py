@@ -35,7 +35,13 @@ ASSIGNMENT_COLORS = {
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--manifest", type=Path, default=Path("fixtures/phase2_real_folds/full_stress.json"))
+    parser.add_argument(
+        "--manifest",
+        type=Path,
+        default=Path("data/generated/synthetic/cp_training_mix_v1/raw-manifest.jsonl"),
+        help="CPLine raw-manifest JSONL path. Rows must include foldPath, split, id, and edges.",
+    )
+    parser.add_argument("--split", type=str, default="train")
     parser.add_argument(
         "--profiles",
         type=str,
@@ -60,9 +66,9 @@ def main() -> None:
     output_dir = args.output_dir if args.output_dir.is_absolute() else REPO_ROOT / args.output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
     profiles = _parse_profiles(args.profiles)
-    records = _select_records(manifest, count=args.num_samples, max_edges=args.max_edges)
+    records = _select_records(manifest, split=args.split, count=args.num_samples, max_edges=args.max_edges)
     parser = FOLDParser()
-    cps = [(record, parser.parse(resolve_fold_path(record["path"]))) for record in records]
+    cps = [(record, parser.parse(resolve_fold_path(record, manifest))) for record in records]
 
     for profile in profiles:
         profile_dir = output_dir / profile
@@ -101,7 +107,7 @@ def main() -> None:
         sheet_path = profile_dir / f"contact_sheet_{args.image_size}.png"
         sidecar_path = profile_dir / f"contact_sheet_{args.image_size}.json"
         _write_contact_sheet(rows, profile=profile, output_path=sheet_path)
-        _write_sidecar(rows, profile=profile, image_size=args.image_size, output_path=sidecar_path)
+        _write_sidecar(rows, profile=profile, image_size=args.image_size, manifest=manifest, output_path=sidecar_path)
         print(f"Saved {profile}: {sheet_path}")
         print(f"Saved {profile}: {sidecar_path}")
 
@@ -116,11 +122,15 @@ def _parse_profiles(value: str) -> list[str]:
     return profiles
 
 
-def _select_records(manifest: Path, *, count: int, max_edges: int | None) -> list[dict[str, Any]]:
+def _select_records(manifest: Path, *, split: str, count: int, max_edges: int | None) -> list[dict[str, Any]]:
     records = load_manifest_records(manifest)
-    filtered = [record for record in records if max_edges is None or int(record["edges"]) <= max_edges]
+    filtered = [
+        record
+        for record in records
+        if record.get("split") == split and (max_edges is None or int(record["edges"]) <= max_edges)
+    ]
     if not filtered:
-        raise SystemExit(f"No records found in {manifest}")
+        raise SystemExit(f"No records found in {manifest} for split={split}")
     return filtered[:count]
 
 
@@ -184,14 +194,21 @@ def _write_contact_sheet(rows: list[dict[str, Any]], *, profile: str, output_pat
     plt.close(fig)
 
 
-def _write_sidecar(rows: list[dict[str, Any]], *, profile: str, image_size: int, output_path: Path) -> None:
+def _write_sidecar(
+    rows: list[dict[str, Any]],
+    *,
+    profile: str,
+    image_size: int,
+    manifest: Path,
+    output_path: Path,
+) -> None:
     payload = {
         "profile": profile,
         "image_size": image_size,
         "rows": [
             {
                 "id": str(row["record"]["id"]),
-                "fold_path": str(resolve_fold_path(row["record"]["path"])),
+                "fold_path": str(resolve_fold_path(row["record"], manifest)),
                 "variant": row["variant"],
                 "seed": row["seed"],
                 "augmentation": row["augmented"].metadata,

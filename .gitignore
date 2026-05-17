@@ -4,7 +4,10 @@ data/**/*.json
 data/**/*.txt
 data/output/scraped
 data/output/scraped/**
+data/generated/synthetic
+data/generated/synthetic/**
 data/ts-generation/node_modules
+tools/synthetic-generator/node_modules
 .venv
 .venv/
 configs/scraping.env
