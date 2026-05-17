@@ -102,6 +102,11 @@ For the very first paid shakedown, optionally set `GRAPH_EVAL_COUNT=32` so each
 stage vectorizes a bounded validation subset. Leave it unset when you want full
 graph-eval summaries.
 
+If 1024px graph vectorization dominates wall-clock time, set
+`SKIP_GRAPH_EVAL=1` for the curriculum and run smaller posthoc graph evals from
+the saved stage checkpoints. Pixel-loss validation still runs when graph eval is
+skipped.
+
 The script runs:
 
 1. `stage-light` from scratch.
@@ -141,6 +146,7 @@ IMAGE_SIZE=1024 \
 BACKBONE=hrnet_w18 \
 RUN_MIXED=0 \
 LOG_EVERY=50 \
+SKIP_GRAPH_EVAL=1 \
 scripts/training/run_cpline_runpod_curriculum.sh
 ```
 

@@ -64,6 +64,11 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Optional cap per split for expensive PlanarGraphBuilder eval; pixel loss still uses the full validation slice.",
     )
+    parser.add_argument(
+        "--skip-graph-eval",
+        action="store_true",
+        help="Skip PlanarGraphBuilder eval and write pixel-loss summaries only.",
+    )
     parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument(
         "--log-every",
@@ -238,6 +243,7 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         "max_steps": args.max_steps,
         "log_every": args.log_every,
         "graph_eval_count": args.graph_eval_count,
+        "skip_graph_eval": args.skip_graph_eval,
         "backbone": args.backbone,
         "hidden_channels": args.hidden_channels,
         "init_checkpoint": init_checkpoint.as_posix() if init_checkpoint is not None else None,
@@ -289,37 +295,41 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
 
     val_loss = evaluate_pixel_loss(model, val_loader, criterion, device)
     eval_thresholds = parse_thresholds(args.eval_thresholds, args.eval_line_threshold)
-    train_graph_sweep = evaluate_vectorizer_sweep(
-        model,
-        train_eval_loader,
-        device,
-        image_size=args.image_size,
-        line_thresholds=eval_thresholds,
-        output_dir=predictions_dir / "train",
-        max_samples=args.graph_eval_count,
-    )
-    val_graph_sweep = evaluate_vectorizer_sweep(
-        model,
-        val_loader,
-        device,
-        image_size=args.image_size,
-        line_thresholds=eval_thresholds,
-        output_dir=predictions_dir / "val",
-        max_samples=args.graph_eval_count,
-    )
+    train_graph_sweep = None
+    val_graph_sweep = None
+    if not args.skip_graph_eval:
+        train_graph_sweep = evaluate_vectorizer_sweep(
+            model,
+            train_eval_loader,
+            device,
+            image_size=args.image_size,
+            line_thresholds=eval_thresholds,
+            output_dir=predictions_dir / "train",
+            max_samples=args.graph_eval_count,
+        )
+        val_graph_sweep = evaluate_vectorizer_sweep(
+            model,
+            val_loader,
+            device,
+            image_size=args.image_size,
+            line_thresholds=eval_thresholds,
+            output_dir=predictions_dir / "val",
+            max_samples=args.graph_eval_count,
+        )
     aug_val_loss = None
     aug_val_graph_sweep = None
     if aug_val_loader is not None:
         aug_val_loss = evaluate_pixel_loss(model, aug_val_loader, criterion, device)
-        aug_val_graph_sweep = evaluate_vectorizer_sweep(
-            model,
-            aug_val_loader,
-            device,
-            image_size=args.image_size,
-            line_thresholds=eval_thresholds,
-            output_dir=predictions_dir / "val_augmented",
-            max_samples=args.graph_eval_count,
-        )
+        if not args.skip_graph_eval:
+            aug_val_graph_sweep = evaluate_vectorizer_sweep(
+                model,
+                aug_val_loader,
+                device,
+                image_size=args.image_size,
+                line_thresholds=eval_thresholds,
+                output_dir=predictions_dir / "val_augmented",
+                max_samples=args.graph_eval_count,
+            )
 
     checkpoint = {
         "model_state_dict": model.state_dict(),

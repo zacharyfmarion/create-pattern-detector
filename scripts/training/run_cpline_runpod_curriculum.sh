@@ -21,6 +21,7 @@ SEED="${SEED:-7}"
 EVAL_THRESHOLDS="${EVAL_THRESHOLDS:-0.5,0.65,0.8}"
 GRAPH_EVAL_COUNT="${GRAPH_EVAL_COUNT:-}"
 LOG_EVERY="${LOG_EVERY:-50}"
+SKIP_GRAPH_EVAL="${SKIP_GRAPH_EVAL:-0}"
 
 STEPS_LIGHT="${STEPS_LIGHT:-3000}"
 STEPS_PRINT="${STEPS_PRINT:-1800}"
@@ -59,6 +60,9 @@ run_stage() {
   )
   if [[ -n "$GRAPH_EVAL_COUNT" ]]; then
     args+=(--graph-eval-count "$GRAPH_EVAL_COUNT")
+  fi
+  if [[ "$SKIP_GRAPH_EVAL" == "1" ]]; then
+    args+=(--skip-graph-eval)
   fi
   if [[ -n "$init_checkpoint" ]]; then
     args+=(--init-checkpoint "$init_checkpoint")
