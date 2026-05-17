@@ -19,6 +19,7 @@ NUM_WORKERS="${NUM_WORKERS:-4}"
 LR="${LR:-0.0003}"
 SEED="${SEED:-7}"
 EVAL_THRESHOLDS="${EVAL_THRESHOLDS:-0.5,0.65,0.8}"
+GRAPH_EVAL_COUNT="${GRAPH_EVAL_COUNT:-}"
 
 STEPS_LIGHT="${STEPS_LIGHT:-3000}"
 STEPS_PRINT="${STEPS_PRINT:-1800}"
@@ -54,6 +55,9 @@ run_stage() {
     --eval-augment-profile "$profile"
     --eval-thresholds "$EVAL_THRESHOLDS"
   )
+  if [[ -n "$GRAPH_EVAL_COUNT" ]]; then
+    args+=(--graph-eval-count "$GRAPH_EVAL_COUNT")
+  fi
   if [[ -n "$init_checkpoint" ]]; then
     args+=(--init-checkpoint "$init_checkpoint")
   fi

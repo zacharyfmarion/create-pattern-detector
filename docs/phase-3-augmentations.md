@@ -112,6 +112,11 @@ After `stage-light`, each stage should initialize from the previous passing
 checkpoint with `--init-checkpoint`. Restarting each stage from random weights
 is a stress test, not the intended curriculum.
 
+For local architecture gates on dense mixed data, set `--graph-eval-count` to a
+small number such as `4` or `8`. Training and pixel validation still use the
+requested sample counts, while PlanarGraphBuilder only vectorizes that many
+examples per split. Leave it unset for serious RunPod evaluation.
+
 The RunPod handoff and staged GPU script are documented in
 `docs/runpod-phase-3.md`.
 

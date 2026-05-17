@@ -347,29 +347,22 @@ Tasks:
 
 Current local finding:
 
-- A 384px tiny-backbone `mixed` augmentation gate is trainable, but full mixed
-  augmentation is too aggressive as the next scaling step.
-- Clean validation reached edge F1 ~= 0.714 and mixed validation reached edge
-  F1 ~= 0.709 after 800 local MPS steps, with 100% structural validity.
-- The main failure mode is line overproduction, especially when dark grid
-  backgrounds are introduced before the line head is stable.
-- A 384px tiny-backbone `stage-light` gate passes after keeping square symmetry
-  as its own sampled profile instead of stacking rotations/flips onto every
-  style profile. After 800 local MPS steps, clean validation reached edge F1
-  ~= 0.963 at threshold 0.65 and augmented `stage-light` validation reached
-  edge F1 ~= 0.823 at threshold 0.50, both with 100% structural validity.
-- Continuing the curriculum from checkpoint works better than restarting each
-  stage. Local 384px MPS continuation reached:
-  `stage-print` clean/aug edge F1 ~= 0.977 / 0.790,
-  `stage-dark` clean/aug edge F1 ~= 0.987 / 0.712,
-  `stage-dark-grid` clean/aug edge F1 ~= 0.983 / 0.637, and a short `mixed`
-  check clean/aug edge F1 ~= 0.971 / 0.826. All reported clean/aug structural
-  validity was 100% except the intentionally tiny 1024 preflight.
-- Dark-grid remains the hardest slice for the tiny local model. Faint grid
-  rendering reduced grid-edge overproduction, but RunPod runs should monitor
-  dark-grid examples separately before enabling long full-`mixed` training.
+- The 14k `cp_training_mix_v1` root now exists locally and is the default
+  CPLine manifest. It contains 12k TreeMaker rows and 2k Rabbit Ear rows.
+- A 384px tiny-backbone staged MPS architecture gate ran on the mixed manifest
+  with 64 train / 16 val, `max_edges=1000`, and `--graph-eval-count 4`.
+  Loss decreased through `stage-light`, `stage-print`, `stage-dark`, and
+  `stage-dark-grid`; clean and augmented capped graph eval stayed structurally
+  valid.
+- The mixed-data tiny model still overproduces edges heavily, so local edge F1
+  is low after these short gates. This is acceptable for architecture proof, not
+  a quality result.
+- Dark and dark-grid augmented validation remain the hardest slices. RunPod
+  runs should monitor predicted edge count versus ground truth and dark-grid
+  examples separately before enabling long full-`mixed` training.
 - A 1024px `hrnet_w18` preflight with batch size 1 ran locally for two MPS
-  steps. That proves the full-size path and memory shape, not quality.
+  steps on the mixed manifest. Loss moved from 3.694 to 2.543, proving the
+  full-size path and memory shape, not model quality.
 
 Augmentation curriculum before larger sizes:
 

@@ -58,6 +58,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-steps", type=int, default=120)
     parser.add_argument("--batch-size", type=int, default=2)
     parser.add_argument("--num-workers", type=int, default=0)
+    parser.add_argument(
+        "--graph-eval-count",
+        type=int,
+        default=None,
+        help="Optional cap per split for expensive PlanarGraphBuilder eval; pixel loss still uses the full validation slice.",
+    )
     parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--backbone", type=str, default="tiny")
     parser.add_argument("--hidden-channels", type=int, default=128)
@@ -224,6 +230,7 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         "image_size": args.image_size,
         "batch_size": args.batch_size,
         "max_steps": args.max_steps,
+        "graph_eval_count": args.graph_eval_count,
         "backbone": args.backbone,
         "hidden_channels": args.hidden_channels,
         "init_checkpoint": init_checkpoint.as_posix() if init_checkpoint is not None else None,
@@ -275,6 +282,7 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         image_size=args.image_size,
         line_thresholds=eval_thresholds,
         output_dir=predictions_dir / "train",
+        max_samples=args.graph_eval_count,
     )
     val_graph_sweep = evaluate_vectorizer_sweep(
         model,
@@ -283,6 +291,7 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         image_size=args.image_size,
         line_thresholds=eval_thresholds,
         output_dir=predictions_dir / "val",
+        max_samples=args.graph_eval_count,
     )
     aug_val_loss = None
     aug_val_graph_sweep = None
@@ -295,6 +304,7 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
             image_size=args.image_size,
             line_thresholds=eval_thresholds,
             output_dir=predictions_dir / "val_augmented",
+            max_samples=args.graph_eval_count,
         )
 
     checkpoint = {
@@ -356,6 +366,7 @@ def evaluate_vectorizer_sweep(
     image_size: int,
     line_thresholds: list[float],
     output_dir: Path,
+    max_samples: int | None = None,
 ) -> dict[str, Any]:
     output_dir.mkdir(parents=True, exist_ok=True)
     by_threshold: dict[str, Any] = {}
@@ -370,6 +381,7 @@ def evaluate_vectorizer_sweep(
             image_size=image_size,
             line_threshold=threshold,
             output_dir=threshold_dir,
+            max_samples=max_samples,
         )
         key = f"{threshold:.2f}"
         summary["edge_f1"] = f1(summary.get("edge_precision", 0.0), summary.get("edge_recall", 0.0))
@@ -396,6 +408,7 @@ def evaluate_vectorizer(
     image_size: int,
     line_threshold: float,
     output_dir: Path,
+    max_samples: int | None = None,
 ) -> dict[str, Any]:
     output_dir.mkdir(parents=True, exist_ok=True)
     model.eval()
@@ -448,6 +461,10 @@ def evaluate_vectorizer(
             )
             rows.append({"id": meta["id"], **item_metrics.to_dict()})
             sample_index += 1
+            if max_samples is not None and sample_index >= max_samples:
+                break
+        if max_samples is not None and sample_index >= max_samples:
+            break
 
     summary = metrics_from_results(metrics)
     (output_dir / "per_file_metrics.json").write_text(json.dumps(rows, indent=2) + "\n", encoding="utf-8")

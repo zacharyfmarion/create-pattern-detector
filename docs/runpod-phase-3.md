@@ -7,27 +7,32 @@ initialization between stages.
 
 ## Local Status
 
-Local gates used the Phase 2 real scraped FOLD fixture before the synthetic
-raw-manifest release was available. CPLine training now reads fold-only
-`raw-manifest.jsonl` datasets directly, with `foldPath` relative to the manifest
-root and `split` selecting train/val/test rows. Use the linked
-`cp_training_mix_v1` root for the next run so both TreeMaker and Rabbit Ear rows
-are available.
+Local gates now use the 14k synthetic mixed raw manifest:
+`data/generated/synthetic/cp_training_mix_v1/raw-manifest.jsonl`.
+CPLine training reads fold-only `raw-manifest.jsonl` datasets directly, with
+`foldPath` relative to the manifest root and `split` selecting train/val/test
+rows.
 
-| Stage | Init | Clean edge F1 | Aug edge F1 | Structural validity |
-| --- | --- | ---: | ---: | ---: |
-| `stage-light` | scratch | 0.963 | 0.823 | 100% / 100% |
-| `stage-print` | `stage-light` | 0.977 | 0.790 | 100% / 100% |
-| `stage-dark` | `stage-print` | 0.987 | 0.712 | 100% / 100% |
-| `stage-dark-grid` | `stage-dark` | 0.983 | 0.637 | 100% / 100% |
-| `mixed` short check | `stage-dark-grid` | 0.971 | 0.826 | 100% / 100% |
+The latest local MPS pass was an architecture gate, not a quality target:
+384px, tiny backbone, 64 train / 16 val, `max_edges=1000`, and
+`--graph-eval-count 4` to keep dense graph vectorization bounded.
 
-The grid-inclusive dark-mode slice is the main known hard case. Faint grid
-rendering fixed the catastrophic overproduction case, but this slice should be
-monitored separately on RunPod.
+| Stage | Init | Train Loss | Clean Val Loss | Aug Val Loss | Clean Edge F1 | Aug Edge F1 | Structural Validity |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `stage-light` | scratch | 5.661 -> 1.710 | 1.569 | 1.441 | 0.084 | 0.074 | 100% / 100% |
+| `stage-print` | `stage-light` | 1.607 -> 1.249 | 1.318 | 1.154 | 0.086 | 0.051 | 100% / 100% |
+| `stage-dark` | `stage-print` | 1.292 -> 1.086 | 1.216 | 2.315 | 0.081 | 0.040 | 100% / 100% |
+| `stage-dark-grid` | `stage-dark` | 1.125 -> 0.976 | 1.094 | 3.119 | 0.079 | 0.048 | 100% / 100% |
 
-A 1024px `hrnet_w18` preflight ran locally for two steps on MPS with batch size
-1. That proves the full-size command path and tensor shapes, not model quality.
+The local tiny model still overproduces edges heavily on dense mixed samples,
+and dark/dark-grid augmented validation remains the hardest slice. That is
+expected for the short local gate; RunPod should monitor predicted edge count
+versus ground truth and dark-grid examples separately.
+
+A 1024px `hrnet_w18` preflight ran locally for two MPS steps with batch size 1
+against the mixed manifest. Loss moved `3.694 -> 2.543`; graph quality was not
+meaningful after two steps, but the full-size command path, tensor shapes, and
+MPS memory path are proven.
 
 ## RunPod Setup
 
@@ -64,6 +69,10 @@ BACKBONE=hrnet_w18 \
 RUN_MIXED=0 \
 scripts/training/run_cpline_runpod_curriculum.sh
 ```
+
+For the very first paid shakedown, optionally set `GRAPH_EVAL_COUNT=32` so each
+stage vectorizes a bounded validation subset. Leave it unset when you want full
+graph-eval summaries.
 
 The script runs:
 

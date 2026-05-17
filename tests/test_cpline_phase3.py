@@ -384,6 +384,8 @@ def test_cpline_training_script_dark_mode_smoke(tmp_path):
             "dark-mode",
             "--eval-thresholds",
             "0.8",
+            "--graph-eval-count",
+            "1",
         ],
         check=True,
         env=env,
@@ -391,6 +393,8 @@ def test_cpline_training_script_dark_mode_smoke(tmp_path):
 
     summary = json.loads((output_dir / "summary.json").read_text(encoding="utf-8"))
     assert summary["augment_profile"] == "dark-mode"
+    assert summary["graph_eval_count"] == 1
+    assert summary["val_graph_sweep"]["thresholds"]["0.80"]["files"] == 1
     assert (output_dir / "latest.pt").exists()
 
     subprocess.run(
@@ -421,6 +425,8 @@ def test_cpline_training_script_dark_mode_smoke(tmp_path):
             "stage-light",
             "--eval-thresholds",
             "0.8",
+            "--graph-eval-count",
+            "1",
             "--init-checkpoint",
             str(output_dir / "latest.pt"),
         ],
