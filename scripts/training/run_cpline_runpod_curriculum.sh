@@ -22,6 +22,9 @@ EVAL_THRESHOLDS="${EVAL_THRESHOLDS:-0.5,0.65,0.8}"
 GRAPH_EVAL_COUNT="${GRAPH_EVAL_COUNT:-}"
 LOG_EVERY="${LOG_EVERY:-50}"
 SKIP_GRAPH_EVAL="${SKIP_GRAPH_EVAL:-0}"
+LINE_HARD_NEGATIVE_WEIGHT="${LINE_HARD_NEGATIVE_WEIGHT:-0.25}"
+LINE_HARD_NEGATIVE_RATIO="${LINE_HARD_NEGATIVE_RATIO:-0.05}"
+LINE_HARD_NEGATIVE_MULTIPLIER="${LINE_HARD_NEGATIVE_MULTIPLIER:-4.0}"
 
 STEPS_LIGHT="${STEPS_LIGHT:-3000}"
 STEPS_PRINT="${STEPS_PRINT:-1800}"
@@ -57,6 +60,9 @@ run_stage() {
     --augment-profile "$profile"
     --eval-augment-profile "$profile"
     --eval-thresholds "$EVAL_THRESHOLDS"
+    --line-hard-negative-weight "$LINE_HARD_NEGATIVE_WEIGHT"
+    --line-hard-negative-ratio "$LINE_HARD_NEGATIVE_RATIO"
+    --line-hard-negative-multiplier "$LINE_HARD_NEGATIVE_MULTIPLIER"
   )
   if [[ -n "$GRAPH_EVAL_COUNT" ]]; then
     args+=(--graph-eval-count "$GRAPH_EVAL_COUNT")

@@ -98,6 +98,18 @@ RUN_MIXED=0 \
 scripts/training/run_cpline_runpod_curriculum.sh
 ```
 
+The curriculum passes CPLine hard-negative line-loss settings through these env
+vars:
+
+```bash
+LINE_HARD_NEGATIVE_WEIGHT=0.25
+LINE_HARD_NEGATIVE_RATIO=0.05
+LINE_HARD_NEGATIVE_MULTIPLIER=4.0
+```
+
+Raise `LINE_HARD_NEGATIVE_WEIGHT` for a focused dark-grid continuation if graph
+eval shows the model is treating background grid strokes as crease lines.
+
 For the very first paid shakedown, optionally set `GRAPH_EVAL_COUNT=32` so each
 stage vectorizes a bounded validation subset. Leave it unset when you want full
 graph-eval summaries.
