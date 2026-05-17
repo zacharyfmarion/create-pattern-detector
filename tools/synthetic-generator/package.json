@@ -1,0 +1,19 @@
+{
+  "name": "cp-synthetic-generator",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "generate": "bun run src/index.ts",
+    "folded-preview": "bun run src/folded-preview.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "rabbit-ear": "^0.9.32"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.0.0"
+  }
+}

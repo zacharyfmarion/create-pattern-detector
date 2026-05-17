@@ -75,3 +75,29 @@ scripts/data/link_shared_scraped_data.sh
 The script refuses to replace a non-empty `data/output/scraped` directory unless it only contains metadata such as `.DS_Store`.
 
 Keep raw dataset files, crops, manifests, and generated reports out of git. Commit small code, docs, config examples, tests, and deterministic fixture manifests instead.
+
+## Shared Synthetic Datasets
+
+The maintained synthetic generator lives under `tools/synthetic-generator/`.
+This PR keeps it focused on two fold-only families:
+
+- `treemaker-tree`: primary external TreeMaker-derived CP generation.
+- `rabbit-ear-fold-program`: strict supplemental Rabbit Ear fold-operation generation.
+
+Large generated releases live outside the repo:
+
+```text
+/Users/zacharymarion/Documents/datasets/create-pattern-detector/synthetic/treemaker_tree_v1
+/Users/zacharymarion/Documents/datasets/create-pattern-detector/synthetic/rabbit_ear_fold_program_v1
+/Users/zacharymarion/Documents/datasets/create-pattern-detector/synthetic/cp_training_mix_v1
+```
+
+Future worktrees should link the mixed root when training:
+
+```bash
+scripts/data/link_shared_synthetic_data.sh cp_training_mix_v1
+PYTHONPATH=. python3.10 scripts/data/smoke_shared_synthetic_data.py --root data/generated/synthetic/cp_training_mix_v1
+```
+
+See `docs/synthetic-fold-datasets.md` for generation, shard merge, folded-preview,
+and mix-building commands.
