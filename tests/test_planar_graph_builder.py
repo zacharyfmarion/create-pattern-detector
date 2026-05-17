@@ -126,6 +126,76 @@ def test_planar_cleanup_removes_weaker_crossing_edge():
     assert cleaned_edges.tolist() == [[0, 1]]
 
 
+def test_collinear_contraction_merges_degree_two_chain():
+    vertices = np.array([[0.0, 0.0], [5.0, 0.2], [10.0, 0.0]], dtype=np.float32)
+    edges = np.array([[0, 1], [1, 2]], dtype=np.int64)
+    support = np.array([0.95, 0.9], dtype=np.float32)
+    assignments = np.array([3, 3], dtype=np.int8)
+    line_prob = np.ones((16, 16), dtype=np.float32)
+    builder = PlanarGraphBuilder(
+        PlanarGraphBuilderConfig(
+            min_edge_length_px=1.0,
+            min_edge_support=0.5,
+            edge_sample_step_px=1.0,
+            collinear_contraction_angle_degrees=6.0,
+            collinear_contraction_distance_px=0.5,
+        )
+    )
+
+    contracted_edges, contracted_support, contracted_assignments, stats = (
+        builder._contract_collinear_edges(
+            vertices,
+            edges,
+            support,
+            assignments,
+            line_prob,
+        )
+    )
+
+    assert contracted_edges.tolist() == [[0, 2]]
+    assert contracted_assignments.tolist() == [3]
+    assert contracted_support[0] >= 0.9
+    assert stats["contracted_vertices"] == 1
+    assert stats["contracted_edges_removed"] == 1
+
+
+def test_collinear_contraction_preserves_assignment_changes():
+    vertices = np.array([[0.0, 0.0], [5.0, 0.0], [10.0, 0.0]], dtype=np.float32)
+    edges = np.array([[0, 1], [1, 2]], dtype=np.int64)
+    support = np.array([0.95, 0.95], dtype=np.float32)
+    assignments = np.array([0, 1], dtype=np.int8)
+    builder = PlanarGraphBuilder(PlanarGraphBuilderConfig(min_edge_length_px=1.0))
+
+    contracted_edges, _, contracted_assignments, stats = builder._contract_collinear_edges(
+        vertices,
+        edges,
+        support,
+        assignments,
+    )
+
+    assert {tuple(edge) for edge in contracted_edges.tolist()} == {(0, 1), (1, 2)}
+    assert contracted_assignments.tolist() == [0, 1]
+    assert stats["contracted_vertices"] == 0
+
+
+def test_collinear_contraction_preserves_branch_vertices():
+    vertices = np.array([[0.0, 0.0], [5.0, 0.0], [10.0, 0.0], [5.0, 5.0]], dtype=np.float32)
+    edges = np.array([[0, 1], [1, 2], [1, 3]], dtype=np.int64)
+    support = np.array([0.95, 0.95, 0.95], dtype=np.float32)
+    assignments = np.array([3, 3, 3], dtype=np.int8)
+    builder = PlanarGraphBuilder(PlanarGraphBuilderConfig(min_edge_length_px=1.0))
+
+    contracted_edges, _, _, stats = builder._contract_collinear_edges(
+        vertices,
+        edges,
+        support,
+        assignments,
+    )
+
+    assert {tuple(edge) for edge in contracted_edges.tolist()} == {(0, 1), (1, 2), (1, 3)}
+    assert stats["contracted_vertices"] == 0
+
+
 def test_structural_validator_finds_crossing_with_spatial_index():
     base_vertices = np.array([[float(i), 0.0] for i in range(320)], dtype=np.float32)
     crossing_vertices = np.array(

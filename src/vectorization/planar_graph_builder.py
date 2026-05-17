@@ -60,6 +60,10 @@ class PlanarGraphBuilderConfig:
     planar_cleanup_max_edges: int = 3000
     planar_split_vertex_distance_px: float = 2.0
     planar_crossing_support_tie: float = 1e-4
+    collinear_edge_contraction: bool = True
+    collinear_contraction_angle_degrees: float = 4.0
+    collinear_contraction_distance_px: float = 2.5
+    collinear_contraction_max_edges: int = 10000
 
 
 @dataclass
@@ -138,6 +142,18 @@ class PlanarGraphBuilder:
                 edge_assignments,
             )
 
+        contraction_stats: dict[str, int | bool] = {}
+        if self.config.collinear_edge_contraction:
+            edges, edge_support, edge_assignments, contraction_stats = (
+                self._contract_collinear_edges(
+                    vertices,
+                    edges,
+                    edge_support,
+                    edge_assignments,
+                    line_prob,
+                )
+            )
+
         vertices, edges, vertex_support = self._drop_unused_vertices(vertices, edges, lines)
         vertices_coords = self._canonicalize_vertices(vertices)
 
@@ -154,6 +170,7 @@ class PlanarGraphBuilder:
                 "lines": lines,
                 "junction_peaks": peaks,
                 "planar_cleanup": cleanup_stats,
+                "collinear_contraction": contraction_stats,
             },
         )
 
@@ -308,19 +325,17 @@ class PlanarGraphBuilder:
     def _merge_vertices(self, vertices: np.ndarray) -> np.ndarray:
         if len(vertices) == 0:
             return vertices.astype(np.float32)
-        remaining = list(range(len(vertices)))
+        tree = cKDTree(vertices)
+        active = np.ones(len(vertices), dtype=bool)
         merged: list[np.ndarray] = []
-        while remaining:
-            seed = remaining.pop(0)
-            seed_point = vertices[seed]
-            group = [seed]
-            keep = []
-            for idx in remaining:
-                if np.linalg.norm(vertices[idx] - seed_point) <= self.config.vertex_merge_px:
-                    group.append(idx)
-                else:
-                    keep.append(idx)
-            remaining = keep
+        for seed, seed_point in enumerate(vertices):
+            if not active[seed]:
+                continue
+            neighbors = tree.query_ball_point(seed_point, self.config.vertex_merge_px)
+            group = np.array([idx for idx in neighbors if active[int(idx)]], dtype=np.int64)
+            if len(group) == 0:
+                continue
+            active[group] = False
             merged.append(vertices[group].mean(axis=0))
         return np.array(merged, dtype=np.float32)
 
@@ -469,11 +484,13 @@ class PlanarGraphBuilder:
             stats["skipped"] = True
             return edges, edge_support, edge_assignments, stats
 
-        edges, edge_support, edge_assignments, split_edges = self._split_edges_at_intermediate_vertices(
-            vertices,
-            edges,
-            edge_support,
-            edge_assignments,
+        edges, edge_support, edge_assignments, split_edges = (
+            self._split_edges_at_intermediate_vertices(
+                vertices,
+                edges,
+                edge_support,
+                edge_assignments,
+            )
         )
         stats["split_edges"] = split_edges
 
@@ -493,6 +510,176 @@ class PlanarGraphBuilder:
         stats["crossing_edges_removed"] = removed_crossings
         stats["output_edges"] = int(len(edges))
         return edges, edge_support, edge_assignments, stats
+
+    def _contract_collinear_edges(
+        self,
+        vertices: np.ndarray,
+        edges: np.ndarray,
+        edge_support: np.ndarray,
+        edge_assignments: np.ndarray,
+        line_prob: np.ndarray | None = None,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict[str, int | bool]]:
+        stats: dict[str, int | bool] = {
+            "input_edges": int(len(edges)),
+            "contracted_vertices": 0,
+            "contracted_edges_removed": 0,
+            "skipped": False,
+        }
+        if len(edges) < 2 or len(vertices) < 3:
+            stats["output_edges"] = int(len(edges))
+            return edges, edge_support, edge_assignments, stats
+        if len(edges) > self.config.collinear_contraction_max_edges:
+            stats["skipped"] = True
+            stats["output_edges"] = int(len(edges))
+            return edges, edge_support, edge_assignments, stats
+
+        adjacency: list[list[tuple[int, int]]] = [[] for _ in range(len(vertices))]
+        for edge_idx, edge in enumerate(edges):
+            v1, v2 = int(edge[0]), int(edge[1])
+            if v1 == v2:
+                continue
+            adjacency[v1].append((v2, edge_idx))
+            adjacency[v2].append((v1, edge_idx))
+
+        parent = np.arange(len(edges), dtype=np.int64)
+        rank = np.zeros(len(edges), dtype=np.int8)
+
+        def find(edge_idx: int) -> int:
+            root = edge_idx
+            while parent[root] != root:
+                root = int(parent[root])
+            while parent[edge_idx] != edge_idx:
+                next_idx = int(parent[edge_idx])
+                parent[edge_idx] = root
+                edge_idx = next_idx
+            return root
+
+        def union(a: int, b: int) -> None:
+            root_a = find(a)
+            root_b = find(b)
+            if root_a == root_b:
+                return
+            if rank[root_a] < rank[root_b]:
+                parent[root_a] = root_b
+            elif rank[root_a] > rank[root_b]:
+                parent[root_b] = root_a
+            else:
+                parent[root_b] = root_a
+                rank[root_a] += 1
+
+        angle_tol = np.deg2rad(self.config.collinear_contraction_angle_degrees)
+        distance_tol = self.config.collinear_contraction_distance_px
+        contractible_vertices: set[int] = set()
+        for vertex_idx, incident in enumerate(adjacency):
+            if len(incident) != 2:
+                continue
+            (neighbor_a, edge_a), (neighbor_b, edge_b) = incident
+            if edge_a == edge_b or neighbor_a == neighbor_b:
+                continue
+            if int(edge_assignments[edge_a]) != int(edge_assignments[edge_b]):
+                continue
+            if not _is_collinear_chain_vertex(
+                vertices[neighbor_a],
+                vertices[vertex_idx],
+                vertices[neighbor_b],
+                angle_tol,
+                distance_tol,
+                self.config.min_edge_length_px,
+            ):
+                continue
+            union(edge_a, edge_b)
+            contractible_vertices.add(vertex_idx)
+
+        groups: dict[int, list[int]] = {}
+        for edge_idx in range(len(edges)):
+            groups.setdefault(find(edge_idx), []).append(edge_idx)
+
+        new_edges: list[tuple[int, int]] = []
+        new_support: list[float] = []
+        new_assignments: list[int] = []
+        contracted_vertices = 0
+        contracted_edges_removed = 0
+
+        def keep_original(edge_indices: list[int]) -> None:
+            for edge_idx in edge_indices:
+                v1, v2 = int(edges[edge_idx][0]), int(edges[edge_idx][1])
+                if v1 == v2:
+                    continue
+                new_edges.append((min(v1, v2), max(v1, v2)))
+                new_support.append(float(edge_support[edge_idx]))
+                new_assignments.append(int(edge_assignments[edge_idx]))
+
+        for edge_indices in groups.values():
+            if len(edge_indices) == 1:
+                keep_original(edge_indices)
+                continue
+
+            assignments = {int(edge_assignments[idx]) for idx in edge_indices}
+            if len(assignments) != 1:
+                keep_original(edge_indices)
+                continue
+
+            component_degree: dict[int, int] = {}
+            for edge_idx in edge_indices:
+                v1, v2 = int(edges[edge_idx][0]), int(edges[edge_idx][1])
+                component_degree[v1] = component_degree.get(v1, 0) + 1
+                component_degree[v2] = component_degree.get(v2, 0) + 1
+            endpoints = [vertex for vertex, degree in component_degree.items() if degree == 1]
+            internal = [vertex for vertex, degree in component_degree.items() if degree == 2]
+            if len(endpoints) != 2 or any(
+                vertex not in contractible_vertices for vertex in internal
+            ):
+                keep_original(edge_indices)
+                continue
+
+            start, end = int(endpoints[0]), int(endpoints[1])
+            if np.linalg.norm(vertices[start] - vertices[end]) < self.config.min_edge_length_px:
+                keep_original(edge_indices)
+                continue
+            component_vertices = np.array(list(component_degree.keys()), dtype=np.int64)
+            max_distance = max(
+                _point_segment_distance(vertices[vertex], vertices[start], vertices[end])
+                for vertex in component_vertices
+            )
+            if max_distance > distance_tol:
+                keep_original(edge_indices)
+                continue
+
+            support = float(np.mean(edge_support[edge_indices]))
+            if line_prob is not None:
+                merged_support = self._segment_support(vertices[start], vertices[end], line_prob)
+                if merged_support < self.config.min_edge_support:
+                    keep_original(edge_indices)
+                    continue
+                support = merged_support
+
+            new_edges.append((min(start, end), max(start, end)))
+            new_support.append(support)
+            new_assignments.append(int(next(iter(assignments))))
+            contracted_vertices += len(internal)
+            contracted_edges_removed += len(edge_indices) - 1
+
+        if not new_edges:
+            stats["output_edges"] = 0
+            return (
+                np.empty((0, 2), dtype=np.int64),
+                np.empty(0, dtype=np.float32),
+                np.empty(0, dtype=np.int8),
+                stats,
+            )
+
+        contracted_edges = np.array(new_edges, dtype=np.int64)
+        contracted_support = np.array(new_support, dtype=np.float32)
+        contracted_assignments = np.array(new_assignments, dtype=np.int8)
+        contracted_edges, contracted_support, contracted_assignments = self._dedupe_edges(
+            contracted_edges,
+            contracted_support,
+            contracted_assignments,
+        )
+        stats["contracted_vertices"] = int(contracted_vertices)
+        stats["contracted_edges_removed"] = int(contracted_edges_removed)
+        stats["output_edges"] = int(len(contracted_edges))
+        return contracted_edges, contracted_support, contracted_assignments, stats
 
     def _split_edges_at_intermediate_vertices(
         self,
@@ -595,6 +782,10 @@ class PlanarGraphBuilder:
             return edges, edge_support, edge_assignments, 0
 
         keep = np.ones(len(edges), dtype=bool)
+        p0 = vertices[edges[:, 0]]
+        p1 = vertices[edges[:, 1]]
+        bbox_min = np.minimum(p0, p1)
+        bbox_max = np.maximum(p0, p1)
         removed = 0
         for i, edge_a in enumerate(edges):
             if not keep[i]:
@@ -603,10 +794,19 @@ class PlanarGraphBuilder:
             for j in range(i + 1, len(edges)):
                 if not keep[j]:
                     continue
+                if (
+                    bbox_max[i, 0] < bbox_min[j, 0]
+                    or bbox_max[j, 0] < bbox_min[i, 0]
+                    or bbox_max[i, 1] < bbox_min[j, 1]
+                    or bbox_max[j, 1] < bbox_min[i, 1]
+                ):
+                    continue
                 b0, b1 = int(edges[j][0]), int(edges[j][1])
                 if len({a0, a1, b0, b1}) < 4:
                     continue
-                if not _proper_segments_intersect(vertices[a0], vertices[a1], vertices[b0], vertices[b1]):
+                if not _proper_segments_intersect(
+                    vertices[a0], vertices[a1], vertices[b0], vertices[b1]
+                ):
                     continue
                 loser = self._crossing_loser(vertices, edges, edge_support, i, j)
                 keep[loser] = False
@@ -705,7 +905,9 @@ class PlanarGraphBuilder:
         support = np.ones(len(new_vertices), dtype=np.float32)
         if lines:
             for idx, vertex in enumerate(new_vertices):
-                support[idx] = float(min(np.min(np.abs([_point_line_distance(vertex, line) for line in lines])), 1e6))
+                support[idx] = float(
+                    min(np.min(np.abs([_point_line_distance(vertex, line) for line in lines])), 1e6)
+                )
         return new_vertices.astype(np.float32), new_edges, support
 
     def _canonicalize_vertices(self, vertices: np.ndarray) -> np.ndarray:
@@ -762,6 +964,40 @@ def _point_line_distances(points: np.ndarray, line: LineHypothesis) -> np.ndarra
         return np.linalg.norm(points - line.p0[None, :], axis=1)
     cross = direction[0] * (points[:, 1] - line.p0[1]) - direction[1] * (points[:, 0] - line.p0[0])
     return np.abs(cross) / length
+
+
+def _is_collinear_chain_vertex(
+    point_a: np.ndarray,
+    vertex: np.ndarray,
+    point_b: np.ndarray,
+    angle_tolerance: float,
+    distance_tolerance: float,
+    min_length: float,
+) -> bool:
+    vec_a = point_a - vertex
+    vec_b = point_b - vertex
+    len_a = float(np.linalg.norm(vec_a))
+    len_b = float(np.linalg.norm(vec_b))
+    if len_a < min_length or len_b < min_length:
+        return False
+    if float(np.dot(vec_a, vec_b)) >= 0.0:
+        return False
+    angle_a = float(np.arctan2(vec_a[1], vec_a[0]) % np.pi)
+    angle_b = float(np.arctan2(vec_b[1], vec_b[0]) % np.pi)
+    if _angle_delta(angle_a, angle_b) > angle_tolerance:
+        return False
+    return _point_segment_distance(vertex, point_a, point_b) <= distance_tolerance
+
+
+def _point_segment_distance(point: np.ndarray, start: np.ndarray, end: np.ndarray) -> float:
+    segment = end - start
+    length_sq = float(np.dot(segment, segment))
+    if length_sq <= 1e-12:
+        return float(np.linalg.norm(point - start))
+    t = float(np.dot(point - start, segment) / length_sq)
+    t = min(1.0, max(0.0, t))
+    projection = start + t * segment
+    return float(np.linalg.norm(point - projection))
 
 
 def _sample_segment_points(p0: np.ndarray, p1: np.ndarray, step: float) -> np.ndarray:
