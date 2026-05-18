@@ -325,7 +325,7 @@ Tasks:
 - Train first on clean renders, then progressively add CPLine-specific augmentations.
 - Add render-time augmentation profiles before larger local/RunPod training:
   `square-symmetry`, `line-style`, `dark-mode`, `print-light`,
-  `print-medium`, and `photo-light`.
+  `print-medium`, `photo-light`, and `photo-dark`.
 - Keep augmentation vector-first: apply geometric perturbations to graph vertices,
   then render matching input images and dense CPLineNet labels from that geometry.
 - Include exact non-identity square-domain rotations/flips: 90/180/270-degree
@@ -338,7 +338,7 @@ Tasks:
 - Run local visual/performance gates for augmentations before paid GPU training.
 - Add configurable augmentation mixes so curriculum stages can sample only the
   approved profiles for that stage instead of jumping straight to full `mixed`:
-  `stage-light`, `stage-print`, and `stage-dark`.
+  `stage-base` and `stage-balanced`.
 - Use the generated fold-only `raw-manifest.jsonl` contract for CPLine training:
   rows provide `foldPath` relative to the manifest root plus explicit
   train/val/test `split` values. The old Phase 2 `records[].path` fixture format
@@ -350,10 +350,10 @@ Current local finding:
 
 - The 14k `cp_training_mix_v1` root now exists locally and is the default
   CPLine manifest. It contains 12k TreeMaker rows and 2k Rabbit Ear rows.
-- A 384px tiny-backbone staged MPS architecture gate ran on the mixed manifest
-  with 64 train / 16 val, `max_edges=1000`, and `--graph-eval-count 4`.
-  Loss decreased through `stage-light`, `stage-print`, and `stage-dark`; clean
-  and augmented capped graph eval stayed structurally valid.
+- Earlier 384px tiny-backbone staged MPS gates proved the architecture path on
+  the mixed manifest. The current curriculum supersedes the old sequential
+  light/print/dark schedule with a short `stage-base` warmup followed by
+  `stage-balanced` training.
 - The mixed-data tiny model still overproduces edges heavily, so local edge F1
   is low after these short gates. This is acceptable for architecture proof, not
   a quality result.
@@ -383,16 +383,17 @@ Current local finding:
 
 Augmentation curriculum before larger sizes:
 
-1. `stage-light`: establish robustness to the square dihedral symmetries, line
-   weight, color, antialiasing, mild blur/noise, and paper tone.
-2. `stage-print`: introduce stronger print/photo variation and mild geometric
-   perturbation after clean validation remains stable.
-3. `stage-dark`: teach dark backgrounds and varied M/V colors.
-4. Only then use the full `mixed` profile for longer local or RunPod training.
+1. `stage-base`: short warmup on clean, line-style, and exact square symmetries
+   to establish geometry and assignment labels.
+2. `stage-balanced`: main training with clean, line-style, print-light,
+   print-medium, photo-light, dark-mode, and photo-dark samples all present
+   together so dark is not treated as a final afterthought.
+3. Targeted continuation only after deterministic eval identifies a specific
+   weakness. Keep the other modes in the mix to avoid forgetting.
 
-Run stages as a curriculum by initializing each stage from the previous passing
-checkpoint with `--init-checkpoint`; restarting every stage from random weights
-is only useful as an extra stress test.
+Run `stage-balanced` by initializing from the passing `stage-base` checkpoint
+with `--init-checkpoint`; restarting every stage from random weights is only
+useful as an extra stress test.
 
 Do not add occlusion augmentation for V1. It requires an explicit completion
 contract and confidence reporting so the model does not learn to hallucinate

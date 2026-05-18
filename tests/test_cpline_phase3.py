@@ -192,6 +192,25 @@ def test_cpline_photo_light_geometric_augmentation_recomputes_targets():
     assert photo.junction_mask.sum() == clean.junction_mask.sum()
 
 
+def test_cpline_photo_dark_combines_dark_style_and_geometry():
+    cp = simple_mv_cp()
+    clean = render_cpline_sample(
+        cp, image_size=128, padding=8, line_width=2, augment_profile="clean"
+    )
+    photo = render_cpline_sample(
+        cp, image_size=128, padding=8, line_width=2, augment_profile="photo-dark", seed=4
+    )
+
+    assert photo.metadata["selected_profile"] == "photo-dark"
+    assert photo.metadata["style_variant"] in DARK_MODE_STYLE_VARIANTS
+    assert photo.metadata["grid_enabled"] is False
+    assert photo.metadata["geometry_applied"] is True
+    assert photo.image.mean() < clean.image.mean()
+    assert not np.allclose(photo.pixel_vertices, clean.pixel_vertices)
+    assert not np.array_equal(photo.line_prob, clean.line_prob)
+    assert photo.junction_mask.sum() == clean.junction_mask.sum()
+
+
 def test_cpline_seeded_augmentation_is_reproducible():
     cp = simple_mv_cp()
     first = render_cpline_sample(
@@ -243,16 +262,16 @@ def test_cpline_loss_hard_negative_penalizes_background_false_positives():
     assert noisy_losses["total"] > clean_losses["total"]
 
 
-def test_cpline_stage_light_samples_only_stage_one_profiles():
+def test_cpline_stage_base_samples_only_geometry_warmup_profiles():
     cp = simple_mv_cp()
-    allowed = {entry[0] for entry in AUGMENT_MIXES["stage-light"]}
+    allowed = {entry[0] for entry in AUGMENT_MIXES["stage-base"]}
     seen = {
         render_cpline_sample(
             cp,
             image_size=96,
             padding=8,
             line_width=2,
-            augment_profile="stage-light",
+            augment_profile="stage-base",
             seed=seed,
         ).metadata["selected_profile"]
         for seed in range(40)
@@ -264,25 +283,31 @@ def test_cpline_stage_light_samples_only_stage_one_profiles():
     assert "photo-light" not in seen
 
 
-def test_cpline_stage_dark_samples_dark_mode_without_grid():
+def test_cpline_stage_balanced_samples_dark_and_photo_dark_without_grid():
     cp = simple_mv_cp()
     dark_sample = None
-    for seed in range(80):
+    photo_dark_sample = None
+    for seed in range(160):
         sample = render_cpline_sample(
             cp,
             image_size=96,
             padding=8,
             line_width=2,
-            augment_profile="stage-dark",
+            augment_profile="stage-balanced",
             seed=seed,
         )
         if sample.metadata["selected_profile"] == "dark-mode":
             dark_sample = sample
-            break
+        if sample.metadata["selected_profile"] == "photo-dark":
+            photo_dark_sample = sample
 
     assert dark_sample is not None
     assert dark_sample.metadata["style_variant"] in DARK_MODE_STYLE_VARIANTS
     assert dark_sample.metadata["grid_enabled"] is False
+    assert photo_dark_sample is not None
+    assert photo_dark_sample.metadata["style_variant"] in DARK_MODE_STYLE_VARIANTS
+    assert photo_dark_sample.metadata["grid_enabled"] is False
+    assert photo_dark_sample.metadata["geometry_applied"] is True
 
 
 def test_cpline_style_profiles_do_not_apply_square_symmetry_by_default():
@@ -520,7 +545,7 @@ def test_cpline_training_script_dark_mode_smoke(tmp_path):
             "--hidden-channels",
             "32",
             "--augment-profile",
-            "stage-light",
+            "stage-base",
             "--eval-thresholds",
             "0.8",
             "--graph-eval-count",
@@ -532,7 +557,7 @@ def test_cpline_training_script_dark_mode_smoke(tmp_path):
         env=env,
     )
     init_summary = json.loads((init_output_dir / "summary.json").read_text(encoding="utf-8"))
-    assert init_summary["augment_profile"] == "stage-light"
+    assert init_summary["augment_profile"] == "stage-base"
     assert init_summary["init_checkpoint"] == str(output_dir / "latest.pt")
 
 

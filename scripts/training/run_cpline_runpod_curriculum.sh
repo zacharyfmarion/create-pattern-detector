@@ -26,11 +26,11 @@ LINE_HARD_NEGATIVE_WEIGHT="${LINE_HARD_NEGATIVE_WEIGHT:-0.25}"
 LINE_HARD_NEGATIVE_RATIO="${LINE_HARD_NEGATIVE_RATIO:-0.05}"
 LINE_HARD_NEGATIVE_MULTIPLIER="${LINE_HARD_NEGATIVE_MULTIPLIER:-4.0}"
 
-STEPS_LIGHT="${STEPS_LIGHT:-3000}"
-STEPS_PRINT="${STEPS_PRINT:-1800}"
-STEPS_DARK="${STEPS_DARK:-1800}"
-STEPS_MIXED="${STEPS_MIXED:-1200}"
-RUN_MIXED="${RUN_MIXED:-0}"
+STEPS_BASE="${STEPS_BASE:-1200}"
+STEPS_BALANCED="${STEPS_BALANCED:-3600}"
+STEPS_TARGETED="${STEPS_TARGETED:-1200}"
+RUN_TARGETED="${RUN_TARGETED:-0}"
+TARGETED_PROFILE="${TARGETED_PROFILE:-stage-balanced}"
 
 mkdir -p "$OUTPUT_ROOT"
 
@@ -78,10 +78,9 @@ run_stage() {
   TQDM_DISABLE="${TQDM_DISABLE:-1}" "$PYTHON" "${args[@]}" 2>&1 | tee -a "$log_path"
 }
 
-run_stage "stage-light" "$STEPS_LIGHT" "$OUTPUT_ROOT/stage-light"
-run_stage "stage-print" "$STEPS_PRINT" "$OUTPUT_ROOT/stage-print" "$OUTPUT_ROOT/stage-light/latest.pt"
-run_stage "stage-dark" "$STEPS_DARK" "$OUTPUT_ROOT/stage-dark" "$OUTPUT_ROOT/stage-print/latest.pt"
+run_stage "stage-base" "$STEPS_BASE" "$OUTPUT_ROOT/stage-base"
+run_stage "stage-balanced" "$STEPS_BALANCED" "$OUTPUT_ROOT/stage-balanced" "$OUTPUT_ROOT/stage-base/latest.pt"
 
-if [[ "$RUN_MIXED" == "1" ]]; then
-  run_stage "mixed" "$STEPS_MIXED" "$OUTPUT_ROOT/mixed" "$OUTPUT_ROOT/stage-dark/latest.pt"
+if [[ "$RUN_TARGETED" == "1" ]]; then
+  run_stage "$TARGETED_PROFILE" "$STEPS_TARGETED" "$OUTPUT_ROOT/targeted" "$OUTPUT_ROOT/stage-balanced/latest.pt"
 fi

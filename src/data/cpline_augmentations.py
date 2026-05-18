@@ -27,41 +27,26 @@ BASE_AUGMENT_PROFILES = (
     "print-light",
     "print-medium",
     "photo-light",
+    "photo-dark",
 )
 AUGMENT_MIXES: dict[str, tuple[tuple[str, float, str | None], ...]] = {
-    "stage-light": (
-        ("clean", 0.20, None),
-        ("square-symmetry", 0.20, None),
-        ("line-style", 0.25, None),
-        ("print-light", 0.35, None),
+    "stage-base": (
+        ("clean", 0.35, None),
+        ("square-symmetry", 0.25, None),
+        ("line-style", 0.40, None),
     ),
-    "stage-print": (
+    "stage-balanced": (
         ("clean", 0.10, None),
-        ("square-symmetry", 0.15, None),
-        ("line-style", 0.20, None),
-        ("print-light", 0.25, None),
-        ("print-medium", 0.20, None),
+        ("square-symmetry", 0.10, None),
+        ("line-style", 0.15, None),
+        ("print-light", 0.15, None),
+        ("print-medium", 0.15, None),
         ("photo-light", 0.10, None),
-    ),
-    "stage-dark": (
-        ("clean", 0.08, None),
-        ("square-symmetry", 0.12, None),
-        ("line-style", 0.18, None),
-        ("print-light", 0.24, None),
-        ("print-medium", 0.16, None),
-        ("photo-light", 0.08, None),
-        ("dark-mode", 0.14, None),
+        ("dark-mode", 0.15, None),
+        ("photo-dark", 0.10, None),
     ),
 }
-MIXED_PROFILE_ENTRIES: tuple[tuple[str, float, str | None], ...] = (
-    ("clean", 0.08, None),
-    ("square-symmetry", 0.10, None),
-    ("line-style", 0.20, None),
-    ("dark-mode", 0.14, None),
-    ("print-light", 0.24, None),
-    ("print-medium", 0.18, None),
-    ("photo-light", 0.06, None),
-)
+MIXED_PROFILE_ENTRIES = AUGMENT_MIXES["stage-balanced"]
 MIXED_AUGMENT_PROFILES = tuple(AUGMENT_MIXES) + ("mixed",)
 AUGMENT_PROFILES = (
     *BASE_AUGMENT_PROFILES,
@@ -320,6 +305,31 @@ def _sample_render_params(
                 "background": tuple(int(v) for v in rng.integers(230, 256, size=3)),
                 "brightness": float(rng.uniform(-10, 8)),
                 "contrast": float(rng.uniform(0.88, 1.12)),
+                "noise_std": float(rng.uniform(0.5, 5.5)),
+                "blur_kernel": int(rng.choice([0, 3, 3, 5])),
+                "jpeg_quality": int(rng.integers(72, 96)),
+                "lighting_gradient": bool(rng.random() < 0.65),
+                "geometry_applied": True,
+                "homography": _sample_mild_homography(image_size, rng),
+            }
+        )
+    elif profile == "photo-dark":
+        _apply_dark_mode_params(
+            params,
+            rng,
+            image_size=image_size,
+            line_width=line_width,
+            style_variant=style_variant,
+        )
+        max_width = max(line_width, int(round(line_width * 1.7)) + 1)
+        width = int(rng.integers(max(1, line_width), max_width + 1))
+        params.update(
+            {
+                "line_width": width,
+                "target_line_width": width,
+                "line_alpha": float(rng.uniform(0.78, 1.0)),
+                "brightness": float(rng.uniform(-8, 8)),
+                "contrast": float(rng.uniform(0.88, 1.14)),
                 "noise_std": float(rng.uniform(0.5, 5.5)),
                 "blur_kernel": int(rng.choice([0, 3, 3, 5])),
                 "jpeg_quality": int(rng.integers(72, 96)),

@@ -13,20 +13,20 @@ CPLine training reads fold-only `raw-manifest.jsonl` datasets directly, with
 `foldPath` relative to the manifest root and `split` selecting train/val/test
 rows.
 
-The latest local MPS pass was an architecture gate, not a quality target:
-384px, tiny backbone, 64 train / 16 val, `max_edges=1000`, and
-`--graph-eval-count 4` to keep dense graph vectorization bounded.
+Earlier local MPS passes were architecture gates, not quality targets. The
+current curriculum supersedes the old sequential light/print/dark staging:
 
-| Stage | Init | Train Loss | Clean Val Loss | Aug Val Loss | Clean Edge F1 | Aug Edge F1 | Structural Validity |
-| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| `stage-light` | scratch | 5.661 -> 1.710 | 1.569 | 1.441 | 0.084 | 0.074 | 100% / 100% |
-| `stage-print` | `stage-light` | 1.607 -> 1.249 | 1.318 | 1.154 | 0.086 | 0.051 | 100% / 100% |
-| `stage-dark` | `stage-print` | 1.292 -> 1.086 | 1.216 | 2.315 | 0.081 | 0.040 | 100% / 100% |
+1. `stage-base`: short geometry and assignment warmup with clean, line-style,
+   and square-symmetry samples.
+2. `stage-balanced`: main training mix with light, print/photo-light, dark, and
+   photo-dark samples present together.
+3. Optional targeted continuation only after deterministic eval identifies a
+   specific weakness.
 
-The local tiny model still overproduces edges heavily on dense mixed samples,
-and dark augmented validation remains the hardest active slice. That is
-expected for the short local gate; RunPod should monitor predicted edge count
-versus ground truth on dark-mode examples separately.
+The local tiny model still overproduces edges heavily on dense mixed samples.
+That is expected for short local gates; RunPod should monitor predicted edge
+count versus ground truth separately for clean, dark-mode, photo-light, and
+photo-dark examples.
 
 A 1024px `hrnet_w18` preflight ran locally for two MPS steps with batch size 1
 against the mixed manifest. Loss moved `3.694 -> 2.543`; graph quality was not
@@ -93,7 +93,7 @@ BATCH_SIZE=1 \
 NUM_WORKERS=4 \
 IMAGE_SIZE=1024 \
 BACKBONE=hrnet_w18 \
-RUN_MIXED=0 \
+RUN_TARGETED=0 \
 scripts/training/run_cpline_runpod_curriculum.sh
 ```
 
@@ -121,11 +121,13 @@ skipped.
 
 The script runs:
 
-1. `stage-light` from scratch.
-2. `stage-print` initialized from `stage-light`.
-3. `stage-dark` initialized from `stage-print`.
+1. `stage-base` from scratch.
+2. `stage-balanced` initialized from `stage-base`.
+3. Optional targeted continuation initialized from `stage-balanced` when
+   `RUN_TARGETED=1`.
 
-Set `RUN_MIXED=1` only after reviewing the `stage-dark` summary.
+Set `RUN_TARGETED=1` only after reviewing deterministic posthoc eval from
+`stage-balanced`.
 
 Each stage writes `summary.json`, `latest.pt`, `run_config.json`, and prediction
 cache artifacts under its output directory. It also streams step metrics to
@@ -155,7 +157,7 @@ BATCH_SIZE=1 \
 NUM_WORKERS=4 \
 IMAGE_SIZE=1024 \
 BACKBONE=hrnet_w18 \
-RUN_MIXED=0 \
+RUN_TARGETED=0 \
 LOG_EVERY=50 \
 SKIP_GRAPH_EVAL=1 \
 scripts/training/run_cpline_runpod_curriculum.sh
@@ -170,19 +172,19 @@ tmux attach -t cpline
 Watch live logs and step metrics from another shell on the Pod:
 
 ```bash
-tail -f checkpoints/runpod_phase3_curriculum/stage-light/train.log
-tail -f checkpoints/runpod_phase3_curriculum/stage-light/train_history.jsonl
+tail -f checkpoints/runpod_phase3_curriculum/stage-base/train.log
+tail -f checkpoints/runpod_phase3_curriculum/stage-base/train_history.jsonl
 watch -n 5 nvidia-smi
 ```
 
 After a stage finishes, inspect its summary:
 
 ```bash
-.venv/bin/python -m json.tool checkpoints/runpod_phase3_curriculum/stage-light/summary.json | less
+.venv/bin/python -m json.tool checkpoints/runpod_phase3_curriculum/stage-base/summary.json | less
 ```
 
-For the staged run, change `stage-light` to `stage-print` or `stage-dark` as
-each stage begins.
+For the staged run, change `stage-base` to `stage-balanced` as the second stage
+begins.
 
 ## Review Gates
 
@@ -192,13 +194,13 @@ After each stage, inspect:
 - clean and augmented edge F1
 - clean and augmented structural validity
 - predicted edge count versus ground-truth edge count
-- dark-mode examples specifically once `stage-dark` starts
+- clean, dark-mode, photo-light, and photo-dark examples once `stage-balanced`
+  starts
 
-Stop or lower dark-mode probability if augmented validation shows a large
-predicted edge explosion on dark examples.
+Use targeted continuation only if a specific slice underperforms; keep the other
+modes in the mix to avoid forgetting.
 
 ## Suggested Follow-Up
 
 If the first RunPod curriculum is stable, increase `TRAIN_COUNT` and `VAL_COUNT`
-before increasing augmentation aggressiveness. Use full `mixed` only after the
-staged summaries are healthy.
+before increasing augmentation aggressiveness.

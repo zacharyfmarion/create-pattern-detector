@@ -7,6 +7,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from collections import Counter
 from typing import Any
 
 import cv2
@@ -17,6 +18,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 
 from src.data.cpline_augmentations import (
+    AUGMENT_MIXES,
     AUGMENT_PROFILES,
     BASE_AUGMENT_PROFILES,
     DARK_MODE_STYLE_VARIANTS,
@@ -46,7 +48,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--profiles",
         type=str,
-        default="square-symmetry,line-style,dark-mode,print-light,print-medium,photo-light",
+        default="square-symmetry,line-style,dark-mode,print-light,print-medium,photo-light,photo-dark",
         help="Comma-separated profiles or 'all'.",
     )
     parser.add_argument("--num-samples", type=int, default=3)
@@ -93,7 +95,7 @@ def main() -> None:
                     line_width=_line_width(args.image_size),
                     augment_profile=profile,
                     seed=seed,
-                    style_variant=variant if profile == "dark-mode" else None,
+                    style_variant=variant if profile in ("dark-mode", "photo-dark") else None,
                     square_symmetry=variant if profile == "square-symmetry" else None,
                 )
                 rows.append(
@@ -101,6 +103,7 @@ def main() -> None:
                         "record": record,
                         "clean": clean,
                         "augmented": augmented,
+                        "selected_profile": augmented.metadata.get("selected_profile", profile),
                         "variant": variant,
                         "seed": seed,
                     }
@@ -138,7 +141,7 @@ def _select_records(manifest: Path, *, split: str, count: int, max_edges: int | 
 def _variants_for_profile(profile: str) -> list[str | None]:
     if profile == "square-symmetry":
         return list(NON_IDENTITY_SQUARE_SYMMETRIES)
-    if profile == "dark-mode":
+    if profile in ("dark-mode", "photo-dark"):
         return list(DARK_MODE_STYLE_VARIANTS)
     return [None]
 
@@ -169,7 +172,10 @@ def _write_contact_sheet(rows: list[dict[str, Any]], *, profile: str, output_pat
             _assignment_overlay(augmented.image, augmented.assignment),
             _graph_overlay(augmented.image, augmented.pixel_vertices, augmented.edges, augmented.assignments),
         ]
+        selected_profile = str(row.get("selected_profile") or profile)
         row_label = str(row["record"]["id"])
+        if selected_profile != profile:
+            row_label = f"{selected_profile}\n{row_label}"
         if row["variant"]:
             row_label = f"{row['variant']}\n{row_label}"
         for col_idx, image in enumerate(images):
@@ -206,18 +212,29 @@ def _write_sidecar(
     payload = {
         "profile": profile,
         "image_size": image_size,
+        "mix_weights": _mix_weights(profile),
+        "selected_profile_counts": dict(Counter(str(row.get("selected_profile") or profile) for row in rows)),
         "rows": [
             {
                 "id": str(row["record"]["id"]),
                 "fold_path": str(resolve_fold_path(row["record"], manifest)),
                 "variant": row["variant"],
                 "seed": row["seed"],
+                "selected_profile": row.get("selected_profile"),
                 "augmentation": row["augmented"].metadata,
             }
             for row in rows
         ],
     }
     output_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+
+def _mix_weights(profile: str) -> dict[str, float] | None:
+    if profile == "mixed":
+        profile = "stage-balanced"
+    if profile not in AUGMENT_MIXES:
+        return None
+    return {entry_profile: weight for entry_profile, weight, _ in AUGMENT_MIXES[profile]}
 
 
 def _line_overlay(image: np.ndarray, line_prob: np.ndarray) -> np.ndarray:

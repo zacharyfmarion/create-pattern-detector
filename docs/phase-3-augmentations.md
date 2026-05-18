@@ -22,12 +22,13 @@ applied only to the input image.
   blur, noise, and compression.
 - `photo-light`: mild residual affine/perspective perturbation, lens/defocus
   blur, lighting gradients, and photo-like compression.
-- `stage-light`: first curriculum mix, sampling only `clean`,
-  `square-symmetry`, `line-style`, and `print-light`.
-- `stage-print`: adds `print-medium` and `photo-light`.
-- `stage-dark`: adds `dark-mode` renders.
-- `mixed`: profile sampler for later staged training. It should only be used
-  after the individual profiles pass visual QA and local graph-eval gates.
+- `photo-dark`: dark-mode canvas and crease palette plus mild perspective,
+  blur, lighting gradients, noise, and photo-like compression.
+- `stage-base`: short geometry/label warmup with only `clean`,
+  `square-symmetry`, and `line-style`.
+- `stage-balanced`: main training mix with light, print/photo-light, dark, and
+  photo-dark samples present together from early in training.
+- `mixed`: compatibility alias for the current `stage-balanced` sampler.
 
 `--render-noise` is deprecated for CPLineNet. Use `--augment-profile`; the old
 flag remains only as a compatibility alias.
@@ -40,6 +41,8 @@ flag remains only as a compatibility alias.
 - Style-only profiles such as `line-style`, `print-light`, `print-medium`, and
   `dark-mode` do not rotate or flip geometry by default. Curriculum mixes add
   orientation coverage by sampling `square-symmetry` as a separate profile.
+- `photo-light` and `photo-dark` apply mild perspective to graph vertices first,
+  then render input images and targets from the transformed graph.
 - Assignment labels move with the graph. M/V are preserved under rotations and
   flips because the diagram colors are also rendered after the same transform.
 - Background grids are intentionally out of scope for V1. Dark-mode augmentation
@@ -97,19 +100,18 @@ Visual checks before larger sizes:
 Recommended local-first curriculum:
 
 1. Visual QA for `square-symmetry`, `line-style`, `dark-mode`, `print-light`,
-   `print-medium`, and `photo-light`.
+   `print-medium`, `photo-light`, and `photo-dark`.
 2. Tiny local smoke at 384px with `print-light`.
 3. Tiny local smoke at 384px with `dark-mode`.
-4. Robustness gate with staged profile mixes, starting with
-   `stage-light`.
-5. Move to `stage-print` to add `print-medium` and `photo-light`.
-6. Move to `stage-dark` to add `dark-mode`.
-7. Use full `mixed` only after the staged gates are stable.
-8. Run a short 1024px local feasibility pass before moving to RunPod.
+4. Short `stage-base` warmup to establish geometry and assignment labels.
+5. Main `stage-balanced` training so light, print/photo-light, dark, and
+   photo-dark all remain in distribution together.
+6. Use targeted continuation only after deterministic eval identifies a
+   specific weakness, and keep the other modes in the mix to avoid forgetting.
+7. Run a short 1024px local feasibility pass before moving to RunPod.
 
-After `stage-light`, each stage should initialize from the previous passing
-checkpoint with `--init-checkpoint`. Restarting each stage from random weights
-is a stress test, not the intended curriculum.
+`stage-balanced` should initialize from the `stage-base` checkpoint. Restarting
+each stage from random weights is a stress test, not the intended curriculum.
 
 For local architecture gates on dense mixed data, set `--graph-eval-count` to a
 small number such as `4` or `8`. Training and pixel validation still use the
