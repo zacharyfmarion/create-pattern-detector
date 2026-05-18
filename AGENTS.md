@@ -101,3 +101,10 @@ PYTHONPATH=. python3.10 scripts/data/smoke_shared_synthetic_data.py --root data/
 
 See `docs/synthetic-fold-datasets.md` for generation, shard merge, folded-preview,
 and mix-building commands.
+
+## RunPod Phase 3
+
+For GPU training setup, follow `docs/runpod-quickstart.md` first. It includes
+the CUDA-compatible Torch pin, the dereferenced synthetic dataset upload, smoke
+checks, curriculum launch, monitoring, and teardown commands. Use
+`docs/runpod-phase-3.md` for the longer rationale and review gates.

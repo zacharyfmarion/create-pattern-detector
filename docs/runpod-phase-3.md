@@ -5,6 +5,10 @@ gates. The goal is not to jump straight to a giant `mixed` run. Run the same
 curriculum that passed locally, with `hrnet_w18` at 1024px and checkpoint
 initialization between stages.
 
+For the shortest working setup recipe, start with
+`docs/runpod-quickstart.md`. This handoff keeps the rationale, review gates, and
+training interpretation notes.
+
 ## Local Status
 
 Local gates now use the 14k synthetic mixed raw manifest:
@@ -93,9 +97,17 @@ BATCH_SIZE=1 \
 NUM_WORKERS=4 \
 IMAGE_SIZE=1024 \
 BACKBONE=hrnet_w18 \
+BATCHNORM_MODE=batch-stats \
 RUN_TARGETED=0 \
 scripts/training/run_cpline_runpod_curriculum.sh
 ```
+
+Use `BATCHNORM_MODE=batch-stats` for small-batch HRNet CPLine runs that mix
+light, dark, print, and photo styles. With batch size 1, regular eval-mode
+BatchNorm running statistics can drift toward whichever style was most recent
+and make validation look catastrophically worse than the actual learned weights.
+Batch-stat validation keeps non-BatchNorm layers in eval mode while using
+current-image BatchNorm statistics without mutating running buffers.
 
 The curriculum passes CPLine hard-negative line-loss settings through these env
 vars:

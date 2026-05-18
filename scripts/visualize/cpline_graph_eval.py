@@ -24,6 +24,7 @@ sys.path.insert(0, str(REPO_ROOT))
 from src.data.cpline_augmentations import AUGMENT_PROFILES
 from src.data.cpline_dataset import CplineFoldDataset, cpline_collate
 from src.models import CPLineNet
+from src.models.batchnorm import BATCHNORM_MODES, model_eval_with_batchnorm_mode
 from src.vectorization import (
     PlanarGraphBuilder,
     PlanarGraphBuilderConfig,
@@ -56,6 +57,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-edges", type=int, default=300)
     parser.add_argument("--seed", type=int, default=8)
     parser.add_argument("--augment-profile", choices=AUGMENT_PROFILES, default="clean")
+    parser.add_argument(
+        "--batchnorm-mode",
+        choices=BATCHNORM_MODES,
+        default="batch-stats",
+        help="BatchNorm behavior during checkpoint visualization.",
+    )
     parser.add_argument("--threshold", type=float, default=0.65)
     return parser.parse_args()
 
@@ -91,7 +98,10 @@ def main() -> None:
     builder = make_builder(args.image_size, args.threshold)
 
     rows: list[dict[str, Any]] = []
-    with torch.no_grad():
+    with torch.no_grad(), model_eval_with_batchnorm_mode(
+        model,
+        batchnorm_mode=args.batchnorm_mode,
+    ):
         for sample_index, batch in enumerate(loader):
             outputs = model(batch["image"].to(device))
             evidence = cpline_outputs_to_evidence(outputs, batch_index=0, line_threshold=args.threshold)
@@ -117,7 +127,10 @@ def main() -> None:
                 gt_edges=graph["edges"].numpy(),
                 gt_assignments=graph["assignments"].numpy(),
                 metrics=metrics,
-                title=f"{args.augment_profile} threshold={args.threshold:.2f} {meta['id']}",
+                title=(
+                    f"{args.augment_profile} threshold={args.threshold:.2f} "
+                    f"bn={args.batchnorm_mode} {meta['id']}"
+                ),
                 save_path=save_path,
             )
             row = {

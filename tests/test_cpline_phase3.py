@@ -21,6 +21,7 @@ from src.data.cpline_dataset import (
 )
 from src.data.fold_parser import CreasePattern, FOLDParser
 from src.models import CPLineNet
+from src.models.batchnorm import model_eval_with_batchnorm_mode
 from src.models.losses import CPLineLoss, CPLineLossConfig
 from src.vectorization import cpline_outputs_to_evidence
 
@@ -73,6 +74,24 @@ def asymmetric_mv_cp() -> CreasePattern:
         ),
         assignments=np.array([2, 2, 2, 2, 0, 1, 0, 1], dtype=np.int8),
     )
+
+
+def test_batchnorm_batch_stats_eval_preserves_running_buffers():
+    model = torch.nn.Sequential(torch.nn.BatchNorm2d(3))
+    batchnorm = model[0]
+    batchnorm.running_mean.fill_(3.0)
+    batchnorm.running_var.fill_(2.0)
+    running_mean = batchnorm.running_mean.clone()
+    running_var = batchnorm.running_var.clone()
+    image = torch.full((1, 3, 4, 4), 10.0)
+
+    with torch.no_grad(), model_eval_with_batchnorm_mode(model, batchnorm_mode="batch-stats"):
+        output = model(image)
+
+    assert model.training is True
+    assert torch.allclose(batchnorm.running_mean, running_mean)
+    assert torch.allclose(batchnorm.running_var, running_var)
+    assert torch.allclose(output.mean(dim=(0, 2, 3)), torch.zeros(3), atol=1e-5)
 
 
 def test_cpline_renderer_keeps_unassigned_geometry_visible():

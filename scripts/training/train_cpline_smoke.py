@@ -33,6 +33,7 @@ sys.path.insert(0, str(REPO_ROOT))
 from src.data.cpline_augmentations import AUGMENT_PROFILES, normalize_augment_profile
 from src.data.cpline_dataset import CplineFoldDataset, cpline_collate
 from src.models import CPLineNet
+from src.models.batchnorm import BATCHNORM_MODES, model_eval_with_batchnorm_mode
 from src.models.losses import CPLineLoss, CPLineLossConfig
 from src.vectorization import (
     PlanarGraphBuilder,
@@ -98,6 +99,15 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--backbone", type=str, default="tiny")
     parser.add_argument("--hidden-channels", type=int, default=128)
+    parser.add_argument(
+        "--batchnorm-mode",
+        choices=BATCHNORM_MODES,
+        default="eval",
+        help=(
+            "BatchNorm behavior during validation/vectorization. Use batch-stats "
+            "for small-batch CPLine runs with strong light/dark/photo style mixing."
+        ),
+    )
     parser.add_argument(
         "--init-checkpoint",
         type=Path,
@@ -276,6 +286,7 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         "skip_graph_eval": args.skip_graph_eval,
         "backbone": args.backbone,
         "hidden_channels": args.hidden_channels,
+        "batchnorm_mode": args.batchnorm_mode,
         "init_checkpoint": init_checkpoint.as_posix() if init_checkpoint is not None else None,
         "augment_profile": augment_profile,
         "eval_augment_profile": args.eval_augment_profile,
@@ -330,7 +341,13 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         output_dir / "post_train.pt",
     )
 
-    val_loss = evaluate_pixel_loss(model, val_loader, criterion, device)
+    val_loss = evaluate_pixel_loss(
+        model,
+        val_loader,
+        criterion,
+        device,
+        batchnorm_mode=args.batchnorm_mode,
+    )
     eval_thresholds = parse_thresholds(args.eval_thresholds, args.eval_line_threshold)
     train_graph_sweep = None
     val_graph_sweep = None
@@ -342,6 +359,7 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
             image_size=args.image_size,
             line_thresholds=eval_thresholds,
             output_dir=predictions_dir / "train",
+            batchnorm_mode=args.batchnorm_mode,
             max_samples=args.graph_eval_count,
         )
         val_graph_sweep = evaluate_vectorizer_sweep(
@@ -351,12 +369,19 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
             image_size=args.image_size,
             line_thresholds=eval_thresholds,
             output_dir=predictions_dir / "val",
+            batchnorm_mode=args.batchnorm_mode,
             max_samples=args.graph_eval_count,
         )
     aug_val_loss = None
     aug_val_graph_sweep = None
     if aug_val_loader is not None:
-        aug_val_loss = evaluate_pixel_loss(model, aug_val_loader, criterion, device)
+        aug_val_loss = evaluate_pixel_loss(
+            model,
+            aug_val_loader,
+            criterion,
+            device,
+            batchnorm_mode=args.batchnorm_mode,
+        )
         if not args.skip_graph_eval:
             aug_val_graph_sweep = evaluate_vectorizer_sweep(
                 model,
@@ -365,6 +390,7 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
                 image_size=args.image_size,
                 line_thresholds=eval_thresholds,
                 output_dir=predictions_dir / "val_augmented",
+                batchnorm_mode=args.batchnorm_mode,
                 max_samples=args.graph_eval_count,
             )
 
@@ -404,17 +430,18 @@ def evaluate_pixel_loss(
     loader: DataLoader,
     criterion: CPLineLoss,
     device: torch.device,
+    *,
+    batchnorm_mode: str = "eval",
 ) -> dict[str, float]:
-    model.eval()
     totals: dict[str, float] = {}
     batches = 0
-    for batch in loader:
-        images = batch["image"].to(device)
-        losses = criterion(model(images), move_targets(batch, device))
-        for key, value in scalar_losses(losses).items():
-            totals[key] = totals.get(key, 0.0) + value
-        batches += 1
-    model.train()
+    with model_eval_with_batchnorm_mode(model, batchnorm_mode=batchnorm_mode):
+        for batch in loader:
+            images = batch["image"].to(device)
+            losses = criterion(model(images), move_targets(batch, device))
+            for key, value in scalar_losses(losses).items():
+                totals[key] = totals.get(key, 0.0) + value
+            batches += 1
     return {key: value / max(batches, 1) for key, value in totals.items()}
 
 
@@ -427,6 +454,7 @@ def evaluate_vectorizer_sweep(
     image_size: int,
     line_thresholds: list[float],
     output_dir: Path,
+    batchnorm_mode: str = "eval",
     max_samples: int | None = None,
 ) -> dict[str, Any]:
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -442,6 +470,7 @@ def evaluate_vectorizer_sweep(
             image_size=image_size,
             line_threshold=threshold,
             output_dir=threshold_dir,
+            batchnorm_mode=batchnorm_mode,
             max_samples=max_samples,
         )
         key = f"{threshold:.2f}"
@@ -471,10 +500,10 @@ def evaluate_vectorizer(
     image_size: int,
     line_threshold: float,
     output_dir: Path,
+    batchnorm_mode: str = "eval",
     max_samples: int | None = None,
 ) -> dict[str, Any]:
     output_dir.mkdir(parents=True, exist_ok=True)
-    model.eval()
     builder = PlanarGraphBuilder(
         PlanarGraphBuilderConfig(
             image_size=image_size,
@@ -495,39 +524,40 @@ def evaluate_vectorizer(
     metrics = []
     rows = []
     sample_index = 0
-    for batch in loader:
-        outputs = model(batch["image"].to(device))
-        for i, graph in enumerate(batch["graph"]):
-            evidence = cpline_outputs_to_evidence(
-                outputs,
-                batch_index=i,
-                line_threshold=line_threshold,
-            )
-            result = builder.build(evidence)
-            item_metrics = evaluate_graph(
-                result,
-                gt_vertices=graph["vertices"].numpy(),
-                gt_edges=graph["edges"].numpy(),
-                gt_assignments=graph["assignments"].numpy(),
-                vertex_tolerance_px=max(3.0, 5.0 * image_size / 768),
-            )
-            metrics.append(item_metrics)
-            meta = batch["meta"][i]
-            np.savez_compressed(
-                output_dir / f"{sample_index:03d}_{meta['id'][:72]}.npz",
-                line_prob=evidence.line_prob,
-                angle=evidence.angle,
-                junction_heatmap=evidence.junction_heatmap,
-                assignment_labels=evidence.assignment_labels,
-                pred_vertices=result.pixel_vertices,
-                pred_edges=result.edges_vertices,
-            )
-            rows.append({"id": meta["id"], **item_metrics.to_dict()})
-            sample_index += 1
+    with model_eval_with_batchnorm_mode(model, batchnorm_mode=batchnorm_mode):
+        for batch in loader:
+            outputs = model(batch["image"].to(device))
+            for i, graph in enumerate(batch["graph"]):
+                evidence = cpline_outputs_to_evidence(
+                    outputs,
+                    batch_index=i,
+                    line_threshold=line_threshold,
+                )
+                result = builder.build(evidence)
+                item_metrics = evaluate_graph(
+                    result,
+                    gt_vertices=graph["vertices"].numpy(),
+                    gt_edges=graph["edges"].numpy(),
+                    gt_assignments=graph["assignments"].numpy(),
+                    vertex_tolerance_px=max(3.0, 5.0 * image_size / 768),
+                )
+                metrics.append(item_metrics)
+                meta = batch["meta"][i]
+                np.savez_compressed(
+                    output_dir / f"{sample_index:03d}_{meta['id'][:72]}.npz",
+                    line_prob=evidence.line_prob,
+                    angle=evidence.angle,
+                    junction_heatmap=evidence.junction_heatmap,
+                    assignment_labels=evidence.assignment_labels,
+                    pred_vertices=result.pixel_vertices,
+                    pred_edges=result.edges_vertices,
+                )
+                rows.append({"id": meta["id"], **item_metrics.to_dict()})
+                sample_index += 1
+                if max_samples is not None and sample_index >= max_samples:
+                    break
             if max_samples is not None and sample_index >= max_samples:
                 break
-        if max_samples is not None and sample_index >= max_samples:
-            break
 
     summary = metrics_from_results(metrics)
     (output_dir / "per_file_metrics.json").write_text(
@@ -536,7 +566,6 @@ def evaluate_vectorizer(
     (output_dir / "graph_summary.json").write_text(
         json.dumps(summary, indent=2) + "\n", encoding="utf-8"
     )
-    model.train()
     return summary
 
 
