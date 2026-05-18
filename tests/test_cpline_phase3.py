@@ -7,7 +7,11 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
-from src.data.cpline_augmentations import AUGMENT_MIXES, NON_IDENTITY_SQUARE_SYMMETRIES
+from src.data.cpline_augmentations import (
+    AUGMENT_MIXES,
+    DARK_MODE_STYLE_VARIANTS,
+    NON_IDENTITY_SQUARE_SYMMETRIES,
+)
 from src.data.cpline_dataset import (
     CplineFoldDataset,
     cpline_collate,
@@ -111,10 +115,11 @@ def test_cpline_dark_mode_preserves_geometry_targets():
         line_width=2,
         augment_profile="dark-mode",
         seed=11,
-        style_variant="dark-grid",
+        style_variant="dark-bright",
         square_symmetry="identity",
     )
 
+    assert dark.metadata["grid_enabled"] is False
     assert dark.image.mean() < clean.image.mean()
     assert not np.array_equal(dark.image, clean.image)
     assert np.array_equal(dark.line_prob, clean.line_prob)
@@ -122,7 +127,7 @@ def test_cpline_dark_mode_preserves_geometry_targets():
     assert np.array_equal(dark.assignment, clean.assignment)
 
 
-def test_cpline_dark_mode_grid_is_not_line_target():
+def test_cpline_dark_mode_has_no_grid_background():
     cp = simple_mv_cp()
     clean = render_cpline_sample(
         cp, image_size=128, padding=8, line_width=2, augment_profile="clean"
@@ -134,13 +139,13 @@ def test_cpline_dark_mode_grid_is_not_line_target():
         line_width=2,
         augment_profile="dark-mode",
         seed=12,
-        style_variant="dark-grid",
+        style_variant="dark-muted",
         square_symmetry="identity",
     )
     background = clean.line_prob < 0.01
     changed_background = np.any(dark.image[background] != clean.image[background], axis=1)
 
-    assert dark.metadata["grid_enabled"] is True
+    assert dark.metadata["grid_enabled"] is False
     assert np.count_nonzero(changed_background) > 0
     assert np.array_equal(dark.line_prob, clean.line_prob)
 
@@ -259,7 +264,7 @@ def test_cpline_stage_light_samples_only_stage_one_profiles():
     assert "photo-light" not in seen
 
 
-def test_cpline_stage_dark_pins_dark_mode_without_grid():
+def test_cpline_stage_dark_samples_dark_mode_without_grid():
     cp = simple_mv_cp()
     dark_sample = None
     for seed in range(80):
@@ -276,7 +281,7 @@ def test_cpline_stage_dark_pins_dark_mode_without_grid():
             break
 
     assert dark_sample is not None
-    assert dark_sample.metadata["style_variant"] == "dark-no-grid"
+    assert dark_sample.metadata["style_variant"] in DARK_MODE_STYLE_VARIANTS
     assert dark_sample.metadata["grid_enabled"] is False
 
 
@@ -406,7 +411,7 @@ def test_cpline_augmentation_visualization_script_smoke(tmp_path):
     assert sidecar.exists()
     data = json.loads(sidecar.read_text(encoding="utf-8"))
     assert len(data["rows"]) == 4
-    assert any(row["augmentation"]["grid_enabled"] for row in data["rows"])
+    assert all(not row["augmentation"]["grid_enabled"] for row in data["rows"])
 
 
 def test_cpline_square_symmetry_visualization_script_smoke(tmp_path):

@@ -29,7 +29,6 @@ LINE_HARD_NEGATIVE_MULTIPLIER="${LINE_HARD_NEGATIVE_MULTIPLIER:-4.0}"
 STEPS_LIGHT="${STEPS_LIGHT:-3000}"
 STEPS_PRINT="${STEPS_PRINT:-1800}"
 STEPS_DARK="${STEPS_DARK:-1800}"
-STEPS_DARK_GRID="${STEPS_DARK_GRID:-1800}"
 STEPS_MIXED="${STEPS_MIXED:-1200}"
 RUN_MIXED="${RUN_MIXED:-0}"
 
@@ -82,8 +81,7 @@ run_stage() {
 run_stage "stage-light" "$STEPS_LIGHT" "$OUTPUT_ROOT/stage-light"
 run_stage "stage-print" "$STEPS_PRINT" "$OUTPUT_ROOT/stage-print" "$OUTPUT_ROOT/stage-light/latest.pt"
 run_stage "stage-dark" "$STEPS_DARK" "$OUTPUT_ROOT/stage-dark" "$OUTPUT_ROOT/stage-print/latest.pt"
-run_stage "stage-dark-grid" "$STEPS_DARK_GRID" "$OUTPUT_ROOT/stage-dark-grid" "$OUTPUT_ROOT/stage-dark/latest.pt"
 
 if [[ "$RUN_MIXED" == "1" ]]; then
-  run_stage "mixed" "$STEPS_MIXED" "$OUTPUT_ROOT/mixed" "$OUTPUT_ROOT/stage-dark-grid/latest.pt"
+  run_stage "mixed" "$STEPS_MIXED" "$OUTPUT_ROOT/mixed" "$OUTPUT_ROOT/stage-dark/latest.pt"
 fi

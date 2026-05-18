@@ -50,19 +50,7 @@ AUGMENT_MIXES: dict[str, tuple[tuple[str, float, str | None], ...]] = {
         ("print-light", 0.24, None),
         ("print-medium", 0.16, None),
         ("photo-light", 0.08, None),
-        ("dark-mode", 0.14, "dark-no-grid"),
-    ),
-    "stage-dark-grid": (
-        ("clean", 0.06, None),
-        ("square-symmetry", 0.10, None),
-        ("line-style", 0.16, None),
-        ("print-light", 0.22, None),
-        ("print-medium", 0.15, None),
-        ("photo-light", 0.07, None),
-        ("dark-mode", 0.14, "dark-no-grid"),
-        ("dark-mode", 0.05, "dark-grid"),
-        ("dark-mode", 0.03, "dark-gray"),
-        ("dark-mode", 0.02, "dark-bright"),
+        ("dark-mode", 0.14, None),
     ),
 }
 MIXED_PROFILE_ENTRIES: tuple[tuple[str, float, str | None], ...] = (
@@ -90,6 +78,12 @@ SQUARE_SYMMETRIES = (
     "anti-transpose",
 )
 NON_IDENTITY_SQUARE_SYMMETRIES = tuple(symmetry for symmetry in SQUARE_SYMMETRIES if symmetry != "identity")
+DARK_MODE_STYLE_VARIANTS = (
+    "dark-default",
+    "dark-muted",
+    "dark-gray",
+    "dark-bright",
+)
 
 ASSIGNMENT_RGB = {
     0: (220, 40, 40),
@@ -209,7 +203,7 @@ def render_augmented_cpline_sample(
     metadata = {
         "profile": profile,
         "selected_profile": selected_profile,
-        "style_variant": selected_style_variant,
+        "style_variant": params.get("style_variant", selected_style_variant),
         "square_symmetry": params["square_symmetry"],
         "seed": seed,
         "render_ms": (perf_counter() - start) * 1000.0,
@@ -273,9 +267,6 @@ def _sample_render_params(
         "target_line_width": int(line_width),
         "line_alpha": 1.0,
         "grid_enabled": False,
-        "grid_spacing": max(16, image_size // 24),
-        "grid_color": (230, 230, 230),
-        "grid_thickness": 1,
         "brightness": 0.0,
         "contrast": 1.0,
         "noise_std": 0.0,
@@ -407,20 +398,22 @@ def _apply_dark_mode_params(
     line_width: int,
     style_variant: str | None,
 ) -> None:
-    variant = style_variant or str(rng.choice(["dark-no-grid", "dark-grid", "dark-grid", "dark-gray", "dark-bright"]))
+    variant = style_variant or str(rng.choice(DARK_MODE_STYLE_VARIANTS))
+    if variant not in DARK_MODE_STYLE_VARIANTS:
+        raise ValueError(f"Unsupported dark-mode style_variant: {variant}")
     bg = int(rng.integers(18, 34))
-    params["background"] = (bg, bg, min(42, bg + int(rng.integers(0, 8))))
+    if variant == "dark-muted":
+        bg = int(rng.integers(28, 48))
+    params["background"] = (bg, bg, min(56, bg + int(rng.integers(0, 10))))
     params["line_width"] = int(line_width)
     params["target_line_width"] = int(line_width)
-    params["line_alpha"] = float(rng.uniform(0.88, 1.0))
-    params["grid_enabled"] = variant in ("dark-grid", "dark-gray", "dark-bright")
-    params["grid_spacing"] = int(rng.choice([max(10, image_size // 36), max(12, image_size // 28), max(16, image_size // 20)]))
-    grid_boost = rng.integers(10, 22) if variant != "dark-bright" else rng.integers(14, 28)
-    grid = min(76, bg + int(grid_boost))
-    params["grid_color"] = (grid, grid, grid)
-    params["grid_thickness"] = 1
-    red_base = (250, 92, 104) if variant != "dark-bright" else (255, 115, 126)
-    blue_base = (24, 145, 255) if variant != "dark-bright" else (68, 175, 255)
+    params["line_alpha"] = float(rng.uniform(0.84, 1.0))
+    if variant == "dark-muted":
+        red_base = (205, 82, 92)
+        blue_base = (42, 118, 210)
+    else:
+        red_base = (250, 92, 104) if variant != "dark-bright" else (255, 115, 126)
+        blue_base = (24, 145, 255) if variant != "dark-bright" else (68, 175, 255)
     border_base = (176, 176, 176) if variant != "dark-gray" else (118, 118, 118)
     unassigned_base = (140, 140, 140) if variant != "dark-gray" else (104, 104, 104)
     params["palette"] = {
@@ -492,9 +485,6 @@ def _render_input_image_from_pixels(
     params: dict[str, Any],
 ) -> np.ndarray:
     image = np.full((image_size, image_size, 3), params["background"], dtype=np.uint8)
-    if params["grid_enabled"]:
-        _draw_grid(image, params)
-
     overlay = image.copy()
     line_width = int(params["line_width"])
     palette = params["palette"]
@@ -514,18 +504,6 @@ def _render_input_image_from_pixels(
     if alpha >= 0.999:
         return overlay
     return cv2.addWeighted(overlay, alpha, image, 1.0 - alpha, 0.0).astype(np.uint8)
-
-
-def _draw_grid(image: np.ndarray, params: dict[str, Any]) -> None:
-    spacing = int(params["grid_spacing"])
-    color = params["grid_color"]
-    thickness = int(params["grid_thickness"])
-    h, w = image.shape[:2]
-    for x in range(0, w, spacing):
-        cv2.line(image, (x, 0), (x, h - 1), color, thickness, lineType=cv2.LINE_AA)
-    for y in range(0, h, spacing):
-        cv2.line(image, (0, y), (w - 1, y), color, thickness, lineType=cv2.LINE_AA)
-
 
 def _apply_photometric_effects(
     image: np.ndarray,

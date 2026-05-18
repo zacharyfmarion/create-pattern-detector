@@ -14,8 +14,8 @@ applied only to the input image.
   anti-transpose. Identity remains available only as a pinned debug/test value.
 - `line-style`: line width, opacity, antialiasing, assignment color jitter, and
   grayscale/monochrome variants.
-- `dark-mode`: dark canvas, optional faint grid, bright M/V colors, and
-  gray/white border or unassigned lines.
+- `dark-mode`: dark canvas, varied bright/muted M/V colors, and gray/white
+  border or unassigned lines. Background grids are out of scope for V1.
 - `print-light`: line-style plus paper tone, mild blur/noise, and JPEG
   compression.
 - `print-medium`: stronger line/color/background diversity, uneven lighting,
@@ -25,8 +25,7 @@ applied only to the input image.
 - `stage-light`: first curriculum mix, sampling only `clean`,
   `square-symmetry`, `line-style`, and `print-light`.
 - `stage-print`: adds `print-medium` and `photo-light`.
-- `stage-dark`: adds `dark-mode` pinned to no-grid renders.
-- `stage-dark-grid`: adds dark-mode grid variants at low probability.
+- `stage-dark`: adds `dark-mode` renders.
 - `mixed`: profile sampler for later staged training. It should only be used
   after the individual profiles pass visual QA and local graph-eval gates.
 
@@ -43,8 +42,9 @@ flag remains only as a compatibility alias.
   orientation coverage by sampling `square-symmetry` as a separate profile.
 - Assignment labels move with the graph. M/V are preserved under rotations and
   flips because the diagram colors are also rendered after the same transform.
-- Dark-mode grid pixels are background noise. They must never appear in line or
-  junction targets.
+- Background grids are intentionally out of scope for V1. Dark-mode augmentation
+  varies background darkness and crease-line palettes, but does not render grid
+  lines.
 - Monochrome line-style renders collapse M/V supervision to `U` for that sample
   so the model does not learn to invent assignments when visual color evidence
   is absent.
@@ -88,7 +88,7 @@ Visual checks before larger sizes:
 
 - Overlays align with the augmented image.
 - Square-symmetry rows show the seven non-identity orientations.
-- Dark-mode grid lines do not appear in line/junction targets.
+- Dark-mode backgrounds stay free of grid-like guide lines.
 - M/V colors remain aligned with assignment overlays.
 - Render timing remains acceptable at 256 and 384 before testing 1024.
 
@@ -103,10 +103,9 @@ Recommended local-first curriculum:
 4. Robustness gate with staged profile mixes, starting with
    `stage-light`.
 5. Move to `stage-print` to add `print-medium` and `photo-light`.
-6. Move to `stage-dark` to add `dark-mode` without grid.
-7. Move to `stage-dark-grid` to add dark-mode grid at low probability.
-8. Use full `mixed` only after the staged gates are stable.
-9. Run a short 1024px local feasibility pass before moving to RunPod.
+6. Move to `stage-dark` to add `dark-mode`.
+7. Use full `mixed` only after the staged gates are stable.
+8. Run a short 1024px local feasibility pass before moving to RunPod.
 
 After `stage-light`, each stage should initialize from the previous passing
 checkpoint with `--init-checkpoint`. Restarting each stage from random weights

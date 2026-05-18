@@ -19,6 +19,7 @@ sys.path.insert(0, str(REPO_ROOT))
 from src.data.cpline_augmentations import (
     AUGMENT_PROFILES,
     BASE_AUGMENT_PROFILES,
+    DARK_MODE_STYLE_VARIANTS,
     NON_IDENTITY_SQUARE_SYMMETRIES,
 )
 from src.data.cpline_dataset import load_manifest_records, render_cpline_sample, resolve_fold_path
@@ -138,7 +139,7 @@ def _variants_for_profile(profile: str) -> list[str | None]:
     if profile == "square-symmetry":
         return list(NON_IDENTITY_SQUARE_SYMMETRIES)
     if profile == "dark-mode":
-        return ["dark-no-grid", "dark-grid", "dark-gray", "dark-bright"]
+        return list(DARK_MODE_STYLE_VARIANTS)
     return [None]
 
 

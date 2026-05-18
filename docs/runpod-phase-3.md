@@ -22,12 +22,11 @@ The latest local MPS pass was an architecture gate, not a quality target:
 | `stage-light` | scratch | 5.661 -> 1.710 | 1.569 | 1.441 | 0.084 | 0.074 | 100% / 100% |
 | `stage-print` | `stage-light` | 1.607 -> 1.249 | 1.318 | 1.154 | 0.086 | 0.051 | 100% / 100% |
 | `stage-dark` | `stage-print` | 1.292 -> 1.086 | 1.216 | 2.315 | 0.081 | 0.040 | 100% / 100% |
-| `stage-dark-grid` | `stage-dark` | 1.125 -> 0.976 | 1.094 | 3.119 | 0.079 | 0.048 | 100% / 100% |
 
 The local tiny model still overproduces edges heavily on dense mixed samples,
-and dark/dark-grid augmented validation remains the hardest slice. That is
+and dark augmented validation remains the hardest active slice. That is
 expected for the short local gate; RunPod should monitor predicted edge count
-versus ground truth and dark-grid examples separately.
+versus ground truth on dark-mode examples separately.
 
 A 1024px `hrnet_w18` preflight ran locally for two MPS steps with batch size 1
 against the mixed manifest. Loss moved `3.694 -> 2.543`; graph quality was not
@@ -107,8 +106,9 @@ LINE_HARD_NEGATIVE_RATIO=0.05
 LINE_HARD_NEGATIVE_MULTIPLIER=4.0
 ```
 
-Raise `LINE_HARD_NEGATIVE_WEIGHT` for a focused dark-grid continuation if graph
-eval shows the model is treating background grid strokes as crease lines.
+Raise `LINE_HARD_NEGATIVE_WEIGHT` for a focused dark-mode continuation if graph
+eval shows the model is treating dark backgrounds or non-crease visual texture
+as crease lines.
 
 For the very first paid shakedown, optionally set `GRAPH_EVAL_COUNT=32` so each
 stage vectorizes a bounded validation subset. Leave it unset when you want full
@@ -124,9 +124,8 @@ The script runs:
 1. `stage-light` from scratch.
 2. `stage-print` initialized from `stage-light`.
 3. `stage-dark` initialized from `stage-print`.
-4. `stage-dark-grid` initialized from `stage-dark`.
 
-Set `RUN_MIXED=1` only after reviewing the `stage-dark-grid` summary.
+Set `RUN_MIXED=1` only after reviewing the `stage-dark` summary.
 
 Each stage writes `summary.json`, `latest.pt`, `run_config.json`, and prediction
 cache artifacts under its output directory. It also streams step metrics to
@@ -182,8 +181,8 @@ After a stage finishes, inspect its summary:
 .venv/bin/python -m json.tool checkpoints/runpod_phase3_curriculum/stage-light/summary.json | less
 ```
 
-For the staged run, change `stage-light` to `stage-print`, `stage-dark`, or
-`stage-dark-grid` as each stage begins.
+For the staged run, change `stage-light` to `stage-print` or `stage-dark` as
+each stage begins.
 
 ## Review Gates
 
@@ -193,10 +192,10 @@ After each stage, inspect:
 - clean and augmented edge F1
 - clean and augmented structural validity
 - predicted edge count versus ground-truth edge count
-- dark-grid examples specifically once `stage-dark-grid` starts
+- dark-mode examples specifically once `stage-dark` starts
 
-Stop or lower grid probability if augmented validation shows a large predicted
-edge explosion on grid examples.
+Stop or lower dark-mode probability if augmented validation shows a large
+predicted edge explosion on dark examples.
 
 ## Suggested Follow-Up
 

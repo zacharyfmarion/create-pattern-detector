@@ -332,12 +332,13 @@ Tasks:
   rotation, horizontal/vertical flip, and both diagonal reflections. Preserve
   M/V labels because the rendered colors/line assignments move with the
   transformed graph.
-- Treat dark-mode grids as visual background noise, not crease evidence.
+- Keep dark-mode augmentation focused on background and crease-line palette
+  variation. Background guide grids are out of scope for V1.
 - Add visual augmentation contact sheets and JSON sidecars before scaling image size.
 - Run local visual/performance gates for augmentations before paid GPU training.
 - Add configurable augmentation mixes so curriculum stages can sample only the
   approved profiles for that stage instead of jumping straight to full `mixed`:
-  `stage-light`, `stage-print`, `stage-dark`, and `stage-dark-grid`.
+  `stage-light`, `stage-print`, and `stage-dark`.
 - Use the generated fold-only `raw-manifest.jsonl` contract for CPLine training:
   rows provide `foldPath` relative to the manifest root plus explicit
   train/val/test `split` values. The old Phase 2 `records[].path` fixture format
@@ -351,31 +352,30 @@ Current local finding:
   CPLine manifest. It contains 12k TreeMaker rows and 2k Rabbit Ear rows.
 - A 384px tiny-backbone staged MPS architecture gate ran on the mixed manifest
   with 64 train / 16 val, `max_edges=1000`, and `--graph-eval-count 4`.
-  Loss decreased through `stage-light`, `stage-print`, `stage-dark`, and
-  `stage-dark-grid`; clean and augmented capped graph eval stayed structurally
-  valid.
+  Loss decreased through `stage-light`, `stage-print`, and `stage-dark`; clean
+  and augmented capped graph eval stayed structurally valid.
 - The mixed-data tiny model still overproduces edges heavily, so local edge F1
   is low after these short gates. This is acceptable for architecture proof, not
   a quality result.
-- Dark and dark-grid augmented validation remain the hardest slices. RunPod
-  runs should monitor predicted edge count versus ground truth and dark-grid
-  examples separately before enabling long full-`mixed` training.
+- Dark augmented validation remains the hardest active slice. RunPod runs should
+  monitor predicted edge count versus ground truth on dark examples before
+  enabling long full-`mixed` training.
 - A 1024px `hrnet_w18` preflight with batch size 1 ran locally for two MPS
   steps on the mixed manifest. Loss moved from 3.694 to 2.543, proving the
   full-size path and memory shape, not model quality.
 - A first 1024px RunPod `hrnet_w18` curriculum checkpoint was followed by a
-  focused hard-negative line-loss continuation for dark-grid false positives.
-  This produced the current best Phase 3 checkpoint artifact, but it is not an
-  exit checkpoint yet.
-- The hard-negative continuation improved clean pixel validation and made many
-  dark-grid examples usable, but deterministic single-worker dark-grid graph
-  eval still exposes grid/background blow-ups on some samples. Treat multi-worker
-  augmented eval numbers before `f639532` with caution because worker-copied RNG
-  state could sample duplicated augmentation streams.
+  focused hard-negative line-loss continuation after grid-like dark backgrounds
+  exposed false positives. This produced the current best Phase 3 checkpoint
+  artifact, but it is not an exit checkpoint yet.
+- Deterministic single-worker dark eval before removing grid augmentation showed
+  that background guide grids create a distracting line-detection problem that is
+  out of scope for V1. Treat multi-worker augmented eval numbers before `f639532`
+  with caution because worker-copied RNG state could sample duplicated
+  augmentation streams.
 - Oracle graph extraction from perfect dense CPLine targets reaches about 98%
-  edge recall and 99% vertex recall on the same clean and dark-grid samples, so
-  the remaining gap is model evidence quality, especially junction/line evidence
-  under dark-grid variants, not an impossible graph-builder ceiling.
+  edge recall and 99% vertex recall on the same clean and dark samples, so the
+  remaining gap is model evidence quality, especially junction/line evidence
+  under style variation, not an impossible graph-builder ceiling.
 - Broad `mixed` continuation and a dark-mode-only high hard-negative pass both
   destabilized validation in this run. The next RunPod pass should use smaller
   segmented checkpoints, deterministic augmented eval, and a junction/recall
@@ -387,10 +387,8 @@ Augmentation curriculum before larger sizes:
    weight, color, antialiasing, mild blur/noise, and paper tone.
 2. `stage-print`: introduce stronger print/photo variation and mild geometric
    perturbation after clean validation remains stable.
-3. `stage-dark`: teach dark backgrounds and bright M/V colors without grid.
-4. `stage-dark-grid`: add dark-mode grid at low probability; grid is background
-   noise and must not produce line or junction targets.
-5. Only then use the full `mixed` profile for longer local or RunPod training.
+3. `stage-dark`: teach dark backgrounds and varied M/V colors.
+4. Only then use the full `mixed` profile for longer local or RunPod training.
 
 Run stages as a curriculum by initializing each stage from the previous passing
 checkpoint with `--init-checkpoint`; restarting every stage from random weights
@@ -405,7 +403,7 @@ Exit criteria on held-out synthetic renders:
 - Clean edge recall >= 95%.
 - Noisy synthetic edge recall >= 90%.
 - Augmentation contact sheets are visually approved at 256 and 384 resolution.
-- Dark-mode grid pixels are not included in line or junction targets.
+- Dark-mode backgrounds render without guide grids for V1.
 - Each curriculum stage passes a 384px local graph-eval gate before moving to
   the next stage.
 - Final valid FOLD rate >= 90%.
