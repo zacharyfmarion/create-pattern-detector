@@ -9,7 +9,7 @@ from typing import Any
 
 import numpy as np
 import torch
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, get_worker_info
 
 from src.data.cpline_augmentations import normalize_augment_profile, render_augmented_cpline_sample
 from src.data.fold_parser import FOLDParser, transform_coords
@@ -97,6 +97,7 @@ class CplineFoldDataset(Dataset):
         self.augment_profile = normalize_augment_profile(augment_profile, render_noise=render_noise)
         self.seed = seed
         self._rng = np.random.default_rng(seed)
+        self._rng_worker_seed: int | None = None
         self.parser = FOLDParser()
         self._geometry_cache: dict[int, tuple[Any, np.ndarray]] = {}
         self.records = select_records(
@@ -159,6 +160,13 @@ class CplineFoldDataset(Dataset):
         return self._geometry_cache[index]
 
     def _next_rng(self) -> np.random.Generator:
+        worker_info = get_worker_info()
+        if worker_info is not None and self._rng_worker_seed != worker_info.seed:
+            # Dataset instances are copied into DataLoader workers with identical
+            # RNG state. Re-seed from PyTorch's per-worker seed so parallel
+            # augmentation streams do not duplicate each other.
+            self._rng = np.random.default_rng(int(worker_info.seed) % np.iinfo(np.uint32).max)
+            self._rng_worker_seed = int(worker_info.seed)
         seed = int(self._rng.integers(0, np.iinfo(np.int32).max))
         return np.random.default_rng(seed)
 

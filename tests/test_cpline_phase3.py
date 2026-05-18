@@ -5,10 +5,12 @@ import sys
 
 import numpy as np
 import torch
+from torch.utils.data import DataLoader
 
 from src.data.cpline_augmentations import AUGMENT_MIXES, NON_IDENTITY_SQUARE_SYMMETRIES
 from src.data.cpline_dataset import (
     CplineFoldDataset,
+    cpline_collate,
     render_cpline_sample,
     render_input_image,
     select_records,
@@ -325,6 +327,24 @@ def test_cpline_dataset_does_not_cache_random_augmented_tensors(tmp_path):
 
     first = dataset[0]["image"]
     second = dataset[0]["image"]
+
+    assert not torch.equal(first, second)
+
+
+def test_cpline_dataset_workers_use_independent_augmentation_rngs(tmp_path):
+    manifest = _write_manifest(tmp_path, count=4)
+    dataset = CplineFoldDataset(
+        manifest,
+        split="train",
+        limit=2,
+        max_edges=20,
+        image_size=96,
+        augment_profile="print-medium",
+        seed=5,
+    )
+    loader = DataLoader(dataset, batch_size=1, num_workers=2, collate_fn=cpline_collate)
+
+    first, second = [batch["image"][0] for batch in loader]
 
     assert not torch.equal(first, second)
 
