@@ -363,6 +363,23 @@ Current local finding:
 - A 1024px `hrnet_w18` preflight with batch size 1 ran locally for two MPS
   steps on the mixed manifest. Loss moved from 3.694 to 2.543, proving the
   full-size path and memory shape, not model quality.
+- A first 1024px RunPod `hrnet_w18` curriculum checkpoint was followed by a
+  focused hard-negative line-loss continuation for dark-grid false positives.
+  This produced the current best Phase 3 checkpoint artifact, but it is not an
+  exit checkpoint yet.
+- The hard-negative continuation improved clean pixel validation and made many
+  dark-grid examples usable, but deterministic single-worker dark-grid graph
+  eval still exposes grid/background blow-ups on some samples. Treat multi-worker
+  augmented eval numbers before `f639532` with caution because worker-copied RNG
+  state could sample duplicated augmentation streams.
+- Oracle graph extraction from perfect dense CPLine targets reaches about 98%
+  edge recall and 99% vertex recall on the same clean and dark-grid samples, so
+  the remaining gap is model evidence quality, especially junction/line evidence
+  under dark-grid variants, not an impossible graph-builder ceiling.
+- Broad `mixed` continuation and a dark-mode-only high hard-negative pass both
+  destabilized validation in this run. The next RunPod pass should use smaller
+  segmented checkpoints, deterministic augmented eval, and a junction/recall
+  recovery plan rather than pushing full `mixed` longer by default.
 
 Augmentation curriculum before larger sizes:
 
