@@ -212,6 +212,7 @@ OUTPUT_ROOT=checkpoints/runpod_phase3_curriculum \
 MANIFEST=data/generated/synthetic/cp_training_mix_v1/raw-manifest.jsonl \
 TRAIN_COUNT=512 \
 VAL_COUNT=64 \
+TRAIN_FAMILY_SAMPLING=balanced \
 BATCH_SIZE=1 \
 NUM_WORKERS=4 \
 IMAGE_SIZE=1024 \
@@ -225,6 +226,12 @@ scripts/training/run_cpline_runpod_curriculum.sh
 
 The script runs `stage-base` first, then initializes `stage-balanced` from
 `stage-base/latest.pt`.
+
+`TRAIN_FAMILY_SAMPLING=balanced` is the default for this RunPod curriculum. The
+mixed manifest is intentionally not family-balanced on disk: TreeMaker is the
+primary source and Rabbit Ear is a smaller supplemental source. Balanced train
+sampling keeps Rabbit Ear geometry from being under-trained while clean
+validation and posthoc graph eval still report natural and per-family metrics.
 
 `BATCHNORM_MODE=batch-stats` is important for 1024px HRNet runs with batch size
 1 and strong light/dark/photo style mixing. It keeps the model in eval mode for

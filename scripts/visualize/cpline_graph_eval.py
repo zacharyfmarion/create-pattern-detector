@@ -31,13 +31,19 @@ from src.vectorization import (
     cpline_outputs_to_evidence,
     evaluate_graph,
 )
+from src.vectorization.metrics import GraphMetrics, metrics_from_results
 
 
 ASSIGNMENT_COLORS = {
     0: "#ff5f5f",  # M
     1: "#2094ff",  # V
-    2: "#f2f2f2",  # B
-    3: "#9aa0a6",  # U
+    2: "#374151",  # B on light backgrounds
+    3: "#6b7280",  # U on light backgrounds
+}
+DARK_BACKGROUND_ASSIGNMENT_COLORS = {
+    **ASSIGNMENT_COLORS,
+    2: "#f8fafc",  # B
+    3: "#cbd5e1",  # U
 }
 
 
@@ -54,6 +60,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--image-size", type=int, default=1024)
     parser.add_argument("--split", choices=["train", "val", "test"], default="val")
     parser.add_argument("--num-samples", type=int, default=4)
+    parser.add_argument(
+        "--max-visuals",
+        type=int,
+        default=None,
+        help="Maximum PNG contact sheets to write; metrics still run for all samples.",
+    )
     parser.add_argument("--max-edges", type=int, default=300)
     parser.add_argument("--seed", type=int, default=8)
     parser.add_argument("--augment-profile", choices=AUGMENT_PROFILES, default="clean")
@@ -98,6 +110,7 @@ def main() -> None:
     builder = make_builder(args.image_size, args.threshold)
 
     rows: list[dict[str, Any]] = []
+    metric_items: list[tuple[str, GraphMetrics]] = []
     with torch.no_grad(), model_eval_with_batchnorm_mode(
         model,
         batchnorm_mode=args.batchnorm_mode,
@@ -107,43 +120,61 @@ def main() -> None:
             evidence = cpline_outputs_to_evidence(outputs, batch_index=0, line_threshold=args.threshold)
             result = builder.build(evidence)
             graph = batch["graph"][0]
-            metrics = evaluate_graph(
+            metrics_obj = evaluate_graph(
                 result,
                 gt_vertices=graph["vertices"].numpy(),
                 gt_edges=graph["edges"].numpy(),
                 gt_assignments=graph["assignments"].numpy(),
                 vertex_tolerance_px=max(3.0, 5.0 * args.image_size / 768),
-            ).to_dict()
+            )
+            metrics = metrics_obj.to_dict()
             meta = batch["meta"][0]
             image = (batch["image"][0].permute(1, 2, 0).numpy() * 255).clip(0, 255).astype(np.uint8)
-            save_path = output_dir / f"{sample_index:02d}_{safe_id(meta['id'])}.png"
-            render_sheet(
-                image=image,
-                evidence=evidence,
-                pred_vertices=result.pixel_vertices,
-                pred_edges=result.edges_vertices,
-                pred_assignments=result.edges_assignment,
-                gt_vertices=graph["vertices"].numpy(),
-                gt_edges=graph["edges"].numpy(),
-                gt_assignments=graph["assignments"].numpy(),
-                metrics=metrics,
-                title=(
-                    f"{args.augment_profile} threshold={args.threshold:.2f} "
-                    f"bn={args.batchnorm_mode} {meta['id']}"
-                ),
-                save_path=save_path,
-            )
+            image_name = None
+            if args.max_visuals is None or sample_index < args.max_visuals:
+                save_path = output_dir / f"{sample_index:02d}_{safe_id(meta['id'])}.png"
+                render_sheet(
+                    image=image,
+                    evidence=evidence,
+                    pred_vertices=result.pixel_vertices,
+                    pred_edges=result.edges_vertices,
+                    pred_assignments=result.edges_assignment,
+                    gt_vertices=graph["vertices"].numpy(),
+                    gt_edges=graph["edges"].numpy(),
+                    gt_assignments=graph["assignments"].numpy(),
+                    metrics=metrics,
+                    title=(
+                        f"{args.augment_profile} threshold={args.threshold:.2f} "
+                        f"bn={args.batchnorm_mode} {meta['id']}"
+                    ),
+                    save_path=save_path,
+                )
+                image_name = save_path.name
             row = {
                 "id": meta["id"],
+                "family": meta.get("family", ""),
+                "bucket": meta.get("bucket", ""),
                 "profile": args.augment_profile,
                 "threshold": args.threshold,
-                "image": save_path.name,
+                "image": image_name,
                 **metrics,
             }
             rows.append(row)
+            metric_items.append((str(meta.get("family", "")), metrics_obj))
             print(json.dumps(row), flush=True)
 
     (output_dir / "metrics.json").write_text(json.dumps(rows, indent=2) + "\n", encoding="utf-8")
+    summary = build_summary(
+        metric_items,
+        checkpoint=checkpoint,
+        manifest=manifest,
+        args=args,
+    )
+    (output_dir / "summary.json").write_text(
+        json.dumps(summary, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    print(json.dumps({"summary": summary}), flush=True)
 
 
 def select_device(requested: str) -> torch.device:
@@ -179,6 +210,35 @@ def make_builder(image_size: int, threshold: float) -> PlanarGraphBuilder:
             planar_cleanup_max_edges=2500,
         )
     )
+
+
+def build_summary(
+    metric_items: list[tuple[str, GraphMetrics]],
+    *,
+    checkpoint: Path,
+    manifest: Path,
+    args: argparse.Namespace,
+) -> dict[str, Any]:
+    families = sorted({family or "unknown" for family, _ in metric_items})
+    by_family = {}
+    for family in families:
+        by_family[family] = metrics_from_results(
+            [metrics for item_family, metrics in metric_items if (item_family or "unknown") == family]
+        )
+    return {
+        "checkpoint": checkpoint.as_posix(),
+        "manifest": manifest.as_posix(),
+        "split": args.split,
+        "profile": args.augment_profile,
+        "threshold": args.threshold,
+        "batchnorm_mode": args.batchnorm_mode,
+        "image_size": args.image_size,
+        "max_edges": args.max_edges,
+        "seed": args.seed,
+        "sample_count": len(metric_items),
+        "aggregate": metrics_from_results([metrics for _, metrics in metric_items]),
+        "by_family": by_family,
+    }
 
 
 def render_sheet(
@@ -223,7 +283,9 @@ def render_sheet(
         "overlay\n"
         f"edge P/R {metrics['edge_precision']:.2f}/{metrics['edge_recall']:.2f}, "
         f"vertex P/R {metrics['vertex_precision']:.2f}/{metrics['vertex_recall']:.2f}, "
-        f"assign {metrics['assignment_accuracy']:.2f}"
+        f"assign {metrics['assignment_accuracy']:.2f}\n"
+        f"border P/R {metrics.get('border_precision', 0.0):.2f}/"
+        f"{metrics.get('border_recall', 0.0):.2f}"
     )
 
     for ax in axes:
@@ -249,16 +311,20 @@ def draw_graph(
 ) -> None:
     if len(vertices) == 0 or len(edges) == 0:
         return
-    stroke_color = "white" if float(np.mean(image)) < 100.0 else "black"
+    is_dark = float(np.mean(image)) < 100.0
+    stroke_color = "white" if is_dark else "black"
+    assignment_colors = DARK_BACKGROUND_ASSIGNMENT_COLORS if is_dark else ASSIGNMENT_COLORS
     effects = [pe.Stroke(linewidth=linewidth + 1.6, foreground=stroke_color, alpha=0.7), pe.Normal()]
     for edge, assignment in zip(edges, assignments):
         p0 = vertices[int(edge[0])]
         p1 = vertices[int(edge[1])]
+        assignment_int = int(assignment)
+        line_width = linewidth * (1.35 if assignment_int == 2 else 1.0)
         (line,) = ax.plot(
             [p0[0], p1[0]],
             [p0[1], p1[1]],
-            color=ASSIGNMENT_COLORS.get(int(assignment), ASSIGNMENT_COLORS[3]),
-            linewidth=linewidth,
+            color=assignment_colors.get(assignment_int, assignment_colors[3]),
+            linewidth=line_width,
             alpha=alpha,
         )
         line.set_path_effects(effects)

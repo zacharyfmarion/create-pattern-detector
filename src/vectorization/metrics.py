@@ -12,6 +12,9 @@ from src.data.fold_parser import FOLDParser
 from src.vectorization.planar_graph_builder import PlanarGraphResult
 
 
+ASSIGNMENT_CLASS_NAMES = {0: "M", 1: "V", 2: "B", 3: "U"}
+
+
 @dataclass
 class StructuralValidity:
     parseable_fold: bool
@@ -54,6 +57,10 @@ class GraphMetrics:
     assignment_total: int
     assignment_correct: int
     assignment_by_class: dict[str, dict[str, float | int]]
+    edge_by_class: dict[str, dict[str, float | int]]
+    border_precision: float
+    border_recall: float
+    border_f1: float
     structural_validity: StructuralValidity
     downstream_base_computation: str = "skipped: Rabbit Ear/FOLD CLI validator not restored"
 
@@ -88,6 +95,12 @@ def evaluate_graph(
         gt_assignments,
         assignment_correct,
     )
+    edge_by_class = _edge_by_class(
+        matched_gt_edges=matched_gt_edges,
+        matched_pred_edges=matched_pred_edges,
+        gt_assignments=gt_assignments,
+        pred_assignments=result.edges_assignment,
+    )
 
     structural = validate_structure(result)
     matched_vertices = len(gt_to_pred)
@@ -111,6 +124,10 @@ def evaluate_graph(
         assignment_total=assignment_total,
         assignment_correct=assignment_correct_count,
         assignment_by_class=assignment_by_class,
+        edge_by_class=edge_by_class,
+        border_precision=float(edge_by_class["B"]["precision"]),
+        border_recall=float(edge_by_class["B"]["recall"]),
+        border_f1=float(edge_by_class["B"]["f1"]),
         structural_validity=structural,
     )
 
@@ -232,6 +249,7 @@ def metrics_from_results(metrics: list[GraphMetrics]) -> dict:
         "assignment_correct": sum(item.assignment_correct for item in metrics),
         "structurally_valid_files": sum(item.structural_validity.valid for item in metrics),
     }
+    edge_by_class = _aggregate_edge_by_class([item.edge_by_class for item in metrics])
     return {
         **totals,
         "vertex_precision": _ratio(totals["matched_vertices"], totals["pred_vertices"]),
@@ -239,6 +257,10 @@ def metrics_from_results(metrics: list[GraphMetrics]) -> dict:
         "edge_precision": _ratio(totals["matched_edges"], totals["pred_edges"]),
         "edge_recall": _ratio(totals["matched_edges"], totals["gt_edges"]),
         "assignment_accuracy": _ratio(totals["assignment_correct"], totals["assignment_total"]),
+        "edge_by_class": edge_by_class,
+        "border_precision": edge_by_class["B"]["precision"],
+        "border_recall": edge_by_class["B"]["recall"],
+        "border_f1": edge_by_class["B"]["f1"],
         "structural_validity_rate": _ratio(totals["structurally_valid_files"], totals["files"]),
         "mean_vertex_error_px": float(np.mean([item.mean_vertex_error_px for item in metrics])),
     }
@@ -249,11 +271,10 @@ def _assignment_by_class(
     gt_assignments: np.ndarray,
     assignment_correct: list[bool],
 ) -> dict[str, dict[str, float | int]]:
-    class_names = {0: "M", 1: "V", 2: "B", 3: "U"}
-    totals = {name: 0 for name in class_names.values()}
-    correct = {name: 0 for name in class_names.values()}
+    totals = {name: 0 for name in ASSIGNMENT_CLASS_NAMES.values()}
+    correct = {name: 0 for name in ASSIGNMENT_CLASS_NAMES.values()}
     for gt_idx, is_correct in zip(matched_gt_edges, assignment_correct):
-        name = class_names.get(int(gt_assignments[gt_idx]), "U")
+        name = ASSIGNMENT_CLASS_NAMES.get(int(gt_assignments[gt_idx]), "U")
         totals[name] += 1
         correct[name] += int(is_correct)
     return {
@@ -266,8 +287,88 @@ def _assignment_by_class(
     }
 
 
+def _edge_by_class(
+    *,
+    matched_gt_edges: list[int],
+    matched_pred_edges: list[int],
+    gt_assignments: np.ndarray,
+    pred_assignments: np.ndarray,
+) -> dict[str, dict[str, float | int]]:
+    gt_totals = {name: 0 for name in ASSIGNMENT_CLASS_NAMES.values()}
+    pred_totals = {name: 0 for name in ASSIGNMENT_CLASS_NAMES.values()}
+    true_positive = {name: 0 for name in ASSIGNMENT_CLASS_NAMES.values()}
+    geometry_matched_gt = {name: 0 for name in ASSIGNMENT_CLASS_NAMES.values()}
+    for assignment in gt_assignments:
+        gt_totals[ASSIGNMENT_CLASS_NAMES.get(int(assignment), "U")] += 1
+    for assignment in pred_assignments:
+        pred_totals[ASSIGNMENT_CLASS_NAMES.get(int(assignment), "U")] += 1
+    for gt_idx, pred_idx in zip(matched_gt_edges, matched_pred_edges):
+        gt_name = ASSIGNMENT_CLASS_NAMES.get(int(gt_assignments[gt_idx]), "U")
+        pred_name = ASSIGNMENT_CLASS_NAMES.get(int(pred_assignments[pred_idx]), "U")
+        geometry_matched_gt[gt_name] += 1
+        if gt_name == pred_name:
+            true_positive[gt_name] += 1
+    return _class_metric_payload(
+        gt_totals=gt_totals,
+        pred_totals=pred_totals,
+        true_positive=true_positive,
+        geometry_matched_gt=geometry_matched_gt,
+    )
+
+
+def _aggregate_edge_by_class(
+    metric_items: list[dict[str, dict[str, float | int]]],
+) -> dict[str, dict[str, float | int]]:
+    gt_totals = {name: 0 for name in ASSIGNMENT_CLASS_NAMES.values()}
+    pred_totals = {name: 0 for name in ASSIGNMENT_CLASS_NAMES.values()}
+    true_positive = {name: 0 for name in ASSIGNMENT_CLASS_NAMES.values()}
+    geometry_matched_gt = {name: 0 for name in ASSIGNMENT_CLASS_NAMES.values()}
+    for item in metric_items:
+        for name in ASSIGNMENT_CLASS_NAMES.values():
+            class_item = item.get(name, {})
+            gt_totals[name] += int(class_item.get("gt_total", 0))
+            pred_totals[name] += int(class_item.get("pred_total", 0))
+            true_positive[name] += int(class_item.get("true_positive", 0))
+            geometry_matched_gt[name] += int(class_item.get("geometry_matched_gt", 0))
+    return _class_metric_payload(
+        gt_totals=gt_totals,
+        pred_totals=pred_totals,
+        true_positive=true_positive,
+        geometry_matched_gt=geometry_matched_gt,
+    )
+
+
+def _class_metric_payload(
+    *,
+    gt_totals: dict[str, int],
+    pred_totals: dict[str, int],
+    true_positive: dict[str, int],
+    geometry_matched_gt: dict[str, int],
+) -> dict[str, dict[str, float | int]]:
+    payload: dict[str, dict[str, float | int]] = {}
+    for name in ["M", "V", "B", "U"]:
+        precision = _ratio(true_positive[name], pred_totals[name])
+        recall = _ratio(true_positive[name], gt_totals[name])
+        geometry_recall = _ratio(geometry_matched_gt[name], gt_totals[name])
+        payload[name] = {
+            "gt_total": gt_totals[name],
+            "pred_total": pred_totals[name],
+            "true_positive": true_positive[name],
+            "geometry_matched_gt": geometry_matched_gt[name],
+            "precision": precision,
+            "recall": recall,
+            "f1": _f1(precision, recall),
+            "geometry_recall": geometry_recall,
+        }
+    return payload
+
+
 def _ratio(numerator: int | float, denominator: int | float) -> float:
     return float(numerator / denominator) if denominator else 0.0
+
+
+def _f1(precision: float, recall: float) -> float:
+    return 2.0 * precision * recall / (precision + recall) if precision + recall else 0.0
 
 
 def _no_illegal_crossings(result: PlanarGraphResult) -> bool:

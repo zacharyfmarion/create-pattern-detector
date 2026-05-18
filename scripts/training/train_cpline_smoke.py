@@ -58,6 +58,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--train-count", type=int, default=8)
     parser.add_argument("--val-count", type=int, default=4)
     parser.add_argument("--max-edges", type=int, default=250)
+    parser.add_argument(
+        "--train-family-sampling",
+        choices=["natural", "balanced"],
+        default="natural",
+        help="Record sampling for the training split. Balanced gives each manifest family an equal share.",
+    )
     parser.add_argument("--max-steps", type=int, default=120)
     parser.add_argument("--batch-size", type=int, default=2)
     parser.add_argument("--num-workers", type=int, default=0)
@@ -195,6 +201,7 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         image_size=args.image_size,
         augment_profile=augment_profile,
         seed=args.seed,
+        family_sampling=args.train_family_sampling,
     )
     val_dataset = CplineFoldDataset(
         manifest,
@@ -292,6 +299,7 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         "eval_augment_profile": args.eval_augment_profile,
         "render_noise": args.render_noise,
         "max_edges": args.max_edges,
+        "train_family_sampling": args.train_family_sampling,
         "lr": args.lr,
         "line_hard_negative_weight": args.line_hard_negative_weight,
         "line_hard_negative_ratio": args.line_hard_negative_ratio,

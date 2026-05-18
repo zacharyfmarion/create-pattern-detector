@@ -28,6 +28,9 @@ applied only to the input image.
   `square-symmetry`, and `line-style`.
 - `stage-balanced`: main training mix with light, print/photo-light, dark, and
   photo-dark samples present together from early in training.
+- Family-balanced train sampling is recommended for `cp_training_mix_v1` because
+  the manifest intentionally has many more TreeMaker than Rabbit Ear examples.
+  Keep validation natural, then inspect per-family graph-eval summaries.
 - `mixed`: compatibility alias for the current `stage-balanced` sampler.
 
 `--render-noise` is deprecated for CPLineNet. Use `--augment-profile`; the old

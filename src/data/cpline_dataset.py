@@ -60,7 +60,10 @@ def select_records(
     limit: int | None,
     max_edges: int | None,
     seed: int | None = None,
+    family_sampling: str = "natural",
 ) -> list[dict[str, Any]]:
+    if family_sampling not in {"natural", "balanced"}:
+        raise ValueError(f"Unsupported family_sampling={family_sampling!r}")
     filtered = [
         record
         for record in records
@@ -68,9 +71,34 @@ def select_records(
     ]
     if limit is None or limit >= len(filtered):
         return filtered
+    if family_sampling == "balanced":
+        return _sample_family_balanced(filtered, limit=limit, seed=seed)
     rng = np.random.default_rng(0 if seed is None else seed)
     selected = rng.choice(len(filtered), size=limit, replace=False)
     return [filtered[int(index)] for index in selected]
+
+
+def _sample_family_balanced(
+    records: list[dict[str, Any]], *, limit: int, seed: int | None
+) -> list[dict[str, Any]]:
+    if not records or limit <= 0:
+        return []
+    rng = np.random.default_rng(0 if seed is None else seed)
+    grouped: dict[str, list[int]] = {}
+    for index, record in enumerate(records):
+        grouped.setdefault(str(record.get("family", "")), []).append(index)
+    family_names = sorted(grouped)
+    base = limit // len(family_names)
+    remainder = limit % len(family_names)
+    chosen: list[int] = []
+    for family_offset, family_name in enumerate(family_names):
+        quota = base + int(family_offset < remainder)
+        family_indices = grouped[family_name]
+        replace = quota > len(family_indices)
+        sampled = rng.choice(family_indices, size=quota, replace=replace)
+        chosen.extend(int(index) for index in sampled)
+    rng.shuffle(chosen)
+    return [records[index] for index in chosen]
 
 
 class CplineFoldDataset(Dataset):
@@ -89,6 +117,7 @@ class CplineFoldDataset(Dataset):
         augment_profile: str = "clean",
         render_noise: str | None = None,
         seed: int | None = None,
+        family_sampling: str = "natural",
     ) -> None:
         self.manifest_path = Path(manifest_path)
         self.image_size = image_size
@@ -106,6 +135,7 @@ class CplineFoldDataset(Dataset):
             limit=limit,
             max_edges=max_edges,
             seed=seed,
+            family_sampling=family_sampling,
         )
         if not self.records:
             raise ValueError(f"No records selected from {manifest_path} for split={split}")

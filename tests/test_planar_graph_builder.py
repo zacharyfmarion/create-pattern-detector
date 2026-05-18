@@ -4,10 +4,11 @@ from src.data.fold_parser import CreasePattern
 from src.vectorization import (
     PlanarGraphBuilder,
     PlanarGraphBuilderConfig,
+    PlanarGraphResult,
     VectorizerEvidence,
     render_vectorizer_evidence,
 )
-from src.vectorization.metrics import evaluate_graph, validate_structure
+from src.vectorization.metrics import evaluate_graph, metrics_from_results, validate_structure
 
 
 def simple_square_with_diagonals() -> CreasePattern:
@@ -70,6 +71,38 @@ def test_planar_graph_builder_recovers_simple_rendered_labels():
     assert result.num_edges >= 4
     assert metrics.vertex_recall >= 0.8
     assert metrics.structural_validity.parseable_fold
+
+
+def test_graph_metrics_report_border_precision_and_recall():
+    vertices = np.array(
+        [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]],
+        dtype=np.float32,
+    )
+    gt_edges = np.array([[0, 1], [1, 2], [2, 3], [3, 0]], dtype=np.int64)
+    pred_edges = np.array([[0, 1], [1, 2], [2, 3], [3, 0], [0, 2]], dtype=np.int64)
+    result = PlanarGraphResult(
+        vertices_coords=vertices,
+        pixel_vertices=vertices,
+        edges_vertices=pred_edges,
+        edges_assignment=np.array([2, 2, 2, 2, 2], dtype=np.int8),
+        edge_support=np.ones(len(pred_edges), dtype=np.float32),
+        vertex_support=np.ones(len(vertices), dtype=np.float32),
+    )
+
+    metrics = evaluate_graph(
+        result,
+        gt_vertices=vertices,
+        gt_edges=gt_edges,
+        gt_assignments=np.array([2, 2, 2, 2], dtype=np.int8),
+        vertex_tolerance_px=1.0,
+    )
+    summary = metrics_from_results([metrics])
+
+    assert metrics.border_precision == 0.8
+    assert metrics.border_recall == 1.0
+    assert metrics.edge_by_class["B"]["geometry_recall"] == 1.0
+    assert summary["border_precision"] == 0.8
+    assert summary["border_recall"] == 1.0
 
 
 def test_rendered_evidence_canonicalizes_metric_edges():

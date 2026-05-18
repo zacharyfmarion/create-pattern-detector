@@ -425,6 +425,43 @@ def test_cpline_dataset_limit_samples_across_ordered_mixed_manifest():
     assert families == {"treemaker-tree", "rabbit-ear-fold-program"}
 
 
+def test_cpline_dataset_balanced_family_sampling_oversamples_small_family():
+    records = [
+        {
+            "id": f"tree-{idx}",
+            "foldPath": f"tree-{idx}.fold",
+            "split": "train",
+            "family": "treemaker-tree",
+            "edges": 8,
+        }
+        for idx in range(8)
+    ] + [
+        {
+            "id": f"rabbit-{idx}",
+            "foldPath": f"rabbit-{idx}.fold",
+            "split": "train",
+            "family": "rabbit-ear-fold-program",
+            "edges": 8,
+        }
+        for idx in range(2)
+    ]
+
+    selected = select_records(
+        records,
+        split="train",
+        limit=8,
+        max_edges=20,
+        seed=7,
+        family_sampling="balanced",
+    )
+    family_counts = {
+        family: sum(record["family"] == family for record in selected)
+        for family in {"treemaker-tree", "rabbit-ear-fold-program"}
+    }
+
+    assert family_counts == {"treemaker-tree": 4, "rabbit-ear-fold-program": 4}
+
+
 def test_cpline_augmentation_visualization_script_smoke(tmp_path):
     manifest = _write_manifest(tmp_path, count=1)
     output_dir = tmp_path / "visualizations"
@@ -522,6 +559,8 @@ def test_cpline_training_script_dark_mode_smoke(tmp_path):
             "1",
             "--hidden-channels",
             "32",
+            "--train-family-sampling",
+            "balanced",
             "--augment-profile",
             "dark-mode",
             "--eval-thresholds",
@@ -535,6 +574,7 @@ def test_cpline_training_script_dark_mode_smoke(tmp_path):
 
     summary = json.loads((output_dir / "summary.json").read_text(encoding="utf-8"))
     assert summary["augment_profile"] == "dark-mode"
+    assert summary["train_family_sampling"] == "balanced"
     assert summary["graph_eval_count"] == 1
     assert summary["val_graph_sweep"]["thresholds"]["0.80"]["files"] == 1
     assert (output_dir / "latest.pt").exists()

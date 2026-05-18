@@ -24,7 +24,10 @@ current curriculum supersedes the old sequential light/print/dark staging:
    and square-symmetry samples.
 2. `stage-balanced`: main training mix with light, print/photo-light, dark, and
    photo-dark samples present together.
-3. Optional targeted continuation only after deterministic eval identifies a
+3. Train sampling should be family-balanced for the mixed manifest so the
+   smaller Rabbit Ear family gets enough updates. Validation and posthoc graph
+   eval should still report clean aggregate and per-family metrics.
+4. Optional targeted continuation only after deterministic eval identifies a
    specific weakness.
 
 The local tiny model still overproduces edges heavily on dense mixed samples.
