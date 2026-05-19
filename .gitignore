@@ -15,5 +15,12 @@ configs/runpod.env
 */**/__pycache__/**
 .DS_Store
 checkpoints/
+!artifacts/
+!artifacts/checkpoints/
+!artifacts/checkpoints/*.json
+*.pt
+*.pth
+*.onnx
+*.safetensors
 **/*.zip
 visualizations/

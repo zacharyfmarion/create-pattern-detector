@@ -1,0 +1,84 @@
+{
+  "schemaVersion": 1,
+  "id": "phase3-v1-cpline-hrnet-w18-stage-balanced",
+  "status": "blessed",
+  "phase": "phase-3-v1",
+  "registeredAt": "2026-05-19",
+  "description": "Best Phase 3 V1 CPLineNet checkpoint for readable rectified 1024px crease-pattern inputs.",
+  "checkpoint": {
+    "gitTracked": false,
+    "relativePath": "checkpoints/runpod_phase3_curriculum/stage-balanced/latest.pt",
+    "originalRunpodPath": "/workspace/create-pattern-detector/checkpoints/runpod_phase3_curriculum/stage-balanced/latest.pt",
+    "sha256": "a2a3d31d2ff80d3cf76952e463d965d03e6c46358a9802c2640a39b57d7732d8",
+    "sizeBytes": 138787408
+  },
+  "model": {
+    "class": "CPLineNet",
+    "backbone": "hrnet_w18",
+    "hiddenChannels": 128,
+    "imageSize": 1024
+  },
+  "training": {
+    "device": "cuda",
+    "dataset": "cp_training_mix_v1",
+    "manifest": "data/generated/synthetic/cp_training_mix_v1/raw-manifest.jsonl",
+    "trainSamples": 512,
+    "valSamples": 64,
+    "maxEdges": 300,
+    "batchSize": 1,
+    "maxSteps": 3600,
+    "seed": 7,
+    "augmentProfile": "stage-balanced",
+    "initCheckpoint": "checkpoints/runpod_phase3_curriculum/stage-base/latest.pt",
+    "skipGraphEvalDuringTraining": true,
+    "lineHardNegativeWeight": 0.25,
+    "lineHardNegativeRatio": 0.05,
+    "lineHardNegativeMultiplier": 4.0
+  },
+  "inference": {
+    "batchnormMode": "batch-stats",
+    "vectorizerThreshold": 0.65,
+    "supportedEnvelope": "Readable, rectified 1024px CP inputs with resolvable line spacing. Dense tiny-fold Rabbit Ear cases remain V2."
+  },
+  "evaluation": {
+    "source": "local posthoc graph eval through PlanarGraphBuilder",
+    "profile": "clean",
+    "imageSize": 1024,
+    "maxEdges": 300,
+    "threshold": 0.65,
+    "batchnormMode": "batch-stats",
+    "treeMakerClean1024N24": {
+      "edgeRecall": 0.9565894490948024,
+      "edgePrecision": 0.972106824925816,
+      "vertexRecall": 0.9796173044925125,
+      "vertexPrecision": 0.9991514637250742,
+      "borderRecall": 0.9273182957393483,
+      "borderPrecision": 0.9462915601023018,
+      "assignmentAccuracy": 0.9918599918599919,
+      "structuralValidityRate": 1.0,
+      "meanVertexErrorPx": 1.021057935561115
+    },
+    "rabbitEarClean1024N24": {
+      "edgeRecall": 0.8609674475205354,
+      "edgePrecision": 0.8981275785464932,
+      "vertexRecall": 0.9157894736842105,
+      "vertexPrecision": 0.9875141884222475,
+      "borderRecall": 0.7967581047381546,
+      "borderPrecision": 0.8949579831932774,
+      "assignmentAccuracy": 0.9777385159010601,
+      "structuralValidityRate": 1.0,
+      "meanVertexErrorPx": 1.2272835831828552
+    },
+    "knownV2Tail": {
+      "summary": "Rabbit Ear failures correlate with very short edges and closely packed vertices rather than family label alone.",
+      "rabbitEarTinyEdgeFracLt8SpearmanVsEdgeRecall": -0.8419221768934941,
+      "rabbitEarCloseVertexFracLt8SpearmanVsEdgeRecall": -0.8729883383482521
+    }
+  },
+  "relatedDocs": [
+    "docs/checkpoint-management.md",
+    "docs/phase-3-v1-status.md",
+    "docs/runpod-phase-3.md",
+    "ROADMAP.md"
+  ]
+}

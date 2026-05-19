@@ -321,7 +321,10 @@ Goal: replace ground-truth labels with model-predicted fields.
 
 Status: V1 complete for the supported readable-input envelope. See
 `docs/phase-3-v1-status.md` for the completion decision, eval numbers, and the
-dense/tiny geometry V2 caveat.
+dense/tiny geometry V2 caveat. The current blessed checkpoint is registered in
+`artifacts/checkpoints/phase3-v1-cpline.json`; use
+`docs/checkpoint-management.md` for checkpoint organization, checksums, and
+replacement rules.
 
 Tasks:
 

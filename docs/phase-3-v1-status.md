@@ -50,6 +50,12 @@ The best current checkpoint is good on the readable clean slice:
 
 Both stratified eval slices had 100% structurally valid predicted FOLD graphs.
 
+The blessed checkpoint is registered in
+`artifacts/checkpoints/phase3-v1-cpline.json`. The weight file itself remains an
+ignored local artifact at
+`checkpoints/runpod_phase3_curriculum/stage-balanced/latest.pt`; see
+`docs/checkpoint-management.md` for the organization and replacement process.
+
 ## Known V2 Tail
 
 Rabbit Ear is not uniformly bad. Easy Rabbit Ear examples are near-perfect, but
