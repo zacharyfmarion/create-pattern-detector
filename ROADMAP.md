@@ -380,6 +380,16 @@ Current local finding:
   destabilized validation in this run. The next RunPod pass should use smaller
   segmented checkpoints, deterministic augmented eval, and a junction/recall
   recovery plan rather than pushing full `mixed` longer by default.
+- A local family/geometry diagnostic on the `max_edges <= 300` validation slice
+  showed that the current clean 1024px checkpoint passes TreeMaker but not
+  Rabbit Ear: 24-sample stratified eval was 95.7% edge recall for TreeMaker and
+  86.1% for Rabbit Ear. The Rabbit Ear gap is not just dataset imbalance.
+  Failures correlate strongly with tiny/close geometry: for Rabbit Ear,
+  `tiny_edge_frac_lt8` has Spearman rho -0.84 against edge recall and
+  `close_vertex_frac_lt8` has rho -0.87. Before another RunPod quality run,
+  stratify by geometry scale, inspect or filter pathological tiny-fold examples,
+  and decide whether V1 should train/evaluate them at 1024px or reserve them for
+  a higher-resolution/scale-aware stage.
 
 Augmentation curriculum before larger sizes:
 
