@@ -440,6 +440,9 @@ V1 exit criteria on held-out synthetic renders:
 
 Goal: produce usable FOLD assignments and honest ambiguity reports.
 
+Implementation handoff and reproduction commands live in
+`docs/phase-4-stage4-handoff.md`.
+
 Phase 4 principle: build the honesty layer before clever origami completion.
 The system should be willing to say "geometry is outside the V1 envelope" or
 "M/V is visually ambiguous" instead of silently inventing a confident FOLD.

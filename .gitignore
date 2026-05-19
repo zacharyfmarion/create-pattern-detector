@@ -8,6 +8,8 @@ data/generated/synthetic
 data/generated/synthetic/**
 data/ts-generation/node_modules
 tools/synthetic-generator/node_modules
+web/stage-inspector/node_modules
+web/stage-inspector/dist
 .venv
 .venv/
 configs/scraping.env

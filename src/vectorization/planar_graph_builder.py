@@ -60,6 +60,8 @@ class PlanarGraphBuilderConfig:
     planar_cleanup_max_edges: int = 3000
     planar_split_vertex_distance_px: float = 2.0
     planar_crossing_support_tie: float = 1e-4
+    repair_near_endpoint_crossings: bool = False
+    near_endpoint_crossing_snap_px: float = 5.0
     collinear_edge_contraction: bool = True
     collinear_contraction_angle_degrees: float = 4.0
     collinear_contraction_distance_px: float = 2.5
@@ -140,6 +142,7 @@ class PlanarGraphBuilder:
                 edges,
                 edge_support,
                 edge_assignments,
+                line_prob=line_prob,
             )
 
         contraction_stats: dict[str, int | bool] = {}
@@ -470,11 +473,15 @@ class PlanarGraphBuilder:
         edges: np.ndarray,
         edge_support: np.ndarray,
         edge_assignments: np.ndarray,
+        line_prob: np.ndarray | None = None,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict[str, int | bool]]:
         stats: dict[str, int | bool] = {
             "input_edges": int(len(edges)),
             "split_edges": 0,
             "duplicate_edges_removed": 0,
+            "near_endpoint_crossings_repaired": 0,
+            "near_endpoint_edges_split": 0,
+            "near_endpoint_vertices_snapped": 0,
             "crossing_edges_removed": 0,
             "skipped": False,
         }
@@ -500,6 +507,20 @@ class PlanarGraphBuilder:
             edge_assignments,
         )
         stats["duplicate_edges_removed"] = int(len(edges) - len(deduped_edges))
+
+        if self.config.repair_near_endpoint_crossings:
+            deduped_edges, deduped_support, deduped_assignments, repair_stats = (
+                self._repair_near_endpoint_crossings(
+                    vertices,
+                    deduped_edges,
+                    deduped_support,
+                    deduped_assignments,
+                    line_prob,
+                )
+            )
+            stats["near_endpoint_crossings_repaired"] = repair_stats["repaired"]
+            stats["near_endpoint_edges_split"] = repair_stats["edges_split"]
+            stats["near_endpoint_vertices_snapped"] = repair_stats["vertices_snapped"]
 
         edges, edge_support, edge_assignments, removed_crossings = self._remove_crossing_edges(
             vertices,
@@ -770,6 +791,254 @@ class PlanarGraphBuilder:
             np.array([value[0] for value in edge_map.values()], dtype=np.float32),
             np.array([value[1] for value in edge_map.values()], dtype=np.int8),
         )
+
+    def _repair_near_endpoint_crossings(
+        self,
+        vertices: np.ndarray,
+        edges: np.ndarray,
+        edge_support: np.ndarray,
+        edge_assignments: np.ndarray,
+        line_prob: np.ndarray | None,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict[str, int]]:
+        stats = {"repaired": 0, "edges_split": 0, "vertices_snapped": 0}
+        if len(edges) < 2:
+            return edges, edge_support, edge_assignments, stats
+
+        max_repairs = max(1, len(edges) * 2)
+        for _ in range(max_repairs):
+            repair = self._find_near_endpoint_crossing(
+                vertices,
+                edges,
+                edge_support,
+                edge_assignments,
+            )
+            if repair is None:
+                break
+            edges, edge_support, edge_assignments, repaired = (
+                self._apply_near_endpoint_crossing_repair(
+                    vertices,
+                    edges,
+                    edge_support,
+                    edge_assignments,
+                    line_prob,
+                    repair,
+                )
+            )
+            if not repaired:
+                break
+            edges, edge_support, edge_assignments = self._dedupe_edges(
+                edges,
+                edge_support,
+                edge_assignments,
+            )
+            stats["repaired"] += 1
+            stats["edges_split"] += 1
+            stats["vertices_snapped"] += 1
+
+        return edges, edge_support, edge_assignments, stats
+
+    def _find_near_endpoint_crossing(
+        self,
+        vertices: np.ndarray,
+        edges: np.ndarray,
+        edge_support: np.ndarray,
+        edge_assignments: np.ndarray,
+    ) -> dict[str, int | np.ndarray] | None:
+        p0 = vertices[edges[:, 0]]
+        p1 = vertices[edges[:, 1]]
+        bbox_min = np.minimum(p0, p1)
+        bbox_max = np.maximum(p0, p1)
+        snap_px = float(self.config.near_endpoint_crossing_snap_px)
+
+        for i, edge_a in enumerate(edges):
+            a0, a1 = int(edge_a[0]), int(edge_a[1])
+            for j in range(i + 1, len(edges)):
+                if (
+                    bbox_max[i, 0] < bbox_min[j, 0]
+                    or bbox_max[j, 0] < bbox_min[i, 0]
+                    or bbox_max[i, 1] < bbox_min[j, 1]
+                    or bbox_max[j, 1] < bbox_min[i, 1]
+                ):
+                    continue
+                b0, b1 = int(edges[j][0]), int(edges[j][1])
+                if len({a0, a1, b0, b1}) < 4:
+                    continue
+                intersection = _segment_intersection_with_parameters(
+                    vertices[a0],
+                    vertices[a1],
+                    vertices[b0],
+                    vertices[b1],
+                )
+                if intersection is None:
+                    continue
+                point, t_a, t_b = intersection
+                near_a, snap_a = _near_endpoint(vertices[a0], vertices[a1], point, t_a, snap_px)
+                near_b, snap_b = _near_endpoint(vertices[b0], vertices[b1], point, t_b, snap_px)
+                if near_a == near_b:
+                    continue
+                if near_a:
+                    repair = self._border_crossing_repair_candidate(
+                        vertices,
+                        edges,
+                        edge_support,
+                        edge_assignments,
+                        snap_edge=i,
+                        split_edge=j,
+                        snap_endpoint=int(snap_a),
+                        point=point,
+                    )
+                else:
+                    repair = self._border_crossing_repair_candidate(
+                        vertices,
+                        edges,
+                        edge_support,
+                        edge_assignments,
+                        snap_edge=j,
+                        split_edge=i,
+                        snap_endpoint=int(snap_b),
+                        point=point,
+                    )
+                if repair is not None:
+                    return repair
+        return None
+
+    def _border_crossing_repair_candidate(
+        self,
+        vertices: np.ndarray,
+        edges: np.ndarray,
+        edge_support: np.ndarray,
+        edge_assignments: np.ndarray,
+        *,
+        snap_edge: int,
+        split_edge: int,
+        snap_endpoint: int,
+        point: np.ndarray,
+    ) -> dict[str, int | np.ndarray] | None:
+        # Keep this deliberately narrow: snap a high-support crease endpoint onto
+        # an already-detected border edge, then split only that border edge.
+        split_is_border = self._edge_is_graph_border_like(vertices, edges[split_edge]) or int(
+            edge_assignments[split_edge]
+        ) == 2
+        snap_is_border = self._edge_is_graph_border_like(vertices, edges[snap_edge]) or int(
+            edge_assignments[snap_edge]
+        ) == 2
+        if not split_is_border or snap_is_border:
+            return None
+        if float(edge_support[snap_edge]) < self.config.direct_edge_min_support:
+            return None
+        if self._crossing_loser(vertices, edges, edge_support, snap_edge, split_edge) != snap_edge:
+            return None
+        return {
+            "snap_edge": snap_edge,
+            "split_edge": split_edge,
+            "snap_vertex": int(edges[snap_edge][snap_endpoint]),
+            "split_v0": int(edges[split_edge][0]),
+            "split_v1": int(edges[split_edge][1]),
+            "point": point,
+        }
+
+    def _edge_is_graph_border_like(self, vertices: np.ndarray, edge: np.ndarray) -> bool:
+        if len(vertices) == 0:
+            return False
+        v0, v1 = int(edge[0]), int(edge[1])
+        p0 = vertices[v0]
+        p1 = vertices[v1]
+        min_xy = vertices.min(axis=0)
+        max_xy = vertices.max(axis=0)
+        tolerance = max(2.0, float(self.config.near_endpoint_crossing_snap_px))
+        same_left = abs(float(p0[0] - min_xy[0])) <= tolerance and abs(
+            float(p1[0] - min_xy[0])
+        ) <= tolerance
+        same_right = abs(float(p0[0] - max_xy[0])) <= tolerance and abs(
+            float(p1[0] - max_xy[0])
+        ) <= tolerance
+        same_top = abs(float(p0[1] - min_xy[1])) <= tolerance and abs(
+            float(p1[1] - min_xy[1])
+        ) <= tolerance
+        same_bottom = abs(float(p0[1] - max_xy[1])) <= tolerance and abs(
+            float(p1[1] - max_xy[1])
+        ) <= tolerance
+        return bool(same_left or same_right or same_top or same_bottom)
+
+    def _apply_near_endpoint_crossing_repair(
+        self,
+        vertices: np.ndarray,
+        edges: np.ndarray,
+        edge_support: np.ndarray,
+        edge_assignments: np.ndarray,
+        line_prob: np.ndarray | None,
+        repair: dict[str, int | np.ndarray],
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, bool]:
+        snap_edge = int(repair["snap_edge"])
+        split_edge = int(repair["split_edge"])
+        snap_vertex = int(repair["snap_vertex"])
+        split_v0 = int(repair["split_v0"])
+        split_v1 = int(repair["split_v1"])
+        point = np.asarray(repair["point"], dtype=np.float32)
+
+        updated_vertices = vertices.copy()
+        updated_vertices[snap_vertex] = point
+        snap_v0, snap_v1 = int(edges[snap_edge][0]), int(edges[snap_edge][1])
+        if (
+            np.linalg.norm(updated_vertices[snap_v0] - updated_vertices[snap_v1])
+            < self.config.min_edge_length_px
+        ):
+            return edges, edge_support, edge_assignments, False
+
+        new_edges: list[tuple[int, int]] = []
+        new_support: list[float] = []
+        new_assignments: list[int] = []
+        split_assignment = int(edge_assignments[split_edge])
+        split_support = float(edge_support[split_edge])
+
+        for edge_idx, edge in enumerate(edges):
+            if edge_idx == split_edge:
+                continue
+            v0, v1 = int(edge[0]), int(edge[1])
+            new_edges.append((min(v0, v1), max(v0, v1)))
+            if edge_idx == snap_edge:
+                new_support.append(
+                    self._support_for_vertices(updated_vertices, v0, v1, line_prob, edge_support[edge_idx])
+                )
+            else:
+                new_support.append(float(edge_support[edge_idx]))
+            new_assignments.append(int(edge_assignments[edge_idx]))
+
+        split_added = 0
+        for v0, v1 in ((split_v0, snap_vertex), (snap_vertex, split_v1)):
+            if v0 == v1:
+                continue
+            if np.linalg.norm(updated_vertices[v0] - updated_vertices[v1]) < self.config.min_edge_length_px:
+                continue
+            new_edges.append((min(v0, v1), max(v0, v1)))
+            new_support.append(
+                self._support_for_vertices(updated_vertices, v0, v1, line_prob, split_support)
+            )
+            new_assignments.append(split_assignment)
+            split_added += 1
+
+        if split_added == 0:
+            return edges, edge_support, edge_assignments, False
+
+        vertices[snap_vertex] = point
+        return (
+            np.asarray(new_edges, dtype=np.int64),
+            np.asarray(new_support, dtype=np.float32),
+            np.asarray(new_assignments, dtype=np.int8),
+            True,
+        )
+
+    def _support_for_vertices(
+        self,
+        vertices: np.ndarray,
+        v0: int,
+        v1: int,
+        line_prob: np.ndarray | None,
+        fallback: float,
+    ) -> float:
+        if line_prob is None:
+            return float(fallback)
+        return self._segment_support(vertices[v0], vertices[v1], line_prob)
 
     def _remove_crossing_edges(
         self,
@@ -1042,3 +1311,38 @@ def _proper_segments_intersect(a: np.ndarray, b: np.ndarray, c: np.ndarray, d: n
     if abs(o1) < eps or abs(o2) < eps or abs(o3) < eps or abs(o4) < eps:
         return False
     return (o1 > 0) != (o2 > 0) and (o3 > 0) != (o4 > 0)
+
+
+def _segment_intersection_with_parameters(
+    a: np.ndarray,
+    b: np.ndarray,
+    c: np.ndarray,
+    d: np.ndarray,
+) -> tuple[np.ndarray, float, float] | None:
+    eps = 1e-6
+    p = a.astype(np.float64)
+    r = (b - a).astype(np.float64)
+    q = c.astype(np.float64)
+    s = (d - c).astype(np.float64)
+    denom = float(r[0] * s[1] - r[1] * s[0])
+    if abs(denom) < eps:
+        return None
+    qp = q - p
+    t = float((qp[0] * s[1] - qp[1] * s[0]) / denom)
+    u = float((qp[0] * r[1] - qp[1] * r[0]) / denom)
+    if not (eps < t < 1.0 - eps and eps < u < 1.0 - eps):
+        return None
+    point = p + t * r
+    return point.astype(np.float32), t, u
+
+
+def _near_endpoint(
+    start: np.ndarray,
+    end: np.ndarray,
+    point: np.ndarray,
+    t: float,
+    threshold: float,
+) -> tuple[bool, int]:
+    endpoint_idx = 0 if t <= 0.5 else 1
+    endpoint = start if endpoint_idx == 0 else end
+    return float(np.linalg.norm(endpoint - point)) <= threshold, endpoint_idx

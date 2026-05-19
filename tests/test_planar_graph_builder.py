@@ -159,6 +159,65 @@ def test_planar_cleanup_removes_weaker_crossing_edge():
     assert cleaned_edges.tolist() == [[0, 1]]
 
 
+def test_near_endpoint_crossing_repair_splits_crossed_edge_and_keeps_crease():
+    vertices = np.array(
+        [[10.0, 0.0], [10.0, 10.0], [0.0, 5.0], [10.4, 5.0]],
+        dtype=np.float32,
+    )
+    edges = np.array([[0, 1], [2, 3]], dtype=np.int64)
+    support = np.array([1.0, 0.95], dtype=np.float32)
+    assignments = np.array([2, 0], dtype=np.int8)
+    line_prob = np.ones((16, 16), dtype=np.float32)
+    builder = PlanarGraphBuilder(
+        PlanarGraphBuilderConfig(
+            min_edge_length_px=0.5,
+            planar_split_vertex_distance_px=0.2,
+            repair_near_endpoint_crossings=True,
+            near_endpoint_crossing_snap_px=1.0,
+        )
+    )
+
+    cleaned_edges, cleaned_support, cleaned_assignments, stats = builder._planar_cleanup(
+        vertices,
+        edges,
+        support,
+        assignments,
+        line_prob=line_prob,
+    )
+
+    assert stats["near_endpoint_crossings_repaired"] == 1
+    assert stats["crossing_edges_removed"] == 0
+    assert np.allclose(vertices[3], [10.0, 5.0])
+    assert {tuple(edge) for edge in cleaned_edges.tolist()} == {(0, 3), (1, 3), (2, 3)}
+    assert len({tuple(edge) for edge in cleaned_edges.tolist()}) == len(cleaned_edges)
+    assert all(np.linalg.norm(vertices[v0] - vertices[v1]) >= 0.5 for v0, v1 in cleaned_edges)
+    assert cleaned_support.shape == cleaned_assignments.shape == (3,)
+    assert sorted(cleaned_assignments.tolist()) == [0, 2, 2]
+
+
+def test_near_endpoint_crossing_repair_does_not_invent_interior_junction():
+    vertices = np.array(
+        [[0.0, 0.0], [10.0, 10.0], [0.0, 10.0], [10.0, 0.0]],
+        dtype=np.float32,
+    )
+    edges = np.array([[0, 1], [2, 3]], dtype=np.int64)
+    support = np.array([0.95, 0.75], dtype=np.float32)
+    assignments = np.array([3, 3], dtype=np.int8)
+    builder = PlanarGraphBuilder(
+        PlanarGraphBuilderConfig(
+            min_edge_length_px=1.0,
+            repair_near_endpoint_crossings=True,
+            near_endpoint_crossing_snap_px=1.0,
+        )
+    )
+
+    cleaned_edges, _, _, stats = builder._planar_cleanup(vertices, edges, support, assignments)
+
+    assert stats["near_endpoint_crossings_repaired"] == 0
+    assert stats["crossing_edges_removed"] == 1
+    assert cleaned_edges.tolist() == [[0, 1]]
+
+
 def test_collinear_contraction_merges_degree_two_chain():
     vertices = np.array([[0.0, 0.0], [5.0, 0.2], [10.0, 0.0]], dtype=np.float32)
     edges = np.array([[0, 1], [1, 2]], dtype=np.int64)
