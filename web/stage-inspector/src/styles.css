@@ -113,6 +113,10 @@ button {
   padding: 14px;
 }
 
+.stage4-layout.stage5-layout {
+  grid-template-columns: minmax(320px, 360px) minmax(0, 1fr);
+}
+
 .left-rail,
 .main-workspace {
   min-height: 0;
@@ -122,6 +126,10 @@ button {
   display: grid;
   gap: 12px;
   grid-template-rows: auto auto 1fr;
+}
+
+.main-workspace.stage5-workspace {
+  grid-template-rows: auto 1fr;
 }
 
 .browser-panel,
@@ -341,6 +349,10 @@ input[type="number"] {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   min-height: 0;
   overflow: auto;
+}
+
+.stage5-graph-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .viewer-panel {

@@ -18,11 +18,14 @@ def graph_to_fold_dict(
     report: QualityReport | None = None,
     repair_actions: list[RepairAction] | None = None,
     include_metadata: bool = True,
+    file_creator: str = "cp-detector stage4",
+    metadata_schema: str = "cp-detector/stage4/v1",
+    extra_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Export an attributed graph as a minimal FOLD dictionary."""
     payload: dict[str, Any] = {
         "file_spec": 1.1,
-        "file_creator": "cp-detector stage4",
+        "file_creator": file_creator,
         "file_classes": ["singleModel"],
         "frame_classes": ["creasePattern"],
         "vertices_coords": graph.vertices_coords.astype(float).tolist(),
@@ -36,6 +39,8 @@ def graph_to_fold_dict(
             graph,
             report=report,
             repair_actions=repair_actions,
+            metadata_schema=metadata_schema,
+            extra_metadata=extra_metadata,
         )
     return payload
 
@@ -47,6 +52,9 @@ def save_fold(
     report: QualityReport | None = None,
     repair_actions: list[RepairAction] | None = None,
     include_metadata: bool = True,
+    file_creator: str = "cp-detector stage4",
+    metadata_schema: str = "cp-detector/stage4/v1",
+    extra_metadata: dict[str, Any] | None = None,
 ) -> None:
     """Write a Stage 4 attributed graph to a `.fold` file."""
     path = Path(output_path)
@@ -58,6 +66,9 @@ def save_fold(
                 report=report,
                 repair_actions=repair_actions,
                 include_metadata=include_metadata,
+                file_creator=file_creator,
+                metadata_schema=metadata_schema,
+                extra_metadata=extra_metadata,
             ),
             indent=2,
             sort_keys=True,
@@ -72,12 +83,14 @@ def _metadata_payload(
     *,
     report: QualityReport | None,
     repair_actions: list[RepairAction] | None,
+    metadata_schema: str,
+    extra_metadata: dict[str, Any] | None,
 ) -> dict[str, Any]:
     actions = repair_actions if repair_actions is not None else []
     if report is not None and not actions:
         actions = report.repair_actions
     metadata: dict[str, Any] = {
-        "schema": "cp-detector/stage4/v1",
+        "schema": metadata_schema,
         "status": report.status if report is not None else None,
         "edge_support": graph.edge_support.astype(float).tolist(),
         "assignment_confidence": graph.assignment_confidence.astype(float).tolist(),
@@ -85,6 +98,8 @@ def _metadata_payload(
         "assignment_source": list(graph.assignment_source),
         "repair_actions": [action.to_dict() for action in actions],
     }
+    if extra_metadata:
+        metadata.update(extra_metadata)
     if graph.assignment_probabilities is not None:
         metadata["assignment_probabilities"] = graph.assignment_probabilities.astype(float).tolist()
     if report is not None:

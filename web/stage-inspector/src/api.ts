@@ -22,6 +22,14 @@ export function fetchStage4Diagnostic(exampleKey: string): Promise<Stage4Diagnos
   return requestJson(`/api/stage4/examples/${encodeURIComponent(exampleKey)}`);
 }
 
+export function fetchStage5Examples(): Promise<Stage4ExamplesResponse> {
+  return requestJson("/api/stage5/examples");
+}
+
+export function fetchStage5Diagnostic(exampleKey: string): Promise<Stage4Diagnostic> {
+  return requestJson(`/api/stage5/examples/${encodeURIComponent(exampleKey)}`);
+}
+
 export function recomputeStage4Diagnostic(input: {
   exampleKey: string;
   threshold?: number;

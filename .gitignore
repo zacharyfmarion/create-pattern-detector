@@ -10,6 +10,7 @@ data/ts-generation/node_modules
 tools/synthetic-generator/node_modules
 web/stage-inspector/node_modules
 web/stage-inspector/dist
+outputs/
 .venv
 .venv/
 configs/scraping.env

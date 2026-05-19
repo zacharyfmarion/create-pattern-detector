@@ -31,12 +31,13 @@ interface InspectorState {
 }
 
 export const useInspectorStore = create<InspectorState>((set) => ({
-  activeStage: "stage4",
+  activeStage: "stage5",
   selectedExampleKey: null,
   selectedWarningCode: null,
   selectedEntity: null,
   layers: DEFAULT_LAYERS,
-  setActiveStage: (activeStage) => set({ activeStage }),
+  setActiveStage: (activeStage) =>
+    set({ activeStage, selectedExampleKey: null, selectedEntity: null, selectedWarningCode: null }),
   setSelectedExampleKey: (selectedExampleKey) =>
     set({ selectedExampleKey, selectedEntity: null, selectedWarningCode: null }),
   setSelectedWarningCode: (selectedWarningCode) => set({ selectedWarningCode }),
