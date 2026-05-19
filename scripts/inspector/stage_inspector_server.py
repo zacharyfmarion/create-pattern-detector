@@ -243,6 +243,12 @@ class StageInspectorService:
         summary = self.summary()
         threshold = _float_param(params.get("threshold"), float(summary.get("threshold", 0.65)))
         infer_assignments = bool(params.get("inferAssignments") or summary.get("infer_assignments", False))
+        repair_near_endpoint_crossings = bool(
+            params.get(
+                "repairNearEndpointCrossings",
+                summary.get("repair_near_endpoint_crossings", False),
+            )
+        )
         repair_config = RepairConfig(
             image_size=int(summary.get("image_size", 1024)),
             **_known_config_overrides(params.get("repair") or {}, RepairConfig),
@@ -252,7 +258,11 @@ class StageInspectorService:
             **_known_config_overrides(params.get("report") or {}, QualityReportConfig),
         )
         assignment_config = EdgeAssignmentConfig()
-        builder = make_builder(int(summary.get("image_size", 1024)), threshold)
+        builder = make_builder(
+            int(summary.get("image_size", 1024)),
+            threshold,
+            repair_near_endpoint_crossings=repair_near_endpoint_crossings,
+        )
         batch = self._batch_for_row(row)
         model, device = self._load_model()
         with torch.no_grad(), model_eval_with_batchnorm_mode(
@@ -331,6 +341,7 @@ class StageInspectorService:
         diagnostic["recomputeParams"] = {
             "threshold": threshold,
             "inferAssignments": infer_assignments,
+            "repairNearEndpointCrossings": repair_near_endpoint_crossings,
             "repair": asdict(repair_config),
             "report": asdict(report_config),
         }
@@ -562,7 +573,12 @@ class HttpError(Exception):
         self.message = message
 
 
-def make_builder(image_size: int, threshold: float) -> PlanarGraphBuilder:
+def make_builder(
+    image_size: int,
+    threshold: float,
+    *,
+    repair_near_endpoint_crossings: bool = False,
+) -> PlanarGraphBuilder:
     return PlanarGraphBuilder(
         PlanarGraphBuilderConfig(
             image_size=image_size,
@@ -578,6 +594,7 @@ def make_builder(image_size: int, threshold: float) -> PlanarGraphBuilder:
             direct_edge_max_vertices=256,
             direct_edge_short_max_vertices=512,
             planar_cleanup_max_edges=2500,
+            repair_near_endpoint_crossings=repair_near_endpoint_crossings,
         )
     )
 

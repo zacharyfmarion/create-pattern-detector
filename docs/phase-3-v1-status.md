@@ -85,3 +85,7 @@ unstable graph validity.
 
 Dense Rabbit Ear and other tiny-geometry examples should stay available as a
 separate regression suite, but they should not block Phase 4.
+
+The implemented Stage 4 handoff, setup commands, eval commands, inspector
+workflow, and current caveats are tracked in
+`docs/phase-4-stage4-handoff.md`.

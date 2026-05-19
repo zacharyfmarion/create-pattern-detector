@@ -87,6 +87,12 @@ def parse_args() -> argparse.Namespace:
         default="batch-stats",
     )
     parser.add_argument("--threshold", type=float, default=0.65)
+    parser.add_argument(
+        "--repair-near-endpoint-crossings",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Enable the gated topology repair that snaps near-endpoint crossings before cleanup deletes edges.",
+    )
     parser.add_argument("--max-visuals-per-profile", type=int, default=4)
     parser.add_argument("--infer-assignments", action="store_true")
     return parser.parse_args()
@@ -103,7 +109,11 @@ def main() -> None:
 
     device = select_device(args.device)
     model = load_model(checkpoint, device)
-    builder = make_builder(args.image_size, args.threshold)
+    builder = make_builder(
+        args.image_size,
+        args.threshold,
+        repair_near_endpoint_crossings=args.repair_near_endpoint_crossings,
+    )
     assignment_config = EdgeAssignmentConfig()
     repair_config = RepairConfig(image_size=args.image_size)
     report_config = QualityReportConfig(image_size=args.image_size)
@@ -339,7 +349,12 @@ def select_device(requested: str) -> torch.device:
     return device
 
 
-def make_builder(image_size: int, threshold: float) -> PlanarGraphBuilder:
+def make_builder(
+    image_size: int,
+    threshold: float,
+    *,
+    repair_near_endpoint_crossings: bool = False,
+) -> PlanarGraphBuilder:
     return PlanarGraphBuilder(
         PlanarGraphBuilderConfig(
             image_size=image_size,
@@ -355,6 +370,7 @@ def make_builder(image_size: int, threshold: float) -> PlanarGraphBuilder:
             direct_edge_max_vertices=256,
             direct_edge_short_max_vertices=512,
             planar_cleanup_max_edges=2500,
+            repair_near_endpoint_crossings=repair_near_endpoint_crossings,
         )
     )
 
@@ -429,6 +445,7 @@ def build_summary(
         "samples_per_profile": args.samples_per_profile,
         "family_sampling": args.family_sampling,
         "threshold": args.threshold,
+        "repair_near_endpoint_crossings": bool(args.repair_near_endpoint_crossings),
         "batchnorm_mode": args.batchnorm_mode,
         "image_size": args.image_size,
         "max_edges": args.max_edges,
