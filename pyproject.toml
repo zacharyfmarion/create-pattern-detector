@@ -52,6 +52,7 @@ dev = [
 cp-train = "scripts.train:main"
 cp-evaluate = "scripts.evaluate:main"
 cp-predict = "scripts.inference:main"
+cp-detect = "src.inference.cli:main"
 
 [build-system]
 requires = ["hatchling"]

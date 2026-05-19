@@ -13,6 +13,26 @@ links it into the current worktree as `.venv`.
 
 ## Usage
 
+### Detect A CP Image
+
+```bash
+cp-detect --rectified input.png \
+  --output output.fold \
+  --report output.report.json \
+  --debug-dir debug/
+```
+
+Phase 5 supports readable CP images and page/screenshot images with a visible
+crease-pattern border. The rectifier crops the CP panel, perspective-warps it to
+the canonical square, preserves the detected border inside a small clean margin,
+and falls back to resize/pad only when the panel cannot be detected confidently.
+Full arbitrary photo/document rectification remains Phase 6. Transparent inputs
+use `--alpha-matte auto` by default so dark-mode CPs are not flattened onto white
+unless the matte is truly ambiguous.
+
+See `docs/phase-5-inference-cli.md` for checkpoint recovery, output layout, and
+debug artifacts.
+
 ### Validate Pipeline
 
 ```bash

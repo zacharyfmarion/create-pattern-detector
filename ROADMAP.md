@@ -54,7 +54,9 @@ cp-detect input.png --output output.fold --report output.report.json --debug-dir
 Inputs:
 
 - A photo, scan, or rendered crease pattern image.
-- Optional flag for already-rectified square images.
+- Current Stage 5 flag: `--rectified` for readable CP images or page/screenshot
+  images where the CP panel has a visible border. Later phases should remove the
+  need for that hint on arbitrary photos/scans.
 
 Outputs:
 
@@ -102,12 +104,27 @@ Browser success criteria:
 
 Purpose: convert the input into a canonical square image and preserve the inverse transform.
 
-Initial implementation:
+Implemented Stage 5 behavior:
 
-- If `--rectified` is passed, trust the input and resize/pad to canonical resolution.
-- Otherwise detect the outer square using border/contour/Hough evidence.
-- Estimate a homography to a `1024 x 1024` canonical image.
-- Fail gracefully if corner confidence is low.
+- `--rectified` means the input is a readable CP image or page/screenshot with a
+  visible CP panel. The rectifier no longer blindly pads the whole page first.
+- It applies EXIF orientation, normalizes RGB/grayscale/RGBA inputs, composites
+  transparency with an explicit or inferred alpha matte, and infers padding color
+  from the image instead of assuming a white background. This preserves
+  dark-mode crease-pattern support.
+- It detects visible square/quadrilateral CP-panel borders using
+  contour/long-line evidence, square/aspect scoring, interior crease density,
+  and line coverage, then estimates a homography to a `1024 x 1024` canonical
+  image.
+- It maps the detected CP border to the Phase 3 training-style inset margin,
+  currently 32 px at 1024, and fills the outside ring with the inferred padding
+  color so thin border pixels remain detectable instead of being clipped at the
+  exact image edge.
+- If panel confidence is low, it falls back to resize/pad and records that
+  lower-confidence transform instead of pretending a crop occurred.
+- Phase 6 remains responsible for arbitrary real-photo/document rectification,
+  faint/occluded panels, multiple competing panels, and benchmark-driven
+  robustness.
 
 Outputs:
 
@@ -509,15 +526,37 @@ Exit criteria:
 
 Goal: one command from image to FOLD.
 
+Status: implemented and updated. The Stage 5 implementation adds the Python
+inference package and `cp-detect` CLI around the blessed Phase 3 V1 checkpoint
+and Stage 4 assignment/repair/report/FOLD export stack. The supported mode is
+still `--rectified`, but it now includes visible CP-panel isolation and
+perspective warping for page/screenshot inputs; arbitrary real-photo discovery
+and benchmarked robustness remain Phase 6.
+
 Tasks:
 
 - Implement `src/inference` pipeline using the exact component contract above.
 - Add CLI command `cp-detect`.
-- First support `cp-detect --rectified` for already-square readable CP inputs;
-  full photo rectification and benchmark-driven robustness remain Phase 6.
+- Support `cp-detect --rectified` for already-square readable CP inputs and
+  page/screenshot inputs with a visible CP-panel border; full arbitrary photo
+  rectification and benchmark-driven robustness remain Phase 6.
 - Save debug artifacts and JSON reports.
 - Add batch inference mode.
 - Add regression tests on fixed images.
+- Recover the blessed local checkpoint from the main checkout when needed:
+  `/Users/zacharymarion/Documents/code/create-pattern-detector/checkpoints/runpod_phase3_curriculum/stage-balanced/latest.pt`.
+- Verify the checkpoint against `artifacts/checkpoints/phase3-v1-cpline.json`
+  before using it for inference or checkpoint-gated tests.
+- Keep alpha handling dark-mode friendly: opaque images preserve their pixels;
+  transparent inputs use `--alpha-matte auto|white|black`, defaulting to auto
+  matte inference with report warnings when it must fall back.
+- Crop titles, model diagrams, and surrounding page content out of detected CP
+  panels before CPLineNet inference; record source quads and homographies in the
+  report metadata.
+- Preserve CP border pixels during panel warp by targeting a small inset border
+  margin and recording both source and target quads in metadata.
+- Make `failed` outputs explicit by writing reports/debug artifacts without
+  silently writing invalid `.fold` files.
 
 Exit criteria:
 
@@ -532,7 +571,9 @@ Goal: handle scans/photos without destroying synthetic performance.
 Tasks:
 
 - Build a small real benchmark of 25 to 100 manually corrected CP images.
-- Add rectification tests.
+- Add rectification tests for difficult real photos, faint borders, curved pages,
+  multiple CP panels, and no-border examples that exceed the Stage 5 heuristic
+  envelope.
 - Fine-tune CPLineNet on mixed synthetic and real examples after Phase 3
   augmentation gates are stable.
 
