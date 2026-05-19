@@ -44,10 +44,12 @@ from src.vectorization import (  # noqa: E402
 )
 
 DEFAULT_EVAL_DIR = Path("visualizations/stage4_checkpoint_eval/phase3_stage4_1024_n24x6")
+DEFAULT_STAGE5_EVAL_DIR = Path("visualizations/stage5_scraped_inspector/eval")
 DEFAULT_CHECKPOINT = Path("checkpoints/runpod_phase3_curriculum/stage-balanced/latest.pt")
 DEFAULT_MANIFEST = Path("data/generated/synthetic/cp_training_mix_v1/raw-manifest.jsonl")
 DEFAULT_DIST = Path("web/stage-inspector/dist")
 DEFAULT_CACHE = Path("visualizations/stage4_inspector/cache")
+DEFAULT_STAGE5_CACHE = Path("visualizations/stage5_scraped_inspector/cache")
 
 
 def parse_args() -> argparse.Namespace:
@@ -55,10 +57,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--eval-dir", type=Path, default=DEFAULT_EVAL_DIR)
+    parser.add_argument("--stage5-eval-dir", type=Path, default=DEFAULT_STAGE5_EVAL_DIR)
     parser.add_argument("--checkpoint", type=Path, default=DEFAULT_CHECKPOINT)
     parser.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
     parser.add_argument("--frontend-dist", type=Path, default=DEFAULT_DIST)
     parser.add_argument("--cache-dir", type=Path, default=DEFAULT_CACHE)
+    parser.add_argument("--stage5-cache-dir", type=Path, default=DEFAULT_STAGE5_CACHE)
     parser.add_argument("--device", choices=["auto", "mps", "cuda", "cpu"], default="auto")
     return parser.parse_args()
 
@@ -72,10 +76,21 @@ def main() -> None:
         cache_dir=_resolve(args.cache_dir),
         device_request=args.device,
     )
+    stage5_eval_dir = _resolve(args.stage5_eval_dir)
+    stage5_cache_dir = _resolve(args.stage5_cache_dir)
+    stage5_service = None
+    if (stage5_eval_dir / "summary.json").exists() and (
+        stage5_eval_dir / "per_sample_metrics.jsonl"
+    ).exists():
+        stage5_service = CachedInspectorService(
+            eval_dir=stage5_eval_dir,
+            cache_dir=stage5_cache_dir,
+        )
     dist_dir = _resolve(args.frontend_dist)
 
     class Handler(StageInspectorHandler):
-        inspector = service
+        stage4_inspector = service
+        stage5_inspector = stage5_service
         frontend_dist = dist_dir
 
     server = ThreadingHTTPServer((args.host, args.port), Handler)
@@ -110,34 +125,7 @@ class StageInspectorService:
         self._device: torch.device | None = None
 
     def stages(self) -> dict[str, Any]:
-        return {
-            "stages": [
-                {
-                    "id": "stage1",
-                    "label": "Stage 1",
-                    "title": "Synthetic Data",
-                    "status": "scaffolded",
-                },
-                {
-                    "id": "stage2",
-                    "label": "Stage 2",
-                    "title": "Deterministic Vectorizer",
-                    "status": "scaffolded",
-                },
-                {
-                    "id": "stage3",
-                    "label": "Stage 3",
-                    "title": "CPLineNet Evidence",
-                    "status": "scaffolded",
-                },
-                {
-                    "id": "stage4",
-                    "label": "Stage 4",
-                    "title": "Assignments, Repair, Reports",
-                    "status": "implemented",
-                },
-            ]
-        }
+        return stage_payload(stage5_available=False)
 
     def examples_index(self) -> dict[str, Any]:
         rows = [self._row_for_client(row) for row in self.rows()]
@@ -447,8 +435,54 @@ class StageInspectorService:
         return "/api/assets/" + path.relative_to(REPO_ROOT).as_posix()
 
 
+class CachedInspectorService(StageInspectorService):
+    """Read cached diagnostics for real-image inspector runs.
+
+    Stage 5 scraped examples are produced by `cp-detect`, not the synthetic
+    Stage 4 replay path, so recomputation is intentionally disabled here.
+    """
+
+    def __init__(self, *, eval_dir: Path, cache_dir: Path) -> None:
+        self.eval_dir = eval_dir
+        self.checkpoint = Path()
+        self.manifest = Path()
+        self.cache_dir = cache_dir
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self.device_request = "cpu"
+        self._summary: dict[str, Any] | None = None
+        self._rows: list[dict[str, Any]] | None = None
+        self._model = None
+        self._device = None
+
+    def recompute(self, body: dict[str, Any]) -> dict[str, Any]:
+        raise HttpError(
+            HTTPStatus.BAD_REQUEST,
+            "Stage 5 scraped examples are cached cp-detect outputs; rerun cp-detect to recompute.",
+        )
+
+    def _diagnostic_for_row(
+        self,
+        row: dict[str, Any],
+        *,
+        params: dict[str, Any],
+        force: bool,
+    ) -> dict[str, Any]:
+        cache_key = _cache_key(row, {})
+        diagnostic_path = self.cache_dir / "diagnostics" / f"{cache_key}.json"
+        if not diagnostic_path.exists():
+            raise HttpError(
+                HTTPStatus.NOT_FOUND,
+                f"Cached Stage 5 diagnostic not found: {diagnostic_path.relative_to(REPO_ROOT)}",
+            )
+        diagnostic = json.loads(diagnostic_path.read_text(encoding="utf-8"))
+        diagnostic["stage"] = "stage5"
+        diagnostic["cache"] = {"hit": True, "key": cache_key}
+        return diagnostic
+
+
 class StageInspectorHandler(SimpleHTTPRequestHandler):
-    inspector: StageInspectorService
+    stage4_inspector: StageInspectorService
+    stage5_inspector: CachedInspectorService | None
     frontend_dist: Path
 
     def do_GET(self) -> None:  # noqa: N802
@@ -456,12 +490,17 @@ class StageInspectorHandler(SimpleHTTPRequestHandler):
             parsed = urlparse(self.path)
             path = unquote(parsed.path)
             if path == "/api/stages":
-                return self._send_json(self.inspector.stages())
+                return self._send_json(stage_payload(stage5_available=self.stage5_inspector is not None))
             if path == "/api/stage4/examples":
-                return self._send_json(self.inspector.examples_index())
+                return self._send_json(self.stage4_inspector.examples_index())
             if path.startswith("/api/stage4/examples/"):
                 key = path.removeprefix("/api/stage4/examples/")
-                return self._send_json(self.inspector.get_example(key))
+                return self._send_json(self.stage4_inspector.get_example(key))
+            if path == "/api/stage5/examples":
+                return self._send_json(self._stage5().examples_index())
+            if path.startswith("/api/stage5/examples/"):
+                key = path.removeprefix("/api/stage5/examples/")
+                return self._send_json(self._stage5().get_example(key))
             if path.startswith("/api/assets/"):
                 asset = path.removeprefix("/api/assets/")
                 return self._send_asset(asset)
@@ -479,7 +518,9 @@ class StageInspectorHandler(SimpleHTTPRequestHandler):
             path = unquote(parsed.path)
             body = self._read_json_body()
             if path == "/api/stage4/recompute":
-                return self._send_json(self.inspector.recompute(body))
+                return self._send_json(self.stage4_inspector.recompute(body))
+            if path == "/api/stage5/recompute":
+                return self._send_json(self._stage5().recompute(body))
             raise HttpError(HTTPStatus.NOT_FOUND, f"Unknown API route: {path}")
         except HttpError as exc:
             self._send_error_json(exc.status, exc.message)
@@ -519,9 +560,16 @@ class StageInspectorHandler(SimpleHTTPRequestHandler):
     def _send_asset(self, asset: str) -> None:
         path = (REPO_ROOT / asset).resolve()
         allowed_roots = [
-            self.inspector.cache_dir.resolve(),
-            self.inspector.eval_dir.resolve(),
+            self.stage4_inspector.cache_dir.resolve(),
+            self.stage4_inspector.eval_dir.resolve(),
         ]
+        if self.stage5_inspector is not None:
+            allowed_roots.extend(
+                [
+                    self.stage5_inspector.cache_dir.resolve(),
+                    self.stage5_inspector.eval_dir.resolve(),
+                ]
+            )
         if not any(_is_relative_to(path, root) for root in allowed_roots):
             raise HttpError(HTTPStatus.FORBIDDEN, "Asset path is outside inspector asset roots")
         if not path.exists() or not path.is_file():
@@ -564,6 +612,14 @@ class StageInspectorHandler(SimpleHTTPRequestHandler):
 
     def log_message(self, format: str, *args: Any) -> None:
         sys.stderr.write("[stage-inspector] " + format % args + "\n")
+
+    def _stage5(self) -> CachedInspectorService:
+        if self.stage5_inspector is None:
+            raise HttpError(
+                HTTPStatus.NOT_FOUND,
+                "Stage 5 inspector data not found. Generate visualizations/stage5_scraped_inspector first.",
+            )
+        return self.stage5_inspector
 
 
 class HttpError(Exception):
@@ -612,6 +668,43 @@ def select_device(requested: str) -> torch.device:
     if device.type == "cuda" and not torch.cuda.is_available():
         raise HttpError(HTTPStatus.BAD_REQUEST, "CUDA requested but unavailable")
     return device
+
+
+def stage_payload(*, stage5_available: bool) -> dict[str, Any]:
+    return {
+        "stages": [
+            {
+                "id": "stage1",
+                "label": "Stage 1",
+                "title": "Synthetic Data",
+                "status": "scaffolded",
+            },
+            {
+                "id": "stage2",
+                "label": "Stage 2",
+                "title": "Deterministic Vectorizer",
+                "status": "scaffolded",
+            },
+            {
+                "id": "stage3",
+                "label": "Stage 3",
+                "title": "CPLineNet Evidence",
+                "status": "scaffolded",
+            },
+            {
+                "id": "stage4",
+                "label": "Stage 4",
+                "title": "Assignments, Repair, Reports",
+                "status": "implemented",
+            },
+            {
+                "id": "stage5",
+                "label": "Stage 5",
+                "title": "Production Inference CLI",
+                "status": "implemented" if stage5_available else "scaffolded",
+            },
+        ]
+    }
 
 
 def _resolve(path: Path) -> Path:

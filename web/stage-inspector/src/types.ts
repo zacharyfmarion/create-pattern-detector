@@ -102,7 +102,7 @@ export interface GraphEdge {
 
 export interface Stage4Diagnostic {
   key: string;
-  stage: "stage4";
+  stage: "stage4" | "stage5";
   imageUrl: string;
   imageSize: number;
   row: Record<string, unknown>;

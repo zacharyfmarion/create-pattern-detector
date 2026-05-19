@@ -29,6 +29,8 @@ import {
 import {
   fetchStage4Diagnostic,
   fetchStage4Examples,
+  fetchStage5Diagnostic,
+  fetchStage5Examples,
   fetchStages,
   recomputeStage4Diagnostic,
 } from "./api";
@@ -46,6 +48,7 @@ const STAGE_COPY: Record<string, string> = {
   stage1: "Synthetic dataset composition, generation failures, and fold distribution checks.",
   stage2: "Deterministic vectorizer behavior on clean evidence maps and curated/stress fixtures.",
   stage3: "CPLineNet dense line, junction, angle, and assignment evidence from the Phase 3 checkpoint.",
+  stage5: "Production cp-detect runs on real scraped CP images, including rectification, reports, and FOLD export.",
 };
 
 const LAYER_LABELS: Record<LayerKey, string> = {
@@ -96,7 +99,13 @@ export function App() {
       </nav>
 
       <main className="stage-body">
-        {activeStage === "stage4" ? <Stage4Explorer /> : <ScaffoldStage stageId={activeStage} />}
+        {activeStage === "stage4" ? (
+          <InspectorExplorer stage="stage4" />
+        ) : activeStage === "stage5" ? (
+          <InspectorExplorer stage="stage5" />
+        ) : (
+          <ScaffoldStage stageId={activeStage} />
+        )}
       </main>
     </div>
   );
@@ -114,96 +123,101 @@ function ScaffoldStage({ stageId }: { stageId: string }) {
   );
 }
 
-function Stage4Explorer() {
+function InspectorExplorer({ stage }: { stage: "stage4" | "stage5" }) {
   const queryClient = useQueryClient();
   const selectedKey = useInspectorStore((state) => state.selectedExampleKey);
   const setSelectedKey = useInspectorStore((state) => state.setSelectedExampleKey);
   const [threshold, setThreshold] = useState(0.65);
   const [inferAssignments, setInferAssignments] = useState(false);
   const examplesQuery = useQuery({
-    queryKey: ["stage4-examples"],
-    queryFn: fetchStage4Examples,
+    queryKey: [stage, "examples"],
+    queryFn: stage === "stage4" ? fetchStage4Examples : fetchStage5Examples,
   });
   const diagnosticQuery = useQuery({
-    queryKey: ["stage4-diagnostic", selectedKey],
-    queryFn: () => fetchStage4Diagnostic(selectedKey!),
+    queryKey: [stage, "diagnostic", selectedKey],
+    queryFn: () =>
+      stage === "stage4" ? fetchStage4Diagnostic(selectedKey!) : fetchStage5Diagnostic(selectedKey!),
     enabled: Boolean(selectedKey),
   });
   const recomputeMutation = useMutation({
     mutationFn: recomputeStage4Diagnostic,
     onSuccess: (diagnostic) => {
-      queryClient.setQueryData(["stage4-diagnostic", diagnostic.key], diagnostic);
+      queryClient.setQueryData([stage, "diagnostic", diagnostic.key], diagnostic);
     },
   });
 
   useEffect(() => {
     if (!selectedKey && examplesQuery.data?.rows.length) {
-      const rabbitEarStress =
-        examplesQuery.data.rows.find(
-          (row) =>
-            row.family === "rabbit-ear-fold-program" &&
-            row.warnings.includes("very_short_edges") &&
-            row.warnings.includes("crowded_junctions"),
-        ) ?? examplesQuery.data.rows[0];
-      setSelectedKey(rabbitEarStress.key);
+      const preferred =
+        stage === "stage4"
+          ? examplesQuery.data.rows.find(
+              (row) =>
+                row.family === "rabbit-ear-fold-program" &&
+                row.warnings.includes("very_short_edges") &&
+                row.warnings.includes("crowded_junctions"),
+            )
+          : examplesQuery.data.rows.find((row) => row.status === "ambiguous");
+      setSelectedKey((preferred ?? examplesQuery.data.rows[0]).key);
     }
-  }, [examplesQuery.data, selectedKey, setSelectedKey]);
+  }, [examplesQuery.data, selectedKey, setSelectedKey, stage]);
 
   const diagnostic = diagnosticQuery.data;
   const rows = examplesQuery.data?.rows ?? [];
 
   return (
-    <section className="stage4-layout">
+    <section className={clsx("stage4-layout", stage === "stage5" && "stage5-layout")}>
       <aside className="left-rail">
-        <ExampleBrowser rows={rows} isLoading={examplesQuery.isLoading} />
+        <ExampleBrowser rows={rows} isLoading={examplesQuery.isLoading} stage={stage} />
       </aside>
-      <section className="main-workspace">
-        <Stage4Summary rows={rows} diagnostic={diagnostic} />
-        <div className="controls-band">
-          <LayerToggles />
-          <div className="recompute-controls">
-            <label>
-              threshold
-              <input
-                type="number"
-                min={0.05}
-                max={0.95}
-                step={0.01}
-                value={threshold}
-                onChange={(event) => setThreshold(Number(event.target.value))}
-              />
-            </label>
-            <label className="checkbox-row">
-              <input
-                type="checkbox"
-                checked={inferAssignments}
-                onChange={(event) => setInferAssignments(event.target.checked)}
-              />
-              infer M/V
-            </label>
-            <button
-              className="primary-button"
-              disabled={!selectedKey || recomputeMutation.isPending}
-              onClick={() =>
-                selectedKey &&
-                recomputeMutation.mutate({
-                  exampleKey: selectedKey,
-                  threshold,
-                  inferAssignments,
-                })
-              }
-            >
-              <RefreshCw size={16} />
-              recompute
-            </button>
+      <section className={clsx("main-workspace", stage === "stage5" && "stage5-workspace")}>
+        <StageSummary rows={rows} diagnostic={diagnostic} stage={stage} />
+        {stage === "stage4" && (
+          <div className="controls-band">
+            <LayerToggles />
+            <div className="recompute-controls">
+              <label>
+                threshold
+                <input
+                  type="number"
+                  min={0.05}
+                  max={0.95}
+                  step={0.01}
+                  value={threshold}
+                  onChange={(event) => setThreshold(Number(event.target.value))}
+                />
+              </label>
+              <label className="checkbox-row">
+                <input
+                  type="checkbox"
+                  checked={inferAssignments}
+                  onChange={(event) => setInferAssignments(event.target.checked)}
+                />
+                infer M/V
+              </label>
+              <button
+                className="primary-button"
+                disabled={!selectedKey || recomputeMutation.isPending}
+                onClick={() =>
+                  selectedKey &&
+                  recomputeMutation.mutate({
+                    exampleKey: selectedKey,
+                    threshold,
+                    inferAssignments,
+                  })
+                }
+              >
+                <RefreshCw size={16} />
+                recompute
+              </button>
+            </div>
           </div>
-        </div>
+        )}
         {diagnosticQuery.isLoading ? (
-          <div className="loading-panel">Computing Stage 4 diagnostics...</div>
+          <div className="loading-panel">Loading {stage === "stage4" ? "Stage 4" : "Stage 5"} diagnostics...</div>
         ) : diagnosticQuery.isError ? (
           <div className="error-panel">{String(diagnosticQuery.error)}</div>
         ) : diagnostic ? (
-          <GraphWorkspace diagnostic={diagnostic} />
+          <GraphWorkspace diagnostic={diagnostic} stage={stage} />
         ) : (
           <div className="loading-panel">Select an example to inspect.</div>
         )}
@@ -212,12 +226,14 @@ function Stage4Explorer() {
   );
 }
 
-function Stage4Summary({
+function StageSummary({
   rows,
   diagnostic,
+  stage,
 }: {
   rows: Stage4ExampleRow[];
   diagnostic?: Stage4Diagnostic;
+  stage: "stage4" | "stage5";
 }) {
   const statusData = useMemo(() => {
     const counts = rows.reduce<Record<string, number>>((acc, row) => {
@@ -230,11 +246,29 @@ function Stage4Summary({
   return (
     <section className="summary-strip">
       <MetricTile label="status" value={diagnostic?.status ?? "loading"} />
-      <MetricTile label="edge P/R" value={formatPair(diagnostic, "edge_precision", "edge_recall")} />
-      <MetricTile
-        label="assignment"
-        value={formatPercent(metricNumber(diagnostic, "assignment_accuracy"))}
-      />
+      {stage === "stage4" ? (
+        <>
+          <MetricTile label="edge P/R" value={formatPair(diagnostic, "edge_precision", "edge_recall")} />
+          <MetricTile
+            label="assignment"
+            value={formatPercent(metricNumber(diagnostic, "assignment_accuracy"))}
+          />
+        </>
+      ) : (
+        <>
+          <MetricTile
+            label="pred V/E"
+            value={`${metricNumber(diagnostic, "pred_vertices").toFixed(0)} / ${metricNumber(
+              diagnostic,
+              "pred_edges",
+            ).toFixed(0)}`}
+          />
+          <MetricTile
+            label="rectifier"
+            value={String(diagnostic?.metrics.rectification_mode ?? "loading")}
+          />
+        </>
+      )}
       <MetricTile
         label="structural"
         value={diagnostic?.structuralValidity?.valid ? "valid" : "warning"}
@@ -266,9 +300,11 @@ function MetricTile({ label, value }: { label: string; value: string }) {
 function ExampleBrowser({
   rows,
   isLoading,
+  stage,
 }: {
   rows: Stage4ExampleRow[];
   isLoading: boolean;
+  stage: "stage4" | "stage5";
 }) {
   const selectedKey = useInspectorStore((state) => state.selectedExampleKey);
   const setSelectedKey = useInspectorStore((state) => state.setSelectedExampleKey);
@@ -310,17 +346,19 @@ function ExampleBrowser({
         cell: ({ getValue }) => <StatusPill status={String(getValue())} />,
       },
       {
-        header: "Edge R",
+        header: stage === "stage4" ? "Edge R" : "Pred E",
         accessorKey: "edgeRecall",
-        cell: ({ getValue }) => formatPercent(Number(getValue())),
+        cell: ({ row, getValue }) =>
+          stage === "stage4" ? formatPercent(Number(getValue())) : row.original.predEdges,
       },
       {
-        header: "Assign",
+        header: stage === "stage4" ? "Assign" : "Unknown",
         accessorKey: "assignmentAccuracy",
-        cell: ({ getValue }) => formatPercent(Number(getValue())),
+        cell: ({ row, getValue }) =>
+          stage === "stage4" ? formatPercent(Number(getValue())) : row.original.unknownEdges,
       },
     ],
-    [],
+    [stage],
   );
   const table = useReactTable({
     data: filtered,
@@ -345,7 +383,7 @@ function ExampleBrowser({
         <SelectFilter label="status" value={status} options={statuses} onChange={setStatus} />
         <SelectFilter label="warning" value={warning} options={warnings} onChange={setWarning} />
       </div>
-      <PresetButtons rows={rows} />
+      <PresetButtons rows={rows} stage={stage} />
       <div className="table-wrap">
         {isLoading ? (
           <div className="loading-panel">Loading examples...</div>
@@ -382,31 +420,47 @@ function ExampleBrowser({
   );
 }
 
-function PresetButtons({ rows }: { rows: Stage4ExampleRow[] }) {
+function PresetButtons({ rows, stage }: { rows: Stage4ExampleRow[]; stage: "stage4" | "stage5" }) {
   const setSelectedKey = useInspectorStore((state) => state.setSelectedExampleKey);
-  const presets = [
-    {
-      label: "worst Rabbit Ear",
-      select: () =>
-        rows
-          .filter((row) => row.family === "rabbit-ear-fold-program")
-          .sort((a, b) => a.edgeRecall - b.edgeRecall)[0],
-    },
-    {
-      label: "theorem-heavy",
-      select: () =>
-        rows.find(
-          (row) =>
-            row.warnings.includes("even_degree_failures") &&
-            row.warnings.includes("kawasaki_residuals") &&
-            row.warnings.includes("maekawa_failures"),
-        ),
-    },
-    {
-      label: "low confidence",
-      select: () => rows.find((row) => row.warnings.includes("low_confidence_assignments")),
-    },
-  ];
+  const presets =
+    stage === "stage4"
+      ? [
+          {
+            label: "worst Rabbit Ear",
+            select: () =>
+              rows
+                .filter((row) => row.family === "rabbit-ear-fold-program")
+                .sort((a, b) => a.edgeRecall - b.edgeRecall)[0],
+          },
+          {
+            label: "theorem-heavy",
+            select: () =>
+              rows.find(
+                (row) =>
+                  row.warnings.includes("even_degree_failures") &&
+                  row.warnings.includes("kawasaki_residuals") &&
+                  row.warnings.includes("maekawa_failures"),
+              ),
+          },
+          {
+            label: "low confidence",
+            select: () => rows.find((row) => row.warnings.includes("low_confidence_assignments")),
+          },
+        ]
+      : [
+          {
+            label: "ambiguous",
+            select: () => rows.find((row) => row.status === "ambiguous"),
+          },
+          {
+            label: "dense output",
+            select: () => [...rows].sort((a, b) => b.predEdges - a.predEdges)[0],
+          },
+          {
+            label: "low confidence",
+            select: () => rows.find((row) => row.warnings.includes("low_confidence_assignments")),
+          },
+        ];
   return (
     <div className="preset-row">
       {presets.map((preset) => (
@@ -450,7 +504,22 @@ function SelectFilter({
   );
 }
 
-function GraphWorkspace({ diagnostic }: { diagnostic: Stage4Diagnostic }) {
+function GraphWorkspace({
+  diagnostic,
+  stage,
+}: {
+  diagnostic: Stage4Diagnostic;
+  stage: "stage4" | "stage5";
+}) {
+  if (stage === "stage5") {
+    return (
+      <section className="graph-grid stage5-graph-grid">
+        <GraphCanvas diagnostic={diagnostic} mode="input" title="Input image" />
+        <GraphCanvas diagnostic={diagnostic} mode="pred" title="Predicted result" />
+      </section>
+    );
+  }
+
   return (
     <section className="graph-grid">
       <GraphCanvas diagnostic={diagnostic} mode="input" title="Input image" />
