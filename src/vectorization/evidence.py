@@ -35,15 +35,40 @@ def render_vectorizer_evidence(
     nearly all vertices in the scraped native corpus.
     """
     pixel_vertices, _ = transform_coords(cp.vertices, image_size=image_size, padding=padding)
+    return render_vectorizer_evidence_from_pixels(
+        pixel_vertices=pixel_vertices,
+        edges=cp.edges,
+        assignments=cp.assignments,
+        image_size=image_size,
+        line_width=line_width,
+        junction_sigma=junction_sigma,
+        junction_radius=junction_radius,
+    )
+
+
+def render_vectorizer_evidence_from_pixels(
+    *,
+    pixel_vertices: np.ndarray,
+    edges: np.ndarray,
+    assignments: np.ndarray,
+    image_size: int = 1024,
+    line_width: int = 2,
+    junction_sigma: float = 2.0,
+    junction_radius: float = 4.0,
+) -> RenderedVectorizerEvidence:
+    """Render vectorizer evidence from pixel-space graph geometry."""
+    pixel_vertices = np.asarray(pixel_vertices, dtype=np.float32)
+    edges = np.asarray(edges, dtype=np.int64)
+    assignments = np.asarray(assignments, dtype=np.int8)
     line_prob = np.zeros((image_size, image_size), dtype=np.float32)
     assignment_labels = np.zeros((image_size, image_size), dtype=np.uint8)
     assignment_priority = np.zeros((image_size, image_size), dtype=np.uint8)
     angle = np.zeros((image_size, image_size, 2), dtype=np.float32)
 
-    for edge_idx, (v1_idx, v2_idx) in enumerate(cp.edges):
+    for edge_idx, (v1_idx, v2_idx) in enumerate(edges):
         p0 = pixel_vertices[v1_idx]
         p1 = pixel_vertices[v2_idx]
-        assignment_label = int(cp.assignments[edge_idx]) + 1
+        assignment_label = int(assignments[edge_idx]) + 1
         start = (int(round(float(p0[0]))), int(round(float(p0[1]))))
         end = (int(round(float(p1[0]))), int(round(float(p1[1]))))
 
@@ -68,7 +93,7 @@ def render_vectorizer_evidence(
 
     heatmap = np.zeros((image_size, image_size), dtype=np.float32)
     degrees = np.zeros(len(pixel_vertices), dtype=np.int32)
-    for v1_idx, v2_idx in cp.edges:
+    for v1_idx, v2_idx in edges:
         degrees[v1_idx] += 1
         degrees[v2_idx] += 1
 
@@ -79,8 +104,8 @@ def render_vectorizer_evidence(
 
     canonical_edges, canonical_assignments = _canonicalize_metric_edges(
         pixel_vertices,
-        cp.edges,
-        cp.assignments,
+        edges,
+        assignments,
     )
 
     return RenderedVectorizerEvidence(

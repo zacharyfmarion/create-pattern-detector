@@ -1,17 +1,21 @@
 """
-Pixel-level prediction head for crease pattern detection.
+Deprecated pixel-level prediction head for crease pattern detection.
 
 Outputs:
 1. Segmentation: 5-class per-pixel classification (BG, M, V, B, U)
 2. Orientation: 2-channel direction field (cos θ, sin θ)
 3. Junction heatmap: Single-channel heatmap for vertex detection
 4. Junction offset: 2-channel sub-pixel offset (dx, dy) for refined vertex positions
+
+Roadmap Phase 3 uses CPLineNet with separate line geometry and assignment
+targets. This head remains only for legacy training scripts/tests.
 """
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from typing import Dict
+import warnings
 
 
 class ConvBNReLU(nn.Module):
@@ -67,6 +71,11 @@ class PixelHead(nn.Module):
             output_stride: Backbone output stride (for upsampling)
         """
         super().__init__()
+        warnings.warn(
+            "PixelHead is deprecated; use CPLineNet heads for Phase 3 training.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
 
         self.output_stride = output_stride
         self.num_seg_classes = num_seg_classes

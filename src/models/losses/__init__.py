@@ -1,5 +1,6 @@
 """Loss functions for crease pattern detection."""
 
+from .cpline_loss import CPLineLoss, CPLineLossConfig
 from .pixel_loss import (
     SegmentationLoss,
     OrientationLoss,
@@ -15,6 +16,8 @@ from .graph_loss import (
 
 __all__ = [
     "SegmentationLoss",
+    "CPLineLoss",
+    "CPLineLossConfig",
     "OrientationLoss",
     "JunctionLoss",
     "PixelLoss",

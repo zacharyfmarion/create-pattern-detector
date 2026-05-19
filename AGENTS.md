@@ -101,3 +101,24 @@ PYTHONPATH=. python3.10 scripts/data/smoke_shared_synthetic_data.py --root data/
 
 See `docs/synthetic-fold-datasets.md` for generation, shard merge, folded-preview,
 and mix-building commands.
+
+## Checkpoint Registry
+
+Do not commit model weights. Keep `.pt` and related checkpoint files under the
+ignored `checkpoints/` tree, and register blessed or important runs with small
+JSON manifests under `artifacts/checkpoints/`.
+
+Before replacing or using the Phase 3 checkpoint, read
+`docs/checkpoint-management.md`. The current blessed Phase 3 V1 CPLineNet
+manifest is `artifacts/checkpoints/phase3-v1-cpline.json`.
+
+## RunPod Phase 3
+
+For GPU training setup, follow `docs/runpod-quickstart.md` first. It includes
+the CUDA-compatible Torch pin, the dereferenced synthetic dataset upload, smoke
+checks, curriculum launch, monitoring, and teardown commands. Use
+`docs/runpod-phase-3.md` for the longer rationale and review gates.
+
+Before launching more Phase 3 GPU work, read `docs/phase-3-v1-status.md`.
+Phase 3 V1 is complete for readable 1024px crease patterns; the remaining dense
+Rabbit Ear/tiny-fold tail is tracked as V2 and should not block Phase 4 work.

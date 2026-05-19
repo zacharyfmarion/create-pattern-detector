@@ -5,6 +5,14 @@ __all__ = [
     "CreasePattern",
     "GroundTruthGenerator",
     "CreasePatternDataset",
+    "CplineFoldDataset",
+    "AUGMENT_PROFILES",
+    "AUGMENT_MIXES",
+    "BASE_AUGMENT_PROFILES",
+    "MIXED_AUGMENT_PROFILES",
+    "SQUARE_SYMMETRIES",
+    "NON_IDENTITY_SQUARE_SYMMETRIES",
+    "render_augmented_cpline_sample",
 ]
 
 
@@ -22,4 +30,20 @@ def __getattr__(name: str):
         from .dataset import CreasePatternDataset
 
         return CreasePatternDataset
+    if name == "CplineFoldDataset":
+        from .cpline_dataset import CplineFoldDataset
+
+        return CplineFoldDataset
+    if name in {
+        "AUGMENT_PROFILES",
+        "AUGMENT_MIXES",
+        "BASE_AUGMENT_PROFILES",
+        "MIXED_AUGMENT_PROFILES",
+        "SQUARE_SYMMETRIES",
+        "NON_IDENTITY_SQUARE_SYMMETRIES",
+        "render_augmented_cpline_sample",
+    }:
+        from . import cpline_augmentations
+
+        return getattr(cpline_augmentations, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
