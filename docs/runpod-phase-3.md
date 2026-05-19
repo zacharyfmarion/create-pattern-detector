@@ -5,6 +5,11 @@ gates. The goal is not to jump straight to a giant `mixed` run. Run the same
 curriculum that passed locally, with `hrnet_w18` at 1024px and checkpoint
 initialization between stages.
 
+Phase 3 V1 is now considered complete for the supported readable-input
+envelope. See `docs/phase-3-v1-status.md` before launching another RunPod run:
+the remaining dense Rabbit Ear tail is a V2 scale-resolution issue, not a reason
+to keep pushing broad Phase 3 training by default.
+
 For the shortest working setup recipe, start with
 `docs/runpod-quickstart.md`. This handoff keeps the rationale, review gates, and
 training interpretation notes.

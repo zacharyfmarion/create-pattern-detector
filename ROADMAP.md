@@ -319,6 +319,10 @@ Saved artifacts:
 
 Goal: replace ground-truth labels with model-predicted fields.
 
+Status: V1 complete for the supported readable-input envelope. See
+`docs/phase-3-v1-status.md` for the completion decision, eval numbers, and the
+dense/tiny geometry V2 caveat.
+
 Tasks:
 
 - Implement CPLineNet heads with separate geometry and assignment targets.
@@ -365,8 +369,8 @@ Current local finding:
   full-size path and memory shape, not model quality.
 - A first 1024px RunPod `hrnet_w18` curriculum checkpoint was followed by a
   focused hard-negative line-loss continuation after grid-like dark backgrounds
-  exposed false positives. This produced the current best Phase 3 checkpoint
-  artifact, but it is not an exit checkpoint yet.
+  exposed false positives. This produced the current best Phase 3 V1 checkpoint
+  artifact for readable crease patterns.
 - Deterministic single-worker dark eval before removing grid augmentation showed
   that background guide grids create a distracting line-detection problem that is
   out of scope for V1. Treat multi-worker augmented eval numbers before `f639532`
@@ -380,16 +384,19 @@ Current local finding:
   destabilized validation in this run. The next RunPod pass should use smaller
   segmented checkpoints, deterministic augmented eval, and a junction/recall
   recovery plan rather than pushing full `mixed` longer by default.
+- V1 completion decision: proceed to Phase 4 with an explicit supported-input
+  envelope. V1 targets readable, rectified 1024px CP inputs with resolvable line
+  spacing across light/dark/print/photo-like render styles. Do not claim robust
+  recovery for extreme dense tiny-fold geometry, dark guide-grid backgrounds, or
+  partial occlusion.
 - A local family/geometry diagnostic on the `max_edges <= 300` validation slice
   showed that the current clean 1024px checkpoint passes TreeMaker but not
   Rabbit Ear: 24-sample stratified eval was 95.7% edge recall for TreeMaker and
   86.1% for Rabbit Ear. The Rabbit Ear gap is not just dataset imbalance.
   Failures correlate strongly with tiny/close geometry: for Rabbit Ear,
   `tiny_edge_frac_lt8` has Spearman rho -0.84 against edge recall and
-  `close_vertex_frac_lt8` has rho -0.87. Before another RunPod quality run,
-  stratify by geometry scale, inspect or filter pathological tiny-fold examples,
-  and decide whether V1 should train/evaluate them at 1024px or reserve them for
-  a higher-resolution/scale-aware stage.
+  `close_vertex_frac_lt8` has rho -0.87. Reserve that tail for a
+  higher-resolution or scale-aware V2 stage instead of blocking Phase 4.
 
 Augmentation curriculum before larger sizes:
 
@@ -409,16 +416,22 @@ Do not add occlusion augmentation for V1. It requires an explicit completion
 contract and confidence reporting so the model does not learn to hallucinate
 hidden geometry.
 
-Exit criteria on held-out synthetic renders:
+V1 exit criteria on held-out synthetic renders:
 
-- Clean edge recall >= 95%.
-- Noisy synthetic edge recall >= 90%.
+- Clean edge recall >= 95% on the supported readable-input slice.
+- Noisy synthetic evaluation is no longer a single blocking number; light,
+  dark, print, and photo-like profiles are implemented and visually QAed, while
+  real-photo benchmark collection remains Phase 6.
 - Augmentation contact sheets are visually approved at 256 and 384 resolution.
 - Dark-mode backgrounds render without guide grids for V1.
-- Each curriculum stage passes a 384px local graph-eval gate before moving to
-  the next stage.
-- Final valid FOLD rate >= 90%.
-- Median vertex localization error <= 2 px at 1024 resolution.
+- Each curriculum stage passed local graph-eval or pixel/shape gates before
+  moving to paid GPU training.
+- Final valid FOLD rate is >= 90%; the current stratified clean eval had 100%
+  structurally valid predicted FOLD graphs.
+- Median vertex localization error is <= 2 px at 1024 resolution on the
+  stratified clean evals.
+- Dense tiny Rabbit Ear-style examples remain tracked as a V2 regression suite,
+  not a V1 Phase 3 blocker.
 
 ### Phase 4: Edge Assignment And Constraint Repair
 

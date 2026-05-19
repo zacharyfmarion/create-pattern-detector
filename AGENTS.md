@@ -108,3 +108,7 @@ For GPU training setup, follow `docs/runpod-quickstart.md` first. It includes
 the CUDA-compatible Torch pin, the dereferenced synthetic dataset upload, smoke
 checks, curriculum launch, monitoring, and teardown commands. Use
 `docs/runpod-phase-3.md` for the longer rationale and review gates.
+
+Before launching more Phase 3 GPU work, read `docs/phase-3-v1-status.md`.
+Phase 3 V1 is complete for readable 1024px crease patterns; the remaining dense
+Rabbit Ear/tiny-fold tail is tracked as V2 and should not block Phase 4 work.
