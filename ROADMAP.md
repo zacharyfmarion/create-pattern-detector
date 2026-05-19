@@ -437,18 +437,67 @@ V1 exit criteria on held-out synthetic renders:
 
 Goal: produce usable FOLD assignments and honest ambiguity reports.
 
-Tasks:
+Phase 4 principle: build the honesty layer before clever origami completion.
+The system should be willing to say "geometry is outside the V1 envelope" or
+"M/V is visually ambiguous" instead of silently inventing a confident FOLD.
+
+Recommended work order:
+
+1. **Edge assignment sampler and confidence.**
+   Aggregate evidence per vectorized edge from CPLineNet `assignment_logits`,
+   `line_prob`, the input image, and edge-support samples. Emit:
+   - `assignment`: `M`, `V`, `B`, or `U`.
+   - `assignment_confidence`: calibrated per-edge confidence.
+   - `assignment_source`: `observed`, `unknown`, or later `inferred`.
+   - `edge_support`: line-evidence support along the edge.
+   - `assignment_margin`: gap between the top two assignment probabilities.
+2. **Graph quality report.**
+   Add a structured report object that classifies each output as `valid`,
+   `repaired`, `ambiguous`, `outside_v1_envelope`, or `failed`. Include warnings
+   for incomplete borders, weak/short edges, crowded junctions, low-confidence
+   assignments, illegal crossings, duplicate/zero-length edges, and dense
+   Rabbit Ear-style tiny geometry.
+3. **Assignment eval suite.**
+   Evaluate assignment separately from geometry on fixed synthetic fixtures:
+   colored M/V, monochrome/no-color, dark-mode, print/photo-like, and
+   geometry-correct but color-ambiguous examples. Monochrome examples should
+   become `U` or low-confidence, not hallucinated M/V.
+4. **Conservative graph repair.**
+   Implement only repairs that do not invent origami semantics by default:
+   dedupe edges, remove zero-length edges, snap or complete obvious border
+   fragments, drop unsupported edges, and downgrade low-confidence M/V labels to
+   `U`. Keep geometry drift explicit and minimal.
+5. **Optional constrained completion.**
+   Add M/V completion behind an explicit flag such as `--infer-assignments`.
+   Mark inferred labels separately from observed labels and report ambiguity when
+   multiple valid completions remain possible.
+
+Implementation tasks:
 
 - Train/evaluate edge assignment separately from geometry.
+- Implement an edge-level assignment sampler over predicted logits and image
+  evidence.
+- Add per-edge confidence/source fields to predicted FOLD metadata.
 - Implement graph validation and repair.
+- Add a `report.json` contract for validation status, warnings, repair actions,
+  confidence summaries, and V1-envelope checks.
 - Add optional constrained M/V completion for unassigned or low-confidence edges.
 - Report whether M/V labels are observed, inferred, ambiguous, or impossible.
+- Preserve dense/tiny Rabbit Ear examples as a non-blocking V2 regression suite.
 
 Exit criteria:
 
 - Assignment accuracy >= 95% when visual M/V colors are present in synthetic renders.
-- Unknown/unassigned behavior is correct when M/V colors are absent.
-- Constraint repair improves validity without large geometry drift.
+- Monochrome or visually ambiguous CPs do not hallucinate M/V; they produce `U`,
+  low confidence, or an ambiguity warning.
+- Every evaluated graph produces a quality report with one of `valid`,
+  `repaired`, `ambiguous`, `outside_v1_envelope`, or `failed`.
+- Conservative repair improves validity without large geometry drift or invented
+  M/V semantics.
+- Dense/tiny Rabbit Ear-style cases trigger an out-of-envelope or low-confidence
+  warning rather than silently producing a confident bad graph.
+- Optional M/V completion is disabled by default and marks inferred labels
+  distinctly when enabled.
 
 ### Phase 5: Production Inference CLI
 
@@ -458,6 +507,8 @@ Tasks:
 
 - Implement `src/inference` pipeline using the exact component contract above.
 - Add CLI command `cp-detect`.
+- First support `cp-detect --rectified` for already-square readable CP inputs;
+  full photo rectification and benchmark-driven robustness remain Phase 6.
 - Save debug artifacts and JSON reports.
 - Add batch inference mode.
 - Add regression tests on fixed images.
