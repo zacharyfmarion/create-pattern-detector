@@ -407,9 +407,29 @@ def test_v2_ambiguous_mv_marks_observed_assignment_unknown():
     )
 
     assert "ambiguous_mv" in sample.metadata["v2_augmentation"]["modes"]
+    assert "dashed" not in sample.metadata["v2_augmentation"]["modes"]
+    assert np.count_nonzero(sample.v2_line_style == V2_LINE_STYLE_IDS["dashed"]) == 0
+    assert np.count_nonzero(sample.v2_line_style == V2_LINE_STYLE_IDS["monochrome"]) > 0
     assert 0 not in sample.v2_observed_assignment
     assert 1 not in sample.v2_observed_assignment
     assert 3 in sample.v2_observed_assignment
+
+
+def test_v2_dark_profile_combines_dark_mode_with_issue_targets():
+    sample = render_cpline_sample(
+        simple_mv_cp(),
+        image_size=128,
+        padding=8,
+        line_width=2,
+        augment_profile="v2-dark-text",
+        seed=8,
+    )
+
+    assert sample.metadata["selected_profile"] == "v2-dark-text"
+    assert sample.metadata["style_variant"] in DARK_MODE_STYLE_VARIANTS
+    assert sample.metadata["v2_augmentation"]["dark_mode"] is True
+    assert sample.image.mean() < 120
+    assert np.count_nonzero(sample.v2_non_crease_mask) > 0
 
 
 def test_v2_issue_mix_samples_combined_profile():
@@ -428,6 +448,24 @@ def test_v2_issue_mix_samples_combined_profile():
 
     assert "v2-combined" in seen
     assert "v2-text" in seen
+
+
+def test_v2_dark_issue_mix_samples_dark_profiles():
+    cp = simple_mv_cp()
+    seen = {
+        render_cpline_sample(
+            cp,
+            image_size=96,
+            padding=8,
+            line_width=2,
+            augment_profile="v2-dark-issue-mix",
+            seed=seed,
+        ).metadata["selected_profile"]
+        for seed in range(80)
+    }
+
+    assert "v2-dark-combined" in seen
+    assert "v2-dark-text" in seen
 
 
 def test_cpline_dataset_does_not_cache_random_augmented_tensors(tmp_path):

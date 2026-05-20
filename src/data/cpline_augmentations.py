@@ -16,7 +16,14 @@ import cv2
 import numpy as np
 
 from src.data.fold_parser import CreasePattern, transform_coords
-from src.data.v2_augmentations import V2_AUGMENT_PROFILES, apply_v2_augmentation, default_v2_targets
+from src.data.v2_augmentations import (
+    V2_AUGMENT_PROFILES,
+    V2_DARK_AUGMENT_PROFILES,
+    apply_v2_augmentation,
+    default_v2_targets,
+    is_v2_dark_profile,
+    v2_issue_profile,
+)
 from src.vectorization.evidence import render_vectorizer_evidence_from_pixels
 
 BASE_AUGMENT_PROFILES = (
@@ -55,7 +62,16 @@ V2_AUGMENT_MIX = (
     ("v2-ambiguous-mv", 0.14, None),
     ("v2-combined", 0.14, None),
 )
+V2_DARK_AUGMENT_MIX = tuple(
+    (profile, weight, None)
+    for profile, weight in zip(
+        V2_DARK_AUGMENT_PROFILES,
+        (0.14, 0.14, 0.14, 0.16, 0.14, 0.14, 0.14),
+        strict=True,
+    )
+)
 AUGMENT_MIXES["v2-issue-mix"] = V2_AUGMENT_MIX
+AUGMENT_MIXES["v2-dark-issue-mix"] = V2_DARK_AUGMENT_MIX
 MIXED_PROFILE_ENTRIES = AUGMENT_MIXES["stage-balanced"]
 MIXED_AUGMENT_PROFILES = tuple(AUGMENT_MIXES) + ("mixed",)
 AUGMENT_PROFILES = (
@@ -314,7 +330,16 @@ def _sample_render_params(
     if profile == "clean":
         return params
     if profile in V2_AUGMENT_PROFILES:
-        if profile in {"v2-ambiguous-mv", "v2-combined"}:
+        if is_v2_dark_profile(profile):
+            _apply_dark_mode_params(
+                params,
+                rng,
+                image_size=image_size,
+                line_width=line_width,
+                style_variant=style_variant,
+            )
+        issue_profile = v2_issue_profile(profile)
+        if issue_profile in {"v2-ambiguous-mv", "v2-combined"}:
             params["assignment_target_mode"] = "mv_to_unassigned"
         return params
     if profile == "square-symmetry":

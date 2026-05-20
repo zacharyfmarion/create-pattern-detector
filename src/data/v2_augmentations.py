@@ -8,7 +8,7 @@ from typing import Any
 import cv2
 import numpy as np
 
-V2_AUGMENT_PROFILES = (
+V2_LIGHT_AUGMENT_PROFILES = (
     "v2-text",
     "v2-watermark",
     "v2-guide-grid",
@@ -17,6 +17,8 @@ V2_AUGMENT_PROFILES = (
     "v2-ambiguous-mv",
     "v2-combined",
 )
+V2_DARK_AUGMENT_PROFILES = tuple(f"v2-dark-{profile.removeprefix('v2-')}" for profile in V2_LIGHT_AUGMENT_PROFILES)
+V2_AUGMENT_PROFILES = (*V2_LIGHT_AUGMENT_PROFILES, *V2_DARK_AUGMENT_PROFILES)
 V2_LINE_STYLE_IDS = {
     "solid": 0,
     "dashed": 1,
@@ -68,6 +70,8 @@ def apply_v2_augmentation(
     if profile not in V2_AUGMENT_PROFILES:
         raise ValueError(f"Unsupported V2 augmentation profile: {profile}")
 
+    issue_profile = v2_issue_profile(profile)
+    dark_mode = is_v2_dark_profile(profile) or _is_dark_background(background)
     result = np.asarray(image, dtype=np.uint8).copy()
     non_crease_mask, target_line_mask, line_style, observed_assignment = default_v2_targets(
         line_prob=line_prob,
@@ -75,8 +79,8 @@ def apply_v2_augmentation(
     )
     modes: list[str] = []
 
-    if profile in {"v2-dashed", "v2-combined"}:
-        result = _render_cp_with_optional_dashes(
+    if issue_profile in {"v2-dashed", "v2-combined"}:
+        result = _render_cp_lines(
             vertices,
             edges,
             assignments,
@@ -85,7 +89,8 @@ def apply_v2_augmentation(
             background=background,
             palette=palette,
             rng=rng,
-            monochrome=profile == "v2-combined",
+            dashed_non_border=True,
+            monochrome=issue_profile == "v2-combined",
         )
         non_border = _line_mask(
             vertices,
@@ -98,9 +103,9 @@ def apply_v2_augmentation(
         line_style[(non_border > 0) & (target_line_mask > 0)] = V2_LINE_STYLE_IDS["dashed"]
         modes.append("dashed")
 
-    if profile in {"v2-ambiguous-mv", "v2-combined"}:
-        if profile != "v2-combined":
-            result = _render_cp_with_optional_dashes(
+    if issue_profile in {"v2-ambiguous-mv", "v2-combined"}:
+        if issue_profile != "v2-combined":
+            result = _render_cp_lines(
                 vertices,
                 edges,
                 assignments,
@@ -109,6 +114,7 @@ def apply_v2_augmentation(
                 background=background,
                 palette=palette,
                 rng=rng,
+                dashed_non_border=False,
                 monochrome=True,
             )
         non_border = _line_mask(
@@ -120,14 +126,14 @@ def apply_v2_augmentation(
             non_border_only=True,
         )
         active = (non_border > 0) & (target_line_mask > 0)
-        if profile == "v2-combined":
+        if issue_profile == "v2-combined":
             active &= line_style != V2_LINE_STYLE_IDS["dashed"]
         line_style[active] = V2_LINE_STYLE_IDS["monochrome"]
         observed_assignment[(observed_assignment == 0) | (observed_assignment == 1)] = 3
         modes.append("ambiguous_mv")
 
-    if profile in {"v2-faint", "v2-combined"}:
-        result = _fade_lines(result, background=background, rng=rng, combined=profile == "v2-combined")
+    if issue_profile in {"v2-faint", "v2-combined"}:
+        result = _fade_lines(result, background=background, rng=rng, combined=issue_profile == "v2-combined")
         non_border = _line_mask(
             vertices,
             edges,
@@ -137,22 +143,22 @@ def apply_v2_augmentation(
             non_border_only=True,
         )
         faint_style = V2_LINE_STYLE_IDS["faint"]
-        if profile == "v2-faint":
+        if issue_profile == "v2-faint":
             line_style[(non_border > 0) & (target_line_mask > 0)] = faint_style
         modes.append("faint")
 
-    if profile in {"v2-guide-grid", "v2-combined"}:
-        result, mask = _add_guide_grid(result, rng=rng)
+    if issue_profile in {"v2-guide-grid", "v2-combined"}:
+        result, mask = _add_guide_grid(result, rng=rng, dark_mode=dark_mode)
         non_crease_mask = np.maximum(non_crease_mask, mask.astype(np.float32))
         modes.append("guide_grid")
 
-    if profile in {"v2-watermark", "v2-combined"}:
-        result, mask = _add_watermark(result, rng=rng)
+    if issue_profile in {"v2-watermark", "v2-combined"}:
+        result, mask = _add_watermark(result, rng=rng, dark_mode=dark_mode)
         non_crease_mask = np.maximum(non_crease_mask, mask.astype(np.float32))
         modes.append("watermark")
 
-    if profile in {"v2-text", "v2-combined"}:
-        result, mask = _add_text_labels(result, rng=rng, combined=profile == "v2-combined")
+    if issue_profile in {"v2-text", "v2-combined"}:
+        result, mask = _add_text_labels(result, rng=rng, combined=issue_profile == "v2-combined", dark_mode=dark_mode)
         non_crease_mask = np.maximum(non_crease_mask, mask.astype(np.float32))
         modes.append("text")
 
@@ -162,6 +168,8 @@ def apply_v2_augmentation(
 
     metadata = {
         "profile": profile,
+        "issue_profile": issue_profile,
+        "dark_mode": dark_mode,
         "modes": modes,
         "non_crease_pixels": int(np.count_nonzero(non_crease_mask > 0)),
         "target_line_pixels": int(np.count_nonzero(target_line_mask > 0)),
@@ -178,7 +186,17 @@ def apply_v2_augmentation(
     )
 
 
-def _render_cp_with_optional_dashes(
+def v2_issue_profile(profile: str) -> str:
+    if profile.startswith("v2-dark-"):
+        return f"v2-{profile.removeprefix('v2-dark-')}"
+    return profile
+
+
+def is_v2_dark_profile(profile: str) -> bool:
+    return profile.startswith("v2-dark-")
+
+
+def _render_cp_lines(
     vertices: np.ndarray,
     edges: np.ndarray,
     assignments: np.ndarray,
@@ -188,6 +206,7 @@ def _render_cp_with_optional_dashes(
     background: tuple[int, int, int],
     palette: dict[int, tuple[int, int, int]],
     rng: np.random.Generator,
+    dashed_non_border: bool,
     monochrome: bool,
 ) -> np.ndarray:
     image = np.full((image_size, image_size, 3), background, dtype=np.uint8)
@@ -201,7 +220,7 @@ def _render_cp_with_optional_dashes(
             color = (mono_shade, mono_shade, mono_shade)
         p0 = vertices[int(edge[0])]
         p1 = vertices[int(edge[1])]
-        if assignment != 2:
+        if dashed_non_border and assignment != 2:
             _draw_dashed_line(image, p0, p1, color, line_width, dash_px=dash_px, gap_px=gap_px)
         else:
             cv2.line(image, _point(p0), _point(p1), color, line_width, cv2.LINE_AA)
@@ -256,6 +275,7 @@ def _add_text_labels(
     *,
     rng: np.random.Generator,
     combined: bool,
+    dark_mode: bool,
 ) -> tuple[np.ndarray, np.ndarray]:
     result = image.copy()
     mask = np.zeros(image.shape[:2], dtype=np.uint8)
@@ -269,33 +289,45 @@ def _add_text_labels(
         size, _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, scale, thickness)
         x = int(rng.integers(max(1, w // 20), max(w // 20 + 1, w - size[0] - w // 20)))
         y = int(rng.integers(max(size[1] + 4, h // 8), max(size[1] + 5, h - h // 10)))
-        color = tuple(int(v) for v in rng.integers(35, 100, size=3))
+        if dark_mode:
+            color = tuple(int(v) for v in rng.integers(170, 235, size=3))
+        else:
+            color = tuple(int(v) for v in rng.integers(35, 100, size=3))
         cv2.putText(result, text, (x, y), cv2.FONT_HERSHEY_SIMPLEX, scale, color, thickness, cv2.LINE_AA)
         cv2.putText(mask, text, (x, y), cv2.FONT_HERSHEY_SIMPLEX, scale, 255, thickness + 2, cv2.LINE_AA)
     return result, (mask > 0).astype(np.float32)
 
 
-def _add_watermark(image: np.ndarray, *, rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray]:
+def _add_watermark(
+    image: np.ndarray,
+    *,
+    rng: np.random.Generator,
+    dark_mode: bool,
+) -> tuple[np.ndarray, np.ndarray]:
     h, w = image.shape[:2]
     text = str(rng.choice(["ORIGAMI", "CREASING", "DIAGRAM", "CP"]))
     scale = float(rng.uniform(1.2, 2.0)) * h / 384.0
     thickness = max(1, int(round(rng.uniform(2.0, 3.5) * h / 384.0)))
-    text_layer = np.zeros_like(image)
     mask_layer = np.zeros((h, w), dtype=np.uint8)
     size, _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, scale, thickness)
     org = ((w - size[0]) // 2, (h + size[1]) // 2)
-    cv2.putText(text_layer, text, org, cv2.FONT_HERSHEY_SIMPLEX, scale, (45, 45, 45), thickness, cv2.LINE_AA)
     cv2.putText(mask_layer, text, org, cv2.FONT_HERSHEY_SIMPLEX, scale, 255, thickness + 3, cv2.LINE_AA)
     angle = float(rng.uniform(-36.0, -18.0) if rng.random() < 0.5 else rng.uniform(18.0, 36.0))
     matrix = cv2.getRotationMatrix2D((w / 2.0, h / 2.0), angle, 1.0)
-    text_layer = cv2.warpAffine(text_layer, matrix, (w, h))
     mask_layer = cv2.warpAffine(mask_layer, matrix, (w, h))
-    alpha = float(rng.uniform(0.12, 0.24))
-    result = cv2.addWeighted(image, 1.0, text_layer, alpha, 0.0)
+    alpha = (mask_layer.astype(np.float32) / 255.0) * float(rng.uniform(0.18, 0.34))
+    color = np.array((210, 210, 210) if dark_mode else (35, 35, 35), dtype=np.float32)
+    result = image.astype(np.float32)
+    result = result * (1.0 - alpha[..., None]) + color * alpha[..., None]
     return result.astype(np.uint8), (mask_layer > 0).astype(np.float32)
 
 
-def _add_guide_grid(image: np.ndarray, *, rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray]:
+def _add_guide_grid(
+    image: np.ndarray,
+    *,
+    rng: np.random.Generator,
+    dark_mode: bool,
+) -> tuple[np.ndarray, np.ndarray]:
     result = image.copy()
     mask = np.zeros(image.shape[:2], dtype=np.uint8)
     h, w = image.shape[:2]
@@ -303,7 +335,11 @@ def _add_guide_grid(image: np.ndarray, *, rng: np.random.Generator) -> tuple[np.
     spacing = max(12, spacing)
     offset_x = int(rng.integers(0, spacing))
     offset_y = int(rng.integers(0, spacing))
-    color = tuple(int(v) for v in rng.integers(165, 218, size=3))
+    color = (
+        tuple(int(v) for v in rng.integers(85, 135, size=3))
+        if dark_mode
+        else tuple(int(v) for v in rng.integers(165, 218, size=3))
+    )
     for x in range(offset_x, w, spacing):
         cv2.line(result, (x, 0), (x, h - 1), color, 1, cv2.LINE_AA)
         cv2.line(mask, (x, 0), (x, h - 1), 255, 2, cv2.LINE_AA)
@@ -312,11 +348,12 @@ def _add_guide_grid(image: np.ndarray, *, rng: np.random.Generator) -> tuple[np.
         cv2.line(mask, (0, y), (w - 1, y), 255, 2, cv2.LINE_AA)
     if rng.random() < 0.35:
         major = spacing * int(rng.choice([2, 3]))
+        major_color = (150, 150, 150) if dark_mode else (145, 145, 145)
         for x in range(offset_x, w, major):
-            cv2.line(result, (x, 0), (x, h - 1), (145, 145, 145), 1, cv2.LINE_AA)
+            cv2.line(result, (x, 0), (x, h - 1), major_color, 1, cv2.LINE_AA)
             cv2.line(mask, (x, 0), (x, h - 1), 255, 3, cv2.LINE_AA)
         for y in range(offset_y, h, major):
-            cv2.line(result, (0, y), (w - 1, y), (145, 145, 145), 1, cv2.LINE_AA)
+            cv2.line(result, (0, y), (w - 1, y), major_color, 1, cv2.LINE_AA)
             cv2.line(mask, (0, y), (w - 1, y), 255, 3, cv2.LINE_AA)
     return result, (mask > 0).astype(np.float32)
 
@@ -358,3 +395,7 @@ def _assignment_counts(assignment: np.ndarray) -> dict[str, int]:
 
 def _point(point: np.ndarray) -> tuple[int, int]:
     return (int(round(float(point[0]))), int(round(float(point[1]))))
+
+
+def _is_dark_background(background: tuple[int, int, int]) -> bool:
+    return float(np.mean(np.asarray(background, dtype=np.float32))) < 96.0

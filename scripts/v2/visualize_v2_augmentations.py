@@ -61,6 +61,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=20260520)
     parser.add_argument("--cell-width", type=int, default=220)
     parser.add_argument(
+        "--include-dark-mode",
+        action="store_true",
+        help="Also render matching v2-dark-* profiles.",
+    )
+    parser.add_argument(
         "--profiles",
         type=str,
         default=",".join(DEFAULT_PROFILES),
@@ -87,60 +92,47 @@ def main() -> None:
         max_edges=args.max_edges,
     )
     parser = FOLDParser()
-    rows: list[dict[str, Any]] = []
     samples_dir = output_dir / "samples"
     samples_dir.mkdir(parents=True, exist_ok=True)
+    rows = _render_rows(
+        profiles=profiles,
+        records=records,
+        parser=parser,
+        manifest=manifest,
+        samples_dir=samples_dir,
+        image_size=args.image_size,
+        seed=args.seed,
+    )
+    _write_sheet_bundle(rows, output_dir=output_dir, cell_width=args.cell_width, prefix="")
 
-    for profile_idx, profile in enumerate(profiles):
-        for sample_idx, record in enumerate(records):
-            cp = parser.parse(resolve_fold_path(record, manifest))
-            seed = args.seed + profile_idx * 1009 + sample_idx * 37
-            clean = render_cpline_sample(
-                cp,
-                image_size=args.image_size,
-                padding=_padding(args.image_size),
-                line_width=_line_width(args.image_size),
-                augment_profile="clean",
-            )
-            augmented = render_cpline_sample(
-                cp,
-                image_size=args.image_size,
-                padding=_padding(args.image_size),
-                line_width=_line_width(args.image_size),
-                augment_profile=profile,
-                seed=seed,
-            )
-            row = {
-                "profile": profile,
-                "record": record,
-                "seed": seed,
-                "clean": clean,
-                "augmented": augmented,
-            }
-            rows.append(row)
-            prefix = f"{profile}_{sample_idx:02d}_{str(record['id'])[:48]}"
-            Image.fromarray(augmented.image).save(samples_dir / f"{prefix}_augmented.png")
-            Image.fromarray(_non_crease_overlay(augmented.image, augmented.v2_non_crease_mask)).save(
-                samples_dir / f"{prefix}_non_crease.png"
-            )
-
-    write_contact_sheet(rows, output_dir / "contact_sheet.png", cell_width=args.cell_width)
-    profiles_dir = output_dir / "profiles"
-    profiles_dir.mkdir(exist_ok=True)
-    for profile in profiles:
-        write_contact_sheet(
-            [row for row in rows if row["profile"] == profile],
-            profiles_dir / f"{profile}_contact_sheet.png",
-            cell_width=args.cell_width,
+    dark_rows: list[dict[str, Any]] = []
+    if args.include_dark_mode:
+        dark_profiles = [_dark_profile(profile) for profile in profiles if not profile.startswith("v2-dark-")]
+        dark_rows = _render_rows(
+            profiles=dark_profiles,
+            records=records,
+            parser=parser,
+            manifest=manifest,
+            samples_dir=samples_dir,
+            image_size=args.image_size,
+            seed=args.seed + 50000,
         )
-    _write_manifest(rows, output_dir / "manifest.json", manifest=manifest, image_size=args.image_size)
+        _write_sheet_bundle(dark_rows, output_dir=output_dir, cell_width=args.cell_width, prefix="dark_")
+
+    _write_manifest(
+        [*rows, *dark_rows],
+        output_dir / "manifest.json",
+        manifest=manifest,
+        image_size=args.image_size,
+    )
     print(
         json.dumps(
             {
                 "output_dir": str(output_dir),
                 "contact_sheet": str(output_dir / "contact_sheet.png"),
+                "dark_contact_sheet": str(output_dir / "dark_contact_sheet.png") if dark_rows else None,
                 "profiles": profiles,
-                "examples": len(rows),
+                "examples": len(rows) + len(dark_rows),
             },
             indent=2,
         )
@@ -171,6 +163,77 @@ def _select_records(
     if len(filtered) < count:
         raise SystemExit(f"Need {count} records but found {len(filtered)} in {manifest} for split={split}")
     return filtered[:count]
+
+
+def _render_rows(
+    *,
+    profiles: list[str],
+    records: list[dict[str, Any]],
+    parser: FOLDParser,
+    manifest: Path,
+    samples_dir: Path,
+    image_size: int,
+    seed: int,
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for profile_idx, profile in enumerate(profiles):
+        for sample_idx, record in enumerate(records):
+            cp = parser.parse(resolve_fold_path(record, manifest))
+            sample_seed = seed + profile_idx * 1009 + sample_idx * 37
+            clean = render_cpline_sample(
+                cp,
+                image_size=image_size,
+                padding=_padding(image_size),
+                line_width=_line_width(image_size),
+                augment_profile="clean",
+            )
+            augmented = render_cpline_sample(
+                cp,
+                image_size=image_size,
+                padding=_padding(image_size),
+                line_width=_line_width(image_size),
+                augment_profile=profile,
+                seed=sample_seed,
+            )
+            row = {
+                "profile": profile,
+                "record": record,
+                "seed": sample_seed,
+                "clean": clean,
+                "augmented": augmented,
+            }
+            rows.append(row)
+            prefix = f"{profile}_{sample_idx:02d}_{str(record['id'])[:48]}"
+            Image.fromarray(augmented.image).save(samples_dir / f"{prefix}_augmented.png")
+            Image.fromarray(_non_crease_overlay(augmented.image, augmented.v2_non_crease_mask)).save(
+                samples_dir / f"{prefix}_non_crease.png"
+            )
+    return rows
+
+
+def _write_sheet_bundle(
+    rows: list[dict[str, Any]],
+    *,
+    output_dir: Path,
+    cell_width: int,
+    prefix: str,
+) -> None:
+    if not rows:
+        return
+    write_contact_sheet(rows, output_dir / f"{prefix}contact_sheet.png", cell_width=cell_width)
+    profiles_dir = output_dir / f"{prefix}profiles"
+    profiles_dir.mkdir(exist_ok=True)
+    profiles = list(dict.fromkeys(str(row["profile"]) for row in rows))
+    for profile in profiles:
+        write_contact_sheet(
+            [row for row in rows if row["profile"] == profile],
+            profiles_dir / f"{profile}_contact_sheet.png",
+            cell_width=cell_width,
+        )
+
+
+def _dark_profile(profile: str) -> str:
+    return f"v2-dark-{profile.removeprefix('v2-')}"
 
 
 def write_contact_sheet(rows: list[dict[str, Any]], path: Path, *, cell_width: int) -> None:
