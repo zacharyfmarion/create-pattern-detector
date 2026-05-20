@@ -331,6 +331,31 @@ Exit criteria before high-res training:
 - Dashed carrier recall is measured separately and improves over V1 support
   sampling.
 
+Progress as of May 20, 2026:
+
+- V2.0 synthetic issue benchmark tooling is in place for text, watermark, guide
+  grid, dashed/gapped support, faint/low-contrast evidence, and visually
+  ambiguous M/V. Cropped-border, symmetry-recovery, and dense-scale-collapse
+  hallucination targets are intentionally excluded.
+- V2.1 label sidecars now emit square-frame/vertex/contact/carrier metadata,
+  artifact masks, dashed/faint/monochrome style metadata, observed-vs-latent
+  assignments, and natural spacing stats. Label tests cover boundary contacts,
+  carriers, artifacts, and ambiguous assignments.
+- V2 render-time augmentations are wired into the training path as
+  `v2-issue-mix` and `v2-dark-issue-mix`, with visual QA contact sheets under
+  `visualizations/v2_augmentations/`.
+- CPLineNet has optional V2 auxiliary heads for `non_crease_logits` and
+  `line_style_logits`; the smoke trainer can enable them with `--v2-heads`,
+  `--non-crease-weight`, `--line-style-weight`, and
+  `--use-v2-observed-assignment`.
+- Local CPU plumbing smokes completed at 128px for both light and dark V2 mixes
+  without graph eval: light total loss `5.2911 -> 3.8934`; dark total loss
+  `5.2109 -> 3.9599`. Prediction/target QA sheets were generated under
+  `visualizations/v2_training_validation_smoke/`.
+- This is only a wiring validation. No 1024 de-risking run, boundary-contact
+  head, carrier-support head, or high-resolution training run has been launched
+  yet.
+
 ## Phase V2.3: SquareTopologyDecoder
 
 Goal: upgrade `PlanarGraphBuilder` into a square-aware graph decoder.
@@ -541,17 +566,17 @@ V2 is complete when a frozen validation suite meets:
 
 ## Near-Term Next Steps
 
-1. Freeze a V2 issue benchmark from the V1 failures that are recoverable from
-   visual evidence: text, guide grid, watermark, dashed lines, faint lines, and
-   ambiguous M/V.
-2. Add boundary-contact, carrier, rectifier/crop report-status,
-   artifact false-positive, dashed-line, and natural minimum-spacing metrics.
-3. Implement V2 oracle ablations for rectification, artifact suppression,
-   boundary contacts, carriers, topology, and assignments.
-4. Build the FOLD-derived V2 label sidecar generator.
-5. Add boundary-contact and non-crease/artifact overlays to the Stage Inspector.
-6. Add CPLineNet-V2 boundary, carrier, dashed, and non-crease evidence heads
-   behind a config flag.
-7. Run short 1024 de-risking runs before any high-resolution training.
-8. Only then launch 1536/2048 or tiled inference experiments if the 1024 V2
-   architecture shows that the new targets improve the actual graph metrics.
+1. Review the generated V2 augmentation and prediction/target contact sheets as
+   the final visual QA gate for the current augmentation set.
+2. Add the missing V2 structural heads needed for the square prior:
+   boundary-contact heatmap/type/side targets first, then carrier support if
+   contact metrics show carrier evidence is the next bottleneck.
+3. Add Stage Inspector overlays for boundary contacts, non-crease/artifact
+   evidence, line style, and observed-vs-latent assignment targets.
+4. Run the first short 1024 de-risking run with V2 heads enabled on the
+   approved issue mix. Compare artifact false-positive rate, dashed carrier
+   recall, faint-line recall, and ambiguous-assignment behavior against V1.
+5. Use the 1024 results to decide whether to add carrier-support heads,
+   adjust augment weights, or proceed to the square topology decoder changes.
+6. Only after 1024 graph metrics improve should we launch 1536/2048 or tiled
+   inference experiments.
