@@ -177,6 +177,132 @@ def test_repair_snaps_border_vertices_and_completes_supported_border():
     assert "complete_supported_border_edge" in {action.code for action in repaired.actions}
 
 
+def test_repair_canonicalizes_inset_border_chain_without_touching_creases():
+    vertices = np.array(
+        [
+            [1.2, 1.0],
+            [5.0, 1.5],
+            [9.8, 1.1],
+            [10.1, 9.9],
+            [1.0, 10.2],
+            [5.0, 5.0],
+        ],
+        dtype=np.float32,
+    )
+    graph = _attributed(
+        vertices,
+        np.array([[0, 2], [2, 3], [3, 4], [4, 0], [5, 1]], dtype=np.int64),
+        np.array([2, 2, 2, 2, 0], dtype=np.int8),
+        np.ones(5, dtype=np.float32),
+        image_size=12,
+    )
+    line_prob = np.zeros((12, 12), dtype=np.float32)
+    cv2.line(line_prob, (1, 1), (10, 1), 1.0, 1)
+
+    repaired = conservative_repair(
+        graph,
+        line_prob=line_prob,
+        config=RepairConfig(
+            image_size=12,
+            border_snap_px=0.0,
+            border_canonicalization_min_support=0.60,
+            border_canonicalization_snap_vertices=True,
+            border_canonicalization_rebuild_chains=True,
+        ),
+    )
+
+    assert "canonicalize_square_border" in {action.code for action in repaired.actions}
+    assert repaired.graph.edges_assignment.tolist().count(2) == 5
+    repaired_edges = {tuple(sorted(edge)) for edge in repaired.graph.edges_vertices.tolist()}
+    assert (0, 1) in repaired_edges
+    assert (1, 2) in repaired_edges
+    assert repaired.graph.edges_assignment[repaired.graph.edges_vertices.tolist().index([5, 1])] == 0
+    assert repaired.graph.pixel_vertices[1, 1] == repaired.graph.pixel_vertices[0, 1]
+
+
+def test_repair_canonicalizes_border_labels_without_default_geometry_snap():
+    vertices = np.array(
+        [[0.4, 0.3], [10.0, 0.6], [10.0, 10.0], [0.0, 10.0]],
+        dtype=np.float32,
+    )
+    graph = _attributed(
+        vertices,
+        np.array([[0, 1], [1, 2], [2, 3], [3, 0]], dtype=np.int64),
+        np.array([3, 2, 2, 2], dtype=np.int8),
+        np.ones(4, dtype=np.float32),
+        image_size=11,
+    )
+    graph.assignment_probabilities = np.array(
+        [
+            [0.05, 0.05, 0.80, 0.10],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+        ],
+        dtype=np.float32,
+    )
+
+    repaired = conservative_repair(
+        graph,
+        config=RepairConfig(
+            image_size=11,
+            border_snap_px=0.0,
+            reconstruct_square_border_chain=False,
+        ),
+    )
+
+    assert "canonicalize_square_border" in {action.code for action in repaired.actions}
+    assert repaired.graph.edges_assignment.tolist() == [2, 2, 2, 2]
+    np.testing.assert_allclose(repaired.graph.pixel_vertices, vertices)
+    assert repaired.max_geometry_drift_px == 0.0
+
+
+def test_repair_reconstructs_square_border_chain_from_boundary_junctions():
+    vertices = np.array(
+        [
+            [0.0, 0.0],
+            [10.0, 0.0],
+            [10.0, 10.0],
+            [0.0, 10.0],
+            [5.0, 0.7],
+            [5.0, 5.0],
+        ],
+        dtype=np.float32,
+    )
+    graph = _attributed(
+        vertices,
+        np.array(
+            [[0, 1], [1, 2], [2, 3], [3, 0], [4, 5]],
+            dtype=np.int64,
+        ),
+        np.array([2, 2, 2, 2, 0], dtype=np.int8),
+        np.ones(5, dtype=np.float32),
+        image_size=11,
+    )
+
+    repaired = conservative_repair(
+        graph,
+        config=RepairConfig(image_size=11, border_snap_px=0.0),
+    )
+
+    assert "reconstruct_square_border_chain" in {action.code for action in repaired.actions}
+    assert repaired.graph.edges_assignment.tolist().count(2) == 5
+    border_edges = {
+        tuple(sorted(edge))
+        for edge, assignment in zip(
+            repaired.graph.edges_vertices.tolist(),
+            repaired.graph.edges_assignment.tolist(),
+        )
+        if assignment == 2
+    }
+    top_mid = int(np.argmin(np.linalg.norm(repaired.graph.pixel_vertices - [5.0, 0.0], axis=1)))
+    top_left = int(np.argmin(np.linalg.norm(repaired.graph.pixel_vertices - [0.0, 0.0], axis=1)))
+    top_right = int(np.argmin(np.linalg.norm(repaired.graph.pixel_vertices - [10.0, 0.0], axis=1)))
+    assert tuple(sorted((top_left, top_mid))) in border_edges
+    assert tuple(sorted((top_mid, top_right))) in border_edges
+    np.testing.assert_allclose(repaired.graph.pixel_vertices[top_mid], [5.0, 0.0])
+
+
 def test_optional_assignment_inference_marks_forced_label_as_inferred():
     vertices = np.array(
         [[5.0, 5.0], [10.0, 5.0], [5.0, 10.0], [0.0, 5.0], [5.0, 0.0]],
@@ -270,6 +396,36 @@ def test_quality_report_status_precedence_and_constraint_warnings():
     assert "kawasaki_residuals" in codes
     assert "maekawa_failures" in codes
     assert report.status == "ambiguous"
+
+
+def test_quality_report_warns_on_dense_geometry():
+    xs, ys = np.meshgrid(np.linspace(0.0, 127.0, 20), np.linspace(0.0, 127.0, 20))
+    vertices = np.stack([xs.reshape(-1), ys.reshape(-1)], axis=1).astype(np.float32)
+    edges = []
+    for y in range(20):
+        for x in range(19):
+            idx = y * 20 + x
+            edges.append([idx, idx + 1])
+    for y in range(19):
+        for x in range(20):
+            idx = y * 20 + x
+            edges.append([idx, idx + 20])
+    graph = _attributed(
+        vertices,
+        np.asarray(edges, dtype=np.int64),
+        np.full(len(edges), 3, dtype=np.int8),
+        np.ones(len(edges), dtype=np.float32),
+        confidence=np.ones(len(edges), dtype=np.float32),
+        margin=np.ones(len(edges), dtype=np.float32),
+        source=["observed"] * len(edges),
+        image_size=128,
+    )
+
+    report = build_quality_report(graph)
+    codes = {warning.code for warning in report.warnings}
+
+    assert "dense_geometry" in codes
+    assert report.status == "outside_v1_envelope"
 
 
 def test_fold_writer_exports_required_fields_and_stage4_metadata():

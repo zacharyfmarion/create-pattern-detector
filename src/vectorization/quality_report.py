@@ -21,6 +21,10 @@ class QualityReportConfig:
     weak_edge_support_threshold: float = 0.40
     short_edge_warning_px: float = 8.0
     crowded_junction_px: float = 8.0
+    dense_edge_count_warning: int = 450
+    dense_vertex_count_warning: int = 350
+    dense_short_edge_fraction: float = 0.18
+    dense_crowded_vertex_fraction: float = 0.18
     low_assignment_confidence: float = 0.60
     low_assignment_margin: float = 0.12
     kawasaki_tolerance_radians: float = 0.12
@@ -196,7 +200,55 @@ def _support_and_envelope_warnings(
                 details={"threshold_px": cfg.crowded_junction_px},
             )
         )
+    warnings.extend(_density_warnings(graph, cfg, lengths=lengths, crowded=crowded))
     return warnings
+
+
+def _density_warnings(
+    graph: AttributedPlanarGraph,
+    cfg: QualityReportConfig,
+    *,
+    lengths: np.ndarray,
+    crowded: set[int],
+) -> list[QualityWarning]:
+    if graph.num_edges == 0:
+        return []
+
+    short_count = int(np.count_nonzero(lengths < cfg.short_edge_warning_px))
+    crowded_count = int(len(crowded))
+    short_fraction = short_count / float(max(1, graph.num_edges))
+    crowded_fraction = crowded_count / float(max(1, graph.num_vertices))
+    dense = (
+        graph.num_edges >= cfg.dense_edge_count_warning
+        or graph.num_vertices >= cfg.dense_vertex_count_warning
+        or short_fraction >= cfg.dense_short_edge_fraction
+        or crowded_fraction >= cfg.dense_crowded_vertex_fraction
+    )
+    if not dense:
+        return []
+
+    return [
+        QualityWarning(
+            code="dense_geometry",
+            message=(
+                "The predicted graph is dense enough that it may be outside the "
+                "Phase 3 V1 1024px readable-geometry envelope."
+            ),
+            severity="warning",
+            details={
+                "edge_count": int(graph.num_edges),
+                "vertex_count": int(graph.num_vertices),
+                "edge_count_threshold": int(cfg.dense_edge_count_warning),
+                "vertex_count_threshold": int(cfg.dense_vertex_count_warning),
+                "short_edge_count": short_count,
+                "short_edge_fraction": short_fraction,
+                "short_edge_fraction_threshold": cfg.dense_short_edge_fraction,
+                "crowded_vertex_count": crowded_count,
+                "crowded_vertex_fraction": crowded_fraction,
+                "crowded_vertex_fraction_threshold": cfg.dense_crowded_vertex_fraction,
+            },
+        )
+    ]
 
 
 def _assignment_warnings(
@@ -311,7 +363,13 @@ def _status_from_warnings(
         "zero_length_edges",
         "illegal_crossings",
     }
-    outside_codes = {"incomplete_border", "very_short_edges", "crowded_junctions", "weak_edges"}
+    outside_codes = {
+        "incomplete_border",
+        "very_short_edges",
+        "crowded_junctions",
+        "weak_edges",
+        "dense_geometry",
+    }
     ambiguous_codes = {
         "low_confidence_assignments",
         "unknown_assignments",

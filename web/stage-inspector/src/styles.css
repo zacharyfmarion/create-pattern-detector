@@ -321,7 +321,7 @@ input[type="number"] {
   border-radius: 8px;
   display: grid;
   gap: 8px;
-  grid-template-columns: 88px 96px auto;
+  grid-template-columns: 88px 96px 110px auto;
   padding: 10px;
 }
 

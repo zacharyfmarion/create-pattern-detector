@@ -20,7 +20,14 @@ FAILED_CODES = {
     "zero_length_edges",
     "illegal_crossings",
 }
-OUTSIDE_CODES = {"incomplete_border", "very_short_edges", "crowded_junctions", "weak_edges"}
+OUTSIDE_CODES = {
+    "incomplete_border",
+    "very_short_edges",
+    "crowded_junctions",
+    "weak_edges",
+    "dense_geometry",
+    "dense_input_evidence",
+}
 ASSIGNMENT_AMBIGUITY_CODES = {"low_confidence_assignments", "unknown_assignments"}
 ORIGAMI_DIAGNOSTIC_CODES = {
     "even_degree_failures",

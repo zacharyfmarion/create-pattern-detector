@@ -151,6 +151,7 @@ class CPDetectPipeline:
             repair_actions=repair.actions,
             config=self.report_config,
         )
+        apply_rectification_warnings_to_report(quality_report, rectification)
 
         result = InferenceResult(
             input_path=path,
@@ -363,6 +364,18 @@ def graph_metadata(graph: AttributedPlanarGraph) -> dict[str, Any]:
             "inferred": int(sum(source == "inferred" for source in graph.assignment_source)),
         },
     }
+
+
+def apply_rectification_warnings_to_report(
+    report: QualityReport,
+    rectification: RectificationResult,
+) -> None:
+    """Promote input-level envelope warnings into the overall Phase 5 status."""
+    codes = {str(warning.get("code", "")) for warning in rectification.warnings}
+    if "dense_input_evidence" not in codes:
+        return
+    if STATUS_ORDER.index(report.status) < STATUS_ORDER.index("outside_v1_envelope"):
+        report.status = "outside_v1_envelope"
 
 
 def write_debug_artifacts(result: InferenceResult, debug_dir: str | Path) -> None:

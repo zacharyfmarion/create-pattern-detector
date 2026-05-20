@@ -24,6 +24,8 @@ PRIMARY_METRICS = (
     "vertex_precision",
     "vertex_recall",
     "assignment_accuracy",
+    "border_precision",
+    "border_recall",
     "border_f1",
     "structural_validity_rate",
 )
@@ -178,6 +180,12 @@ def compare_samples(baseline: dict[str, Any], candidate: dict[str, Any]) -> list
                 - float(baseline_row["edge_precision"]),
                 "assignment_accuracy_delta": float(candidate_row["assignment_accuracy"])
                 - float(baseline_row["assignment_accuracy"]),
+                "border_precision_delta": float(candidate_row["border_precision"])
+                - float(baseline_row["border_precision"]),
+                "border_recall_delta": float(candidate_row["border_recall"])
+                - float(baseline_row["border_recall"]),
+                "border_f1_delta": float(candidate_row["border_f1"])
+                - float(baseline_row["border_f1"]),
                 "baseline_status": baseline_row["status"],
                 "candidate_status": candidate_row["status"],
             }
@@ -270,6 +278,11 @@ def target_report(
             "score": row_score(candidate_row) - row_score(baseline_row),
             "edge_recall": float(candidate_row["edge_recall"]) - float(baseline_row["edge_recall"]),
             "edge_precision": float(candidate_row["edge_precision"]) - float(baseline_row["edge_precision"]),
+            "border_recall": float(candidate_row["border_recall"])
+            - float(baseline_row["border_recall"]),
+            "border_precision": float(candidate_row["border_precision"])
+            - float(baseline_row["border_precision"]),
+            "border_f1": float(candidate_row["border_f1"]) - float(baseline_row["border_f1"]),
             "pred_edges": int(candidate_row["pred_edges"]) - int(baseline_row["pred_edges"]),
             "matched_edges": int(candidate_row["matched_edges"]) - int(baseline_row["matched_edges"]),
         },
@@ -375,6 +388,8 @@ def compact_metrics(block: dict[str, Any]) -> dict[str, Any]:
             float(block.get("vertex_recall", 0.0)),
         ),
         "assignment_accuracy": float(block.get("assignment_accuracy", 0.0)),
+        "border_precision": float(block.get("border_precision", 0.0)),
+        "border_recall": float(block.get("border_recall", 0.0)),
         "border_f1": float(block.get("border_f1", 0.0)),
         "structural_validity_rate": float(block.get("structural_validity_rate", 0.0)),
         "status_quality": status_quality(block),
@@ -391,6 +406,9 @@ def compact_row(row: dict[str, Any]) -> dict[str, Any]:
         "pred_edges": int(row["pred_edges"]),
         "gt_edges": int(row["gt_edges"]),
         "assignment_accuracy": float(row["assignment_accuracy"]),
+        "border_precision": float(row["border_precision"]),
+        "border_recall": float(row["border_recall"]),
+        "border_f1": float(row["border_f1"]),
     }
 
 

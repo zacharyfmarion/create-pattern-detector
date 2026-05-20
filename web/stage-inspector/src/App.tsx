@@ -129,6 +129,7 @@ function InspectorExplorer({ stage }: { stage: "stage4" | "stage5" }) {
   const setSelectedKey = useInspectorStore((state) => state.setSelectedExampleKey);
   const [threshold, setThreshold] = useState(0.65);
   const [inferAssignments, setInferAssignments] = useState(false);
+  const [snapBorderVertices, setSnapBorderVertices] = useState(false);
   const examplesQuery = useQuery({
     queryKey: [stage, "examples"],
     queryFn: stage === "stage4" ? fetchStage4Examples : fetchStage5Examples,
@@ -194,6 +195,14 @@ function InspectorExplorer({ stage }: { stage: "stage4" | "stage5" }) {
                 />
                 infer M/V
               </label>
+              <label className="checkbox-row">
+                <input
+                  type="checkbox"
+                  checked={snapBorderVertices}
+                  onChange={(event) => setSnapBorderVertices(event.target.checked)}
+                />
+                snap border
+              </label>
               <button
                 className="primary-button"
                 disabled={!selectedKey || recomputeMutation.isPending}
@@ -203,6 +212,9 @@ function InspectorExplorer({ stage }: { stage: "stage4" | "stage5" }) {
                     exampleKey: selectedKey,
                     threshold,
                     inferAssignments,
+                    repair: {
+                      border_canonicalization_snap_vertices: snapBorderVertices,
+                    },
                   })
                 }
               >

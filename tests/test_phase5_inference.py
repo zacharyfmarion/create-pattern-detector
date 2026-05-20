@@ -11,6 +11,7 @@ from src.inference.cli import main as cli_main
 from src.inference.pipeline import (
     InferenceConfig,
     InferenceResult,
+    apply_rectification_warnings_to_report,
     build_report_payload,
     write_inference_outputs,
 )
@@ -79,9 +80,14 @@ def test_rectifier_crops_axis_aligned_cp_panel_from_page(tmp_path: Path) -> None
     result = SquareRectifier(image_size=128).rectify(path, rectified=True)
 
     assert result.transform["mode"] == "detect_quad_warp"
-    source_quad = np.asarray(result.transform["source_quad"], dtype=np.float32)
+    source_quad = np.asarray(result.transform["detected_source_quad"], dtype=np.float32)
+    padded_source_quad = np.asarray(result.transform["source_quad"], dtype=np.float32)
     expected = np.asarray([[34, 58], [273, 58], [273, 297], [34, 297]], dtype=np.float32)
     assert float(np.max(np.abs(source_quad - expected))) <= 4.0
+    assert float(padded_source_quad[0, 0]) < float(source_quad[0, 0])
+    assert float(padded_source_quad[0, 1]) < float(source_quad[0, 1])
+    assert float(padded_source_quad[2, 0]) > float(source_quad[2, 0])
+    assert float(padded_source_quad[2, 1]) > float(source_quad[2, 1])
     interior = _rectified_panel_region(result.rectified_rgb, result.transform)
     assert float(np.mean(np.abs(interior.astype(np.float32) - _resize_np(panel, interior.shape[0])))) < 18.0
     margin = int(result.transform["border_margin_px"])
@@ -108,7 +114,7 @@ def test_rectifier_perspective_warps_skewed_cp_panel(tmp_path: Path) -> None:
     result = SquareRectifier(image_size=128).rectify(path, rectified=True)
 
     assert result.transform["mode"] == "detect_quad_warp"
-    source_quad = np.asarray(result.transform["source_quad"], dtype=np.float32)
+    source_quad = np.asarray(result.transform["detected_source_quad"], dtype=np.float32)
     nearest = _nearest_quad_distances(source_quad, dest)
     assert float(np.max(nearest)) <= 12.0
     interior = _rectified_panel_region(result.rectified_rgb, result.transform)
@@ -130,6 +136,34 @@ def test_rectifier_crops_dark_mode_cp_panel_without_white_matte(tmp_path: Path) 
     assert result.transform["mode"] == "detect_quad_warp"
     assert float(result.rectified_rgb.mean()) < 95.0
     assert result.padding_rgb == (42, 42, 42)
+
+
+def test_rectifier_does_not_crop_full_frame_square_cp(tmp_path: Path) -> None:
+    panel = _synthetic_cp_panel(size=240)
+    path = tmp_path / "full_frame.png"
+    panel.save(path)
+
+    result = SquareRectifier(image_size=128).rectify(path, rectified=True)
+
+    assert result.transform["mode"] == "full_frame_resize"
+    assert result.transform["full_frame_panel"] is True
+    assert "target_quad" not in result.transform
+    resized = _resize_np(panel, 128).astype(np.uint8)
+    assert float(np.mean(np.abs(result.rectified_rgb.astype(np.float32) - resized.astype(np.float32)))) < 1.0
+
+
+def test_rectifier_warns_on_dense_rectified_input(tmp_path: Path) -> None:
+    path = tmp_path / "dense.png"
+    image = np.full((192, 192, 3), 255, dtype=np.uint8)
+    for offset in range(0, 192, 6):
+        image[:, offset : offset + 1] = 0
+        image[offset : offset + 1, :] = 0
+    Image.fromarray(image).save(path)
+
+    result = SquareRectifier(image_size=192).rectify(path, rectified=True)
+
+    codes = [warning["code"] for warning in result.warnings]
+    assert "dense_input_evidence" in codes
 
 
 def test_fold_writer_allows_phase5_metadata_schema() -> None:
@@ -224,6 +258,28 @@ def test_report_payload_includes_rectification_warnings(tmp_path: Path) -> None:
     assert payload["warnings"]["rectification"][0]["code"] == "rectified_input_not_square"
 
 
+def test_dense_rectification_warning_promotes_phase5_status(tmp_path: Path) -> None:
+    graph = _square_border_graph()
+    report = build_quality_report(graph)
+    rectification = RectificationResult(
+        rectified_rgb=np.zeros((16, 16, 3), dtype=np.uint8),
+        input_rgb=np.zeros((16, 16, 3), dtype=np.uint8),
+        original_size=(16, 16),
+        processed_size=(16, 16),
+        homography_image_to_square=np.eye(3, dtype=np.float32),
+        rectification_confidence=1.0,
+        alpha_matte_policy="none",
+        alpha_matte_rgb=None,
+        padding_rgb=(0, 0, 0),
+        warnings=[{"code": "dense_input_evidence", "severity": "warning"}],
+    )
+
+    assert report.status == "valid"
+    apply_rectification_warnings_to_report(report, rectification)
+
+    assert report.status == "outside_v1_envelope"
+
+
 def test_cli_requires_rectified_flag(tmp_path: Path, capsys) -> None:
     path = tmp_path / "input.png"
     Image.fromarray(np.zeros((8, 8, 3), dtype=np.uint8)).save(path)
@@ -259,6 +315,28 @@ def _empty_graph() -> AttributedPlanarGraph:
         assignment_margin=np.empty(0, dtype=np.float32),
         assignment_source=[],
     )
+
+
+def _square_border_graph() -> AttributedPlanarGraph:
+    result = PlanarGraphResult(
+        vertices_coords=np.array(
+            [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+            dtype=np.float32,
+        ),
+        pixel_vertices=np.array(
+            [[0.0, 0.0], [15.0, 0.0], [15.0, 15.0], [0.0, 15.0]],
+            dtype=np.float32,
+        ),
+        edges_vertices=np.array([[0, 1], [1, 2], [2, 3], [3, 0]], dtype=np.int64),
+        edges_assignment=np.array([2, 2, 2, 2], dtype=np.int8),
+        edge_support=np.ones(4, dtype=np.float32),
+        vertex_support=np.ones(4, dtype=np.float32),
+    )
+    graph = AttributedPlanarGraph.from_planar_result(result)
+    graph.assignment_confidence = np.ones(4, dtype=np.float32)
+    graph.assignment_margin = np.ones(4, dtype=np.float32)
+    graph.assignment_source = ["observed"] * 4
+    return graph
 
 
 def _manifest() -> dict:

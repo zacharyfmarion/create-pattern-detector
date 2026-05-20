@@ -73,6 +73,7 @@ def main() -> None:
             config=RepairConfig(
                 image_size=args.image_size,
                 weak_edge_support_threshold=0.05,
+                reconstruct_square_border_chain=False,
                 infer_assignments=args.infer_assignments,
             ),
         )

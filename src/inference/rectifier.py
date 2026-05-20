@@ -71,6 +71,7 @@ class SquareRectifier:
         analysis_max_side: int = 1600,
         min_panel_confidence: float = 0.72,
         border_margin_ratio: float = 32.0 / 1024.0,
+        source_crop_padding_ratio: float = 0.025,
     ) -> None:
         if alpha_matte not in {"auto", "white", "black"}:
             raise ValueError(f"Unsupported alpha matte policy: {alpha_matte}")
@@ -79,6 +80,7 @@ class SquareRectifier:
         self.analysis_max_side = int(analysis_max_side)
         self.min_panel_confidence = float(min_panel_confidence)
         self.border_margin_ratio = float(border_margin_ratio)
+        self.source_crop_padding_ratio = float(source_crop_padding_ratio)
 
     def rectify(self, image_path: str | Path, *, rectified: bool) -> RectificationResult:
         if not rectified:
@@ -117,14 +119,37 @@ class SquareRectifier:
             min_confidence=self.min_panel_confidence,
         )
         if panel is not None:
-            rectified_rgb, transform, homography, padding_rgb = _warp_panel_to_square(
-                input_rgb,
-                panel=panel,
-                image_size=self.image_size,
-                border_margin_ratio=self.border_margin_ratio,
-                fallback_padding_rgb=matte_rgb,
-            )
-            rectification_confidence = panel.confidence
+            if _is_full_frame_panel(input_rgb, panel.quad):
+                rectified_rgb, transform, homography, padding_rgb = _resize_and_pad(
+                    input_rgb,
+                    image_size=self.image_size,
+                    fallback_padding_rgb=matte_rgb,
+                )
+                transform = {
+                    **transform,
+                    "mode": "full_frame_resize",
+                    "method": panel.method,
+                    "full_frame_panel": True,
+                    "detected_source_quad": [
+                        [float(value) for value in point]
+                        for point in _order_quad_points(
+                            _clip_quad(panel.quad, width=width, height=height)
+                        ).tolist()
+                    ],
+                    "confidence": float(panel.confidence),
+                    "metrics": panel.metrics,
+                }
+                rectification_confidence = max(1.0 if width == height else 0.85, panel.confidence)
+            else:
+                rectified_rgb, transform, homography, padding_rgb = _warp_panel_to_square(
+                    input_rgb,
+                    panel=panel,
+                    image_size=self.image_size,
+                    border_margin_ratio=self.border_margin_ratio,
+                    source_crop_padding_ratio=self.source_crop_padding_ratio,
+                    fallback_padding_rgb=matte_rgb,
+                )
+                rectification_confidence = panel.confidence
         else:
             rectified_rgb, transform, homography, padding_rgb = _resize_and_pad(
                 input_rgb,
@@ -132,6 +157,10 @@ class SquareRectifier:
                 fallback_padding_rgb=matte_rgb,
             )
             rectification_confidence = 1.0 if width == height else 0.85
+
+        density_warning = _dense_input_warning(rectified_rgb)
+        if density_warning is not None:
+            warnings.append(density_warning)
 
         return RectificationResult(
             rectified_rgb=rectified_rgb,
@@ -189,6 +218,29 @@ def _detect_cp_panel(
     if best.confidence < min_confidence:
         return None
     return best
+
+
+def _is_full_frame_panel(rgb: np.ndarray, quad: np.ndarray) -> bool:
+    """Return true when a detected CP panel already spans the square image."""
+    height, width = rgb.shape[:2]
+    if width <= 0 or height <= 0:
+        return False
+    if abs(width - height) > max(2, int(round(max(width, height) * 0.02))):
+        return False
+
+    ordered = _order_quad_points(_clip_quad(quad, width=width, height=height))
+    frame_area = float(max(1, (width - 1) * (height - 1)))
+    area_ratio = abs(float(cv2.contourArea(ordered))) / frame_area
+    edge_tolerance = max(6.0, min(width, height) * 0.025)
+    x_values = ordered[:, 0]
+    y_values = ordered[:, 1]
+    touches_frame = (
+        float(np.min(x_values)) <= edge_tolerance
+        and float(np.max(x_values)) >= float(width - 1) - edge_tolerance
+        and float(np.min(y_values)) <= edge_tolerance
+        and float(np.max(y_values)) >= float(height - 1) - edge_tolerance
+    )
+    return area_ratio >= 0.94 and touches_frame
 
 
 def _analysis_image(rgb: np.ndarray, *, analysis_max_side: int) -> tuple[np.ndarray, float]:
@@ -447,11 +499,18 @@ def _warp_panel_to_square(
     panel: _PanelCandidate,
     image_size: int,
     border_margin_ratio: float,
+    source_crop_padding_ratio: float,
     fallback_padding_rgb: tuple[int, int, int] | None,
 ) -> tuple[np.ndarray, dict[str, object], np.ndarray, tuple[int, int, int]]:
     height, width = rgb.shape[:2]
-    quad = _clip_quad(panel.quad, width=width, height=height)
-    ordered = _order_quad_points(quad)
+    detected_quad = _clip_quad(panel.quad, width=width, height=height)
+    ordered_detected = _order_quad_points(detected_quad)
+    padding_px = _source_crop_padding_px(
+        ordered_detected,
+        padding_ratio=source_crop_padding_ratio,
+    )
+    padded_quad = _expand_quad(ordered_detected, padding_px=padding_px)
+    ordered = _order_quad_points(_clip_quad(padded_quad, width=width, height=height))
     border_margin_px = max(2, int(round(float(image_size) * float(border_margin_ratio))))
     border_margin_px = min(border_margin_px, max(0, (image_size - 2) // 2))
     low = float(border_margin_px)
@@ -465,7 +524,17 @@ def _warp_panel_to_square(
         ],
         dtype=np.float32,
     )
-    homography = cv2.getPerspectiveTransform(ordered.astype(np.float32), dst)
+    target_padding_px = _target_crop_padding_px(
+        source_quad=ordered_detected,
+        target_quad=dst,
+        source_padding_px=padding_px,
+    )
+    padded_dst = _clip_quad(
+        _expand_quad(dst, padding_px=target_padding_px),
+        width=image_size,
+        height=image_size,
+    )
+    homography = cv2.getPerspectiveTransform(ordered.astype(np.float32), padded_dst)
     padding_rgb = fallback_padding_rgb or _infer_padding_rgb(rgb)
     warped = cv2.warpPerspective(
         rgb,
@@ -476,15 +545,22 @@ def _warp_panel_to_square(
         borderValue=tuple(int(value) for value in padding_rgb),
     )
     mask = np.zeros((image_size, image_size), dtype=np.uint8)
-    cv2.fillConvexPoly(mask, np.rint(dst).astype(np.int32), 255)
+    cv2.fillConvexPoly(mask, np.rint(padded_dst).astype(np.int32), 255)
     warped[mask == 0] = np.asarray(padding_rgb, dtype=np.uint8)
     transform = {
         "mode": "detect_quad_warp" if panel.method == "border_quad" else "detect_density_crop",
         "method": panel.method,
         "border_margin_px": int(border_margin_px),
         "border_margin_ratio": float(border_margin_ratio),
+        "source_crop_padding_px": float(padding_px),
+        "source_crop_padding_ratio": float(source_crop_padding_ratio),
+        "target_crop_padding_px": float(target_padding_px),
+        "detected_source_quad": [
+            [float(value) for value in point] for point in ordered_detected.tolist()
+        ],
         "source_quad": [[float(value) for value in point] for point in ordered.tolist()],
         "target_quad": [[float(value) for value in point] for point in dst.tolist()],
+        "padded_target_quad": [[float(value) for value in point] for point in padded_dst.tolist()],
         "confidence": float(panel.confidence),
         "metrics": panel.metrics,
         "resized_size": [int(image_size), int(image_size)],
@@ -497,6 +573,55 @@ def _clip_quad(quad: np.ndarray, *, width: int, height: int) -> np.ndarray:
     clipped[:, 0] = np.clip(clipped[:, 0], 0.0, float(max(0, width - 1)))
     clipped[:, 1] = np.clip(clipped[:, 1], 0.0, float(max(0, height - 1)))
     return clipped
+
+
+def _source_crop_padding_px(quad: np.ndarray, *, padding_ratio: float) -> float:
+    ordered = _order_quad_points(quad)
+    side_lengths = [
+        float(np.linalg.norm(ordered[1] - ordered[0])),
+        float(np.linalg.norm(ordered[2] - ordered[1])),
+        float(np.linalg.norm(ordered[2] - ordered[3])),
+        float(np.linalg.norm(ordered[3] - ordered[0])),
+    ]
+    min_side = max(1.0, min(side_lengths))
+    return max(2.0, min(48.0, min_side * max(0.0, padding_ratio)))
+
+
+def _target_crop_padding_px(
+    *,
+    source_quad: np.ndarray,
+    target_quad: np.ndarray,
+    source_padding_px: float,
+) -> float:
+    source_side = max(1.0, _mean_side_length(source_quad))
+    target_side = max(1.0, _mean_side_length(target_quad))
+    return max(1.0, min(64.0, source_padding_px * target_side / source_side))
+
+
+def _mean_side_length(quad: np.ndarray) -> float:
+    ordered = _order_quad_points(quad)
+    return float(
+        (
+            np.linalg.norm(ordered[1] - ordered[0])
+            + np.linalg.norm(ordered[2] - ordered[1])
+            + np.linalg.norm(ordered[2] - ordered[3])
+            + np.linalg.norm(ordered[3] - ordered[0])
+        )
+        / 4.0
+    )
+
+
+def _expand_quad(quad: np.ndarray, *, padding_px: float) -> np.ndarray:
+    ordered = _order_quad_points(quad)
+    center = np.mean(ordered, axis=0)
+    expanded = ordered.copy()
+    for idx, point in enumerate(ordered):
+        vector = point - center
+        distance = float(np.linalg.norm(vector))
+        if distance <= 1e-6:
+            continue
+        expanded[idx] = point + vector / distance * float(padding_px) * math.sqrt(2.0)
+    return expanded.astype(np.float32)
 
 
 def _order_quad_points(points: np.ndarray) -> np.ndarray:
@@ -600,6 +725,56 @@ def _resize_and_pad(
         "resized_size": [int(resized_width), int(resized_height)],
     }
     return np.asarray(canvas, dtype=np.uint8), transform, homography, padding_rgb
+
+
+def _dense_input_warning(rgb: np.ndarray) -> dict[str, object] | None:
+    height, width = rgb.shape[:2]
+    if width <= 0 or height <= 0:
+        return None
+    edges = _edge_map(rgb)
+    edge_density = float(np.count_nonzero(edges)) / float(max(1, edges.size))
+    min_side = min(width, height)
+    lines = cv2.HoughLinesP(
+        edges,
+        rho=1,
+        theta=np.pi / 180.0,
+        threshold=max(24, int(min_side * 0.035)),
+        minLineLength=max(16, int(min_side * 0.045)),
+        maxLineGap=max(4, int(min_side * 0.010)),
+    )
+    line_count = 0
+    line_length_density = 0.0
+    if lines is not None:
+        lengths = []
+        for line in lines[:, 0, :]:
+            x1, y1, x2, y2 = [int(value) for value in line]
+            length = float(np.hypot(x2 - x1, y2 - y1))
+            if length >= max(16.0, min_side * 0.045):
+                lengths.append(length)
+        line_count = len(lengths)
+        line_length_density = float(np.sum(lengths)) / float(max(1, width * height))
+
+    dense = (
+        edge_density >= 0.11
+        or line_count >= 260
+        or (line_count >= 140 and line_length_density >= 0.30)
+    )
+    if not dense:
+        return None
+    return {
+        "code": "dense_input_evidence",
+        "message": (
+            "The rectified input contains dense line evidence that may be outside "
+            "the Phase 3 V1 1024px readable-geometry envelope."
+        ),
+        "severity": "warning",
+        "details": {
+            "edge_density": edge_density,
+            "hough_line_count": int(line_count),
+            "line_length_density": line_length_density,
+            "image_size": [int(width), int(height)],
+        },
+    }
 
 
 def _infer_padding_rgb(rgb: np.ndarray) -> tuple[int, int, int]:
