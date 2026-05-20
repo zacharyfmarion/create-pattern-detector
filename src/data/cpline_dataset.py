@@ -31,6 +31,12 @@ class CplineSample:
     v2_target_line_mask: np.ndarray
     v2_line_style: np.ndarray
     v2_observed_assignment: np.ndarray
+    v2_boundary_contact_heatmap: np.ndarray
+    v2_vertex_type: np.ndarray
+    v2_boundary_side: np.ndarray
+    v2_boundary_offset: np.ndarray
+    v2_boundary_mask: np.ndarray
+    v2_boundary_coord: np.ndarray
     metadata: dict[str, Any]
 
 
@@ -172,6 +178,12 @@ class CplineFoldDataset(Dataset):
             "v2_target_line_mask": torch.from_numpy(sample.v2_target_line_mask).unsqueeze(0).float(),
             "v2_line_style": torch.from_numpy(sample.v2_line_style).long(),
             "v2_observed_assignment": torch.from_numpy(sample.v2_observed_assignment).long(),
+            "v2_boundary_contact_heatmap": torch.from_numpy(sample.v2_boundary_contact_heatmap).unsqueeze(0).float(),
+            "v2_vertex_type": torch.from_numpy(sample.v2_vertex_type).long(),
+            "v2_boundary_side": torch.from_numpy(sample.v2_boundary_side).long(),
+            "v2_boundary_offset": torch.from_numpy(sample.v2_boundary_offset).permute(2, 0, 1).float(),
+            "v2_boundary_mask": torch.from_numpy(sample.v2_boundary_mask).bool(),
+            "v2_boundary_coord": torch.from_numpy(sample.v2_boundary_coord).unsqueeze(0).float(),
             "graph": {
                 "vertices": torch.from_numpy(sample.pixel_vertices).float(),
                 "edges": torch.from_numpy(sample.edges).long(),
@@ -252,6 +264,12 @@ def render_cpline_sample(
         v2_target_line_mask=sample.v2_target_line_mask,
         v2_line_style=sample.v2_line_style,
         v2_observed_assignment=sample.v2_observed_assignment,
+        v2_boundary_contact_heatmap=sample.v2_boundary_contact_heatmap,
+        v2_vertex_type=sample.v2_vertex_type,
+        v2_boundary_side=sample.v2_boundary_side,
+        v2_boundary_offset=sample.v2_boundary_offset,
+        v2_boundary_mask=sample.v2_boundary_mask,
+        v2_boundary_coord=sample.v2_boundary_coord,
         metadata=sample.metadata,
     )
 
@@ -288,6 +306,12 @@ def cpline_collate(batch: list[dict[str, Any]]) -> dict[str, Any]:
         "v2_target_line_mask",
         "v2_line_style",
         "v2_observed_assignment",
+        "v2_boundary_contact_heatmap",
+        "v2_vertex_type",
+        "v2_boundary_side",
+        "v2_boundary_offset",
+        "v2_boundary_mask",
+        "v2_boundary_coord",
     ]
     result = {key: torch.stack([item[key] for item in batch]) for key in stack_keys}
     result["graph"] = [item["graph"] for item in batch]

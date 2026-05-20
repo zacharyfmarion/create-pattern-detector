@@ -344,17 +344,26 @@ Progress as of May 20, 2026:
 - V2 render-time augmentations are wired into the training path as
   `v2-issue-mix` and `v2-dark-issue-mix`, with visual QA contact sheets under
   `visualizations/v2_augmentations/`.
-- CPLineNet has optional V2 auxiliary heads for `non_crease_logits` and
-  `line_style_logits`; the smoke trainer can enable them with `--v2-heads`,
-  `--non-crease-weight`, `--line-style-weight`, and
+- CPLineNet has optional V2 auxiliary heads for `non_crease_logits`,
+  `line_style_logits`, `boundary_contact_heatmap`, `vertex_type_logits`,
+  `boundary_side_logits`, `boundary_offset`, and `boundary_side_coordinate`.
+  The smoke trainer can enable them with `--v2-heads`, `--non-crease-weight`,
+  `--line-style-weight`, the boundary-head loss weights, and
   `--use-v2-observed-assignment`.
 - Local CPU plumbing smokes completed at 128px for both light and dark V2 mixes
   without graph eval: light total loss `5.2911 -> 3.8934`; dark total loss
   `5.2109 -> 3.9599`. Prediction/target QA sheets were generated under
   `visualizations/v2_training_validation_smoke/`.
-- This is only a wiring validation. No 1024 de-risking run, boundary-contact
-  head, carrier-support head, or high-resolution training run has been launched
-  yet.
+- Boundary-head local CPU plumbing smokes completed at 128px for both light and
+  dark V2 mixes without graph eval: light total loss `5.1879 -> 4.2881`,
+  validation boundary-contact loss `0.9281`; dark total loss `5.2147 ->
+  4.3133`, validation boundary-contact loss `0.9454`. Target/prediction QA
+  sheets were generated under `visualizations/v2_boundary_validation_smoke/`.
+  The prediction columns are still diffuse after this tiny smoke and should not
+  be treated as learned localization quality yet.
+- This is only a wiring validation. No 1024 de-risking run, carrier-support
+  head, decoder boundary-contact eval, or high-resolution training run has been
+  launched yet.
 
 ## Phase V2.3: SquareTopologyDecoder
 

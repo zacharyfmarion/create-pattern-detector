@@ -28,6 +28,13 @@ class CPLineLossConfig:
     line_style_weight: float = 0.0
     line_style_ignore_index: int = -100
     use_observed_assignment_target: bool = False
+    boundary_contact_weight: float = 0.0
+    boundary_contact_pos_weight: float = 50.0
+    vertex_type_weight: float = 0.0
+    boundary_side_weight: float = 0.0
+    boundary_side_ignore_index: int = -100
+    boundary_offset_weight: float = 0.0
+    boundary_coord_weight: float = 0.0
 
 
 class CPLineLoss(nn.Module):
@@ -37,6 +44,10 @@ class CPLineLoss(nn.Module):
         self.register_buffer("line_pos_weight", torch.tensor([self.config.line_pos_weight]))
         self.register_buffer("junction_pos_weight", torch.tensor([self.config.junction_pos_weight]))
         self.register_buffer("non_crease_pos_weight", torch.tensor([self.config.non_crease_pos_weight]))
+        self.register_buffer(
+            "boundary_contact_pos_weight",
+            torch.tensor([self.config.boundary_contact_pos_weight]),
+        )
 
     def forward(
         self, outputs: dict[str, torch.Tensor], targets: dict[str, torch.Tensor]
@@ -79,6 +90,19 @@ class CPLineLoss(nn.Module):
             targets,
             ignore_index=self.config.line_style_ignore_index,
         )
+        boundary_contact_loss = _optional_boundary_contact_loss(
+            outputs,
+            targets,
+            self.boundary_contact_pos_weight,
+        )
+        vertex_type_loss = _optional_vertex_type_loss(outputs, targets)
+        boundary_side_loss = _optional_boundary_side_loss(
+            outputs,
+            targets,
+            ignore_index=self.config.boundary_side_ignore_index,
+        )
+        boundary_offset_loss = _optional_boundary_offset_loss(outputs, targets)
+        boundary_coord_loss = _optional_boundary_coord_loss(outputs, targets)
         total = (
             self.config.line_weight * line_loss
             + self.config.line_hard_negative_weight * line_hard_negative_loss
@@ -88,6 +112,11 @@ class CPLineLoss(nn.Module):
             + self.config.assignment_weight * assignment_loss
             + self.config.non_crease_weight * non_crease_loss
             + self.config.line_style_weight * line_style_loss
+            + self.config.boundary_contact_weight * boundary_contact_loss
+            + self.config.vertex_type_weight * vertex_type_loss
+            + self.config.boundary_side_weight * boundary_side_loss
+            + self.config.boundary_offset_weight * boundary_offset_loss
+            + self.config.boundary_coord_weight * boundary_coord_loss
         )
         return {
             "total": total,
@@ -99,6 +128,11 @@ class CPLineLoss(nn.Module):
             "assignment": assignment_loss,
             "non_crease": non_crease_loss,
             "line_style": line_style_loss,
+            "boundary_contact": boundary_contact_loss,
+            "vertex_type": vertex_type_loss,
+            "boundary_side": boundary_side_loss,
+            "boundary_offset": boundary_offset_loss,
+            "boundary_coord": boundary_coord_loss,
         }
 
 
@@ -170,6 +204,64 @@ def _optional_line_style_loss(
         targets["v2_line_style"],
         ignore_index=ignore_index,
     )
+
+
+def _optional_boundary_contact_loss(
+    outputs: dict[str, torch.Tensor],
+    targets: dict[str, torch.Tensor],
+    pos_weight: torch.Tensor,
+) -> torch.Tensor:
+    if "boundary_contact_logits" not in outputs or "v2_boundary_contact_heatmap" not in targets:
+        return outputs["line_logits"].new_tensor(0.0)
+    return F.binary_cross_entropy_with_logits(
+        outputs["boundary_contact_logits"],
+        targets["v2_boundary_contact_heatmap"],
+        pos_weight=pos_weight.to(outputs["boundary_contact_logits"].device),
+    )
+
+
+def _optional_vertex_type_loss(
+    outputs: dict[str, torch.Tensor],
+    targets: dict[str, torch.Tensor],
+) -> torch.Tensor:
+    if "vertex_type_logits" not in outputs or "v2_vertex_type" not in targets:
+        return outputs["line_logits"].new_tensor(0.0)
+    return F.cross_entropy(outputs["vertex_type_logits"], targets["v2_vertex_type"])
+
+
+def _optional_boundary_side_loss(
+    outputs: dict[str, torch.Tensor],
+    targets: dict[str, torch.Tensor],
+    *,
+    ignore_index: int,
+) -> torch.Tensor:
+    if "boundary_side_logits" not in outputs or "v2_boundary_side" not in targets:
+        return outputs["line_logits"].new_tensor(0.0)
+    if not torch.any(targets["v2_boundary_side"] != ignore_index):
+        return outputs["line_logits"].new_tensor(0.0)
+    return F.cross_entropy(
+        outputs["boundary_side_logits"],
+        targets["v2_boundary_side"],
+        ignore_index=ignore_index,
+    )
+
+
+def _optional_boundary_offset_loss(
+    outputs: dict[str, torch.Tensor],
+    targets: dict[str, torch.Tensor],
+) -> torch.Tensor:
+    if "boundary_offset" not in outputs or "v2_boundary_offset" not in targets or "v2_boundary_mask" not in targets:
+        return outputs["line_logits"].new_tensor(0.0)
+    return _masked_l1(outputs["boundary_offset"], targets["v2_boundary_offset"], targets["v2_boundary_mask"])
+
+
+def _optional_boundary_coord_loss(
+    outputs: dict[str, torch.Tensor],
+    targets: dict[str, torch.Tensor],
+) -> torch.Tensor:
+    if "boundary_coord" not in outputs or "v2_boundary_coord" not in targets or "v2_boundary_mask" not in targets:
+        return outputs["line_logits"].new_tensor(0.0)
+    return _masked_l1(outputs["boundary_coord"], targets["v2_boundary_coord"], targets["v2_boundary_mask"])
 
 
 def _masked_l1(

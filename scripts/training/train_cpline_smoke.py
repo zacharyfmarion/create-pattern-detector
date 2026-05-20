@@ -112,6 +112,11 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--non-crease-weight", type=float, default=0.0)
     parser.add_argument("--line-style-weight", type=float, default=0.0)
+    parser.add_argument("--boundary-contact-weight", type=float, default=0.0)
+    parser.add_argument("--vertex-type-weight", type=float, default=0.0)
+    parser.add_argument("--boundary-side-weight", type=float, default=0.0)
+    parser.add_argument("--boundary-offset-weight", type=float, default=0.0)
+    parser.add_argument("--boundary-coord-weight", type=float, default=0.0)
     parser.add_argument(
         "--use-v2-observed-assignment",
         action="store_true",
@@ -191,6 +196,12 @@ def move_targets(batch: dict[str, Any], device: torch.device) -> dict[str, torch
         "v2_target_line_mask",
         "v2_line_style",
         "v2_observed_assignment",
+        "v2_boundary_contact_heatmap",
+        "v2_vertex_type",
+        "v2_boundary_side",
+        "v2_boundary_offset",
+        "v2_boundary_mask",
+        "v2_boundary_coord",
     ]:
         if key in batch:
             targets[key] = batch[key].to(device)
@@ -301,6 +312,11 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
             non_crease_weight=args.non_crease_weight,
             line_style_weight=args.line_style_weight,
             use_observed_assignment_target=args.use_v2_observed_assignment,
+            boundary_contact_weight=args.boundary_contact_weight,
+            vertex_type_weight=args.vertex_type_weight,
+            boundary_side_weight=args.boundary_side_weight,
+            boundary_offset_weight=args.boundary_offset_weight,
+            boundary_coord_weight=args.boundary_coord_weight,
         )
     )
     optimizer = torch.optim.AdamW(model.get_param_groups(args.lr), lr=args.lr, weight_decay=1e-4)
@@ -332,6 +348,11 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         "line_hard_negative_multiplier": args.line_hard_negative_multiplier,
         "non_crease_weight": args.non_crease_weight,
         "line_style_weight": args.line_style_weight,
+        "boundary_contact_weight": args.boundary_contact_weight,
+        "vertex_type_weight": args.vertex_type_weight,
+        "boundary_side_weight": args.boundary_side_weight,
+        "boundary_offset_weight": args.boundary_offset_weight,
+        "boundary_coord_weight": args.boundary_coord_weight,
         "use_v2_observed_assignment": args.use_v2_observed_assignment,
         "seed": args.seed,
     }

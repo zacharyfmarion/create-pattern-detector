@@ -24,6 +24,7 @@ from src.data.v2_augmentations import (
     is_v2_dark_profile,
     v2_issue_profile,
 )
+from src.data.v2_boundary_targets import build_v2_boundary_targets
 from src.vectorization.evidence import render_vectorizer_evidence_from_pixels
 
 BASE_AUGMENT_PROFILES = (
@@ -121,6 +122,12 @@ class AugmentedCplineSample:
     v2_target_line_mask: np.ndarray
     v2_line_style: np.ndarray
     v2_observed_assignment: np.ndarray
+    v2_boundary_contact_heatmap: np.ndarray
+    v2_vertex_type: np.ndarray
+    v2_boundary_side: np.ndarray
+    v2_boundary_offset: np.ndarray
+    v2_boundary_mask: np.ndarray
+    v2_boundary_coord: np.ndarray
     metadata: dict[str, Any]
 
 
@@ -212,6 +219,12 @@ def render_augmented_cpline_sample(
         line_prob=rendered.evidence.line_prob,
         assignment=assignment,
     )
+    v2_boundary = build_v2_boundary_targets(
+        vertices=rendered.pixel_vertices,
+        edges=rendered.edges,
+        assignments=rendered.assignments,
+        image_size=image_size,
+    )
     v2_metadata: dict[str, Any] | None = None
     if selected_profile in V2_AUGMENT_PROFILES:
         v2_result = apply_v2_augmentation(
@@ -258,6 +271,7 @@ def render_augmented_cpline_sample(
         "line_pixels": int(np.count_nonzero(rendered.evidence.line_prob > 0.05)),
         "junction_pixels": int(np.count_nonzero(rendered.evidence.junction_heatmap > 0.05)),
         "v2_augmentation": v2_metadata,
+        "v2_boundary": v2_boundary.metadata,
         "params": _metadata_params(params),
     }
     return AugmentedCplineSample(
@@ -275,6 +289,12 @@ def render_augmented_cpline_sample(
         v2_target_line_mask=v2_target_line_mask.astype(np.float32),
         v2_line_style=v2_line_style.astype(np.int64),
         v2_observed_assignment=v2_observed_assignment.astype(np.int64),
+        v2_boundary_contact_heatmap=v2_boundary.contact_heatmap.astype(np.float32),
+        v2_vertex_type=v2_boundary.vertex_type.astype(np.int64),
+        v2_boundary_side=v2_boundary.side.astype(np.int64),
+        v2_boundary_offset=v2_boundary.offset.astype(np.float32),
+        v2_boundary_mask=v2_boundary.mask.astype(bool),
+        v2_boundary_coord=v2_boundary.side_coord.astype(np.float32),
         metadata=metadata,
     )
 

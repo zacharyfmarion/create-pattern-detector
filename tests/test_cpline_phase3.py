@@ -21,6 +21,7 @@ from src.data.cpline_dataset import (
 )
 from src.data.fold_parser import CreasePattern, FOLDParser
 from src.data.v2_augmentations import V2_LINE_STYLE_IDS
+from src.data.v2_boundary_targets import V2_BOUNDARY_SIDE_IDS, V2_VERTEX_TYPE_IDS
 from src.models import CPLineNet
 from src.models.batchnorm import model_eval_with_batchnorm_mode
 from src.models.losses import CPLineLoss, CPLineLossConfig
@@ -53,6 +54,27 @@ def simple_mv_cp() -> CreasePattern:
         vertices=cp.vertices.copy(),
         edges=cp.edges.copy(),
         assignments=np.array([2, 2, 2, 2, 0, 1, 0, 1], dtype=np.int8),
+    )
+
+
+def boundary_contact_cp() -> CreasePattern:
+    return CreasePattern(
+        vertices=np.array(
+            [
+                [0.0, 0.0],
+                [1.0, 0.0],
+                [1.0, 1.0],
+                [0.0, 1.0],
+                [0.5, 0.0],
+                [0.5, 0.5],
+            ],
+            dtype=np.float32,
+        ),
+        edges=np.array(
+            [[0, 4], [4, 1], [1, 2], [2, 3], [3, 0], [4, 5], [5, 2]],
+            dtype=np.int64,
+        ),
+        assignments=np.array([2, 2, 2, 2, 2, 0, 1], dtype=np.int8),
     )
 
 
@@ -500,6 +522,28 @@ def test_v2_dark_issue_mix_samples_dark_profiles():
     assert "v2-dark-text" in seen
 
 
+def test_v2_boundary_targets_mark_boundary_contact_side_and_coord():
+    sample = render_cpline_sample(
+        boundary_contact_cp(),
+        image_size=128,
+        padding=8,
+        line_width=2,
+        augment_profile="clean",
+    )
+
+    assert sample.v2_boundary_contact_heatmap.max() > 0.9
+    assert np.count_nonzero(sample.v2_boundary_mask) == 1
+    assert V2_VERTEX_TYPE_IDS["corner"] in np.unique(sample.v2_vertex_type)
+    assert V2_VERTEX_TYPE_IDS["boundary_contact"] in np.unique(sample.v2_vertex_type)
+    assert V2_VERTEX_TYPE_IDS["interior_intersection"] in np.unique(sample.v2_vertex_type)
+
+    side_labels = sample.v2_boundary_side[sample.v2_boundary_mask]
+    side_coords = sample.v2_boundary_coord[sample.v2_boundary_mask]
+    assert side_labels.tolist() == [V2_BOUNDARY_SIDE_IDS["top"]]
+    assert np.isclose(float(side_coords[0]), 0.5, atol=0.02)
+    assert sample.metadata["v2_boundary"]["side_counts"] == {"top": 1}
+
+
 def test_cpline_dataset_does_not_cache_random_augmented_tensors(tmp_path):
     manifest = _write_manifest(tmp_path, count=2)
     dataset = CplineFoldDataset(
@@ -554,6 +598,12 @@ def test_cpline_dataset_collates_v2_targets(tmp_path):
     assert batch["v2_target_line_mask"].shape == (1, 1, 96, 96)
     assert batch["v2_line_style"].shape == (1, 96, 96)
     assert batch["v2_observed_assignment"].shape == (1, 96, 96)
+    assert batch["v2_boundary_contact_heatmap"].shape == (1, 1, 96, 96)
+    assert batch["v2_vertex_type"].shape == (1, 96, 96)
+    assert batch["v2_boundary_side"].shape == (1, 96, 96)
+    assert batch["v2_boundary_offset"].shape == (1, 2, 96, 96)
+    assert batch["v2_boundary_mask"].shape == (1, 96, 96)
+    assert batch["v2_boundary_coord"].shape == (1, 1, 96, 96)
 
 
 def test_cpline_dataset_limit_samples_across_ordered_mixed_manifest():
@@ -795,6 +845,11 @@ def test_cpline_net_optional_v2_heads_and_losses():
 
     assert outputs["non_crease_logits"].shape == (2, 1, 64, 64)
     assert outputs["line_style_logits"].shape == (2, 4, 64, 64)
+    assert outputs["boundary_contact_logits"].shape == (2, 1, 64, 64)
+    assert outputs["vertex_type_logits"].shape == (2, 4, 64, 64)
+    assert outputs["boundary_side_logits"].shape == (2, 4, 64, 64)
+    assert outputs["boundary_offset"].shape == (2, 2, 64, 64)
+    assert outputs["boundary_coord"].shape == (2, 1, 64, 64)
 
     targets = {
         "line_prob": torch.zeros((2, 1, 64, 64), dtype=torch.float32),
@@ -806,6 +861,12 @@ def test_cpline_net_optional_v2_heads_and_losses():
         "v2_non_crease_mask": torch.zeros((2, 1, 64, 64), dtype=torch.float32),
         "v2_line_style": torch.full((2, 64, 64), -100, dtype=torch.long),
         "v2_observed_assignment": torch.full((2, 64, 64), -100, dtype=torch.long),
+        "v2_boundary_contact_heatmap": torch.zeros((2, 1, 64, 64), dtype=torch.float32),
+        "v2_vertex_type": torch.zeros((2, 64, 64), dtype=torch.long),
+        "v2_boundary_side": torch.full((2, 64, 64), -100, dtype=torch.long),
+        "v2_boundary_offset": torch.zeros((2, 2, 64, 64), dtype=torch.float32),
+        "v2_boundary_mask": torch.zeros((2, 64, 64), dtype=torch.bool),
+        "v2_boundary_coord": torch.zeros((2, 1, 64, 64), dtype=torch.float32),
     }
     targets["line_prob"][:, :, 10:14, 10:14] = 1.0
     targets["angle"][:, 0, 10:14, 10:14] = 1.0
@@ -813,17 +874,32 @@ def test_cpline_net_optional_v2_heads_and_losses():
     targets["v2_observed_assignment"][:, 10:14, 10:14] = 3
     targets["v2_non_crease_mask"][:, :, 30:34, 30:34] = 1.0
     targets["v2_line_style"][:, 10:14, 10:14] = V2_LINE_STYLE_IDS["dashed"]
+    targets["v2_boundary_contact_heatmap"][:, :, 5, 5] = 1.0
+    targets["v2_vertex_type"][:, 5, 5] = V2_VERTEX_TYPE_IDS["boundary_contact"]
+    targets["v2_boundary_side"][:, 5, 5] = V2_BOUNDARY_SIDE_IDS["top"]
+    targets["v2_boundary_mask"][:, 5, 5] = True
+    targets["v2_boundary_coord"][:, :, 5, 5] = 0.5
     criterion = CPLineLoss(
         CPLineLossConfig(
             non_crease_weight=1.0,
             line_style_weight=1.0,
             use_observed_assignment_target=True,
+            boundary_contact_weight=1.0,
+            vertex_type_weight=1.0,
+            boundary_side_weight=1.0,
+            boundary_offset_weight=1.0,
+            boundary_coord_weight=1.0,
         )
     )
     losses = criterion(outputs, targets)
 
     assert losses["non_crease"] > 0
     assert losses["line_style"] > 0
+    assert losses["boundary_contact"] > 0
+    assert losses["vertex_type"] > 0
+    assert losses["boundary_side"] > 0
+    assert torch.isfinite(losses["boundary_offset"])
+    assert torch.isfinite(losses["boundary_coord"])
 
 
 def test_cpline_outputs_convert_to_vectorizer_evidence():
