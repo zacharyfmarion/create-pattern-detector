@@ -27,6 +27,10 @@ class CplineSample:
     pixel_vertices: np.ndarray
     edges: np.ndarray
     assignments: np.ndarray
+    v2_non_crease_mask: np.ndarray
+    v2_target_line_mask: np.ndarray
+    v2_line_style: np.ndarray
+    v2_observed_assignment: np.ndarray
     metadata: dict[str, Any]
 
 
@@ -164,6 +168,10 @@ class CplineFoldDataset(Dataset):
             "junction_offset": torch.from_numpy(sample.junction_offset).permute(2, 0, 1).float(),
             "junction_mask": torch.from_numpy(sample.junction_mask).bool(),
             "assignment": torch.from_numpy(sample.assignment).long(),
+            "v2_non_crease_mask": torch.from_numpy(sample.v2_non_crease_mask).unsqueeze(0).float(),
+            "v2_target_line_mask": torch.from_numpy(sample.v2_target_line_mask).unsqueeze(0).float(),
+            "v2_line_style": torch.from_numpy(sample.v2_line_style).long(),
+            "v2_observed_assignment": torch.from_numpy(sample.v2_observed_assignment).long(),
             "graph": {
                 "vertices": torch.from_numpy(sample.pixel_vertices).float(),
                 "edges": torch.from_numpy(sample.edges).long(),
@@ -240,6 +248,10 @@ def render_cpline_sample(
         pixel_vertices=sample.pixel_vertices,
         edges=sample.edges,
         assignments=sample.assignments,
+        v2_non_crease_mask=sample.v2_non_crease_mask,
+        v2_target_line_mask=sample.v2_target_line_mask,
+        v2_line_style=sample.v2_line_style,
+        v2_observed_assignment=sample.v2_observed_assignment,
         metadata=sample.metadata,
     )
 
@@ -272,6 +284,10 @@ def cpline_collate(batch: list[dict[str, Any]]) -> dict[str, Any]:
         "junction_offset",
         "junction_mask",
         "assignment",
+        "v2_non_crease_mask",
+        "v2_target_line_mask",
+        "v2_line_style",
+        "v2_observed_assignment",
     ]
     result = {key: torch.stack([item[key] for item in batch]) for key in stack_keys}
     result["graph"] = [item["graph"] for item in batch]

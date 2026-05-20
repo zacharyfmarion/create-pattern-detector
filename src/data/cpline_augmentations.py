@@ -7,17 +7,17 @@ rendered. Photometric effects touch only the input image.
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 from time import perf_counter
 from typing import Any
-import warnings
 
 import cv2
 import numpy as np
 
 from src.data.fold_parser import CreasePattern, transform_coords
+from src.data.v2_augmentations import V2_AUGMENT_PROFILES, apply_v2_augmentation, default_v2_targets
 from src.vectorization.evidence import render_vectorizer_evidence_from_pixels
-
 
 BASE_AUGMENT_PROFILES = (
     "clean",
@@ -46,10 +46,21 @@ AUGMENT_MIXES: dict[str, tuple[tuple[str, float, str | None], ...]] = {
         ("photo-dark", 0.10, None),
     ),
 }
+V2_AUGMENT_MIX = (
+    ("v2-text", 0.14, None),
+    ("v2-watermark", 0.14, None),
+    ("v2-guide-grid", 0.14, None),
+    ("v2-dashed", 0.16, None),
+    ("v2-faint", 0.14, None),
+    ("v2-ambiguous-mv", 0.14, None),
+    ("v2-combined", 0.14, None),
+)
+AUGMENT_MIXES["v2-issue-mix"] = V2_AUGMENT_MIX
 MIXED_PROFILE_ENTRIES = AUGMENT_MIXES["stage-balanced"]
 MIXED_AUGMENT_PROFILES = tuple(AUGMENT_MIXES) + ("mixed",)
 AUGMENT_PROFILES = (
     *BASE_AUGMENT_PROFILES,
+    *V2_AUGMENT_PROFILES,
     *MIXED_AUGMENT_PROFILES,
 )
 SQUARE_SYMMETRIES = (
@@ -90,6 +101,10 @@ class AugmentedCplineSample:
     pixel_vertices: np.ndarray
     edges: np.ndarray
     assignments: np.ndarray
+    v2_non_crease_mask: np.ndarray
+    v2_target_line_mask: np.ndarray
+    v2_line_style: np.ndarray
+    v2_observed_assignment: np.ndarray
     metadata: dict[str, Any]
 
 
@@ -177,6 +192,32 @@ def render_augmented_cpline_sample(
     junction_offset, junction_mask = _junction_offsets(rendered.pixel_vertices, rendered.edges, image_size)
     assignment = rendered.evidence.assignment_labels.astype(np.int64) - 1
     assignment[rendered.evidence.assignment_labels == 0] = -100
+    v2_non_crease_mask, v2_target_line_mask, v2_line_style, v2_observed_assignment = default_v2_targets(
+        line_prob=rendered.evidence.line_prob,
+        assignment=assignment,
+    )
+    v2_metadata: dict[str, Any] | None = None
+    if selected_profile in V2_AUGMENT_PROFILES:
+        v2_result = apply_v2_augmentation(
+            profile=selected_profile,
+            image=image,
+            vertices=transformed_vertices,
+            edges=cp.edges,
+            assignments=cp.assignments,
+            line_prob=rendered.evidence.line_prob,
+            assignment_target=assignment,
+            image_size=image_size,
+            line_width=int(params["line_width"]),
+            background=tuple(int(v) for v in params["background"]),
+            palette={int(k): tuple(int(c) for c in v) for k, v in params["palette"].items()},
+            rng=local_rng,
+        )
+        image = v2_result.image
+        v2_non_crease_mask = v2_result.non_crease_mask
+        v2_target_line_mask = v2_result.target_line_mask
+        v2_line_style = v2_result.line_style
+        v2_observed_assignment = v2_result.observed_assignment
+        v2_metadata = v2_result.metadata
     clipped_vertices = int(
         np.sum(
             (transformed_vertices[:, 0] < 0)
@@ -200,6 +241,7 @@ def render_augmented_cpline_sample(
         "edge_count": int(len(rendered.edges)),
         "line_pixels": int(np.count_nonzero(rendered.evidence.line_prob > 0.05)),
         "junction_pixels": int(np.count_nonzero(rendered.evidence.junction_heatmap > 0.05)),
+        "v2_augmentation": v2_metadata,
         "params": _metadata_params(params),
     }
     return AugmentedCplineSample(
@@ -213,6 +255,10 @@ def render_augmented_cpline_sample(
         pixel_vertices=rendered.pixel_vertices.astype(np.float32),
         edges=rendered.edges.astype(np.int64),
         assignments=rendered.assignments.astype(np.int8),
+        v2_non_crease_mask=v2_non_crease_mask.astype(np.float32),
+        v2_target_line_mask=v2_target_line_mask.astype(np.float32),
+        v2_line_style=v2_line_style.astype(np.int64),
+        v2_observed_assignment=v2_observed_assignment.astype(np.int64),
         metadata=metadata,
     )
 
@@ -263,10 +309,14 @@ def _sample_render_params(
         "assignment_target_mode": "original",
         "square_symmetry": _select_square_symmetry(profile, rng, square_symmetry),
     }
-    if profile == "clean":
-        return params
     if params["square_symmetry"] != "identity":
         params["geometry_applied"] = True
+    if profile == "clean":
+        return params
+    if profile in V2_AUGMENT_PROFILES:
+        if profile in {"v2-ambiguous-mv", "v2-combined"}:
+            params["assignment_target_mode"] = "mv_to_unassigned"
+        return params
     if profile == "square-symmetry":
         return params
     if profile == "line-style":

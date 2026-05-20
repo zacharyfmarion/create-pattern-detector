@@ -23,6 +23,11 @@ class CPLineLossConfig:
     line_hard_negative_ratio: float = 0.05
     line_hard_negative_multiplier: float = 4.0
     line_hard_negative_min_pixels: int = 256
+    non_crease_weight: float = 0.0
+    non_crease_pos_weight: float = 20.0
+    line_style_weight: float = 0.0
+    line_style_ignore_index: int = -100
+    use_observed_assignment_target: bool = False
 
 
 class CPLineLoss(nn.Module):
@@ -31,6 +36,7 @@ class CPLineLoss(nn.Module):
         self.config = config or CPLineLossConfig()
         self.register_buffer("line_pos_weight", torch.tensor([self.config.line_pos_weight]))
         self.register_buffer("junction_pos_weight", torch.tensor([self.config.junction_pos_weight]))
+        self.register_buffer("non_crease_pos_weight", torch.tensor([self.config.non_crease_pos_weight]))
 
     def forward(
         self, outputs: dict[str, torch.Tensor], targets: dict[str, torch.Tensor]
@@ -59,10 +65,19 @@ class CPLineLoss(nn.Module):
             targets["junction_offset"],
             targets["junction_mask"],
         )
+        assignment_target = targets["assignment"]
+        if self.config.use_observed_assignment_target and "v2_observed_assignment" in targets:
+            assignment_target = targets["v2_observed_assignment"]
         assignment_loss = F.cross_entropy(
             outputs["assignment_logits"],
-            targets["assignment"],
+            assignment_target,
             ignore_index=self.config.assignment_ignore_index,
+        )
+        non_crease_loss = _optional_non_crease_loss(outputs, targets, self.non_crease_pos_weight)
+        line_style_loss = _optional_line_style_loss(
+            outputs,
+            targets,
+            ignore_index=self.config.line_style_ignore_index,
         )
         total = (
             self.config.line_weight * line_loss
@@ -71,6 +86,8 @@ class CPLineLoss(nn.Module):
             + self.config.junction_weight * junction_loss
             + self.config.junction_offset_weight * offset_loss
             + self.config.assignment_weight * assignment_loss
+            + self.config.non_crease_weight * non_crease_loss
+            + self.config.line_style_weight * line_style_loss
         )
         return {
             "total": total,
@@ -80,6 +97,8 @@ class CPLineLoss(nn.Module):
             "junction": junction_loss,
             "junction_offset": offset_loss,
             "assignment": assignment_loss,
+            "non_crease": non_crease_loss,
+            "line_style": line_style_loss,
         }
 
 
@@ -122,6 +141,35 @@ def _hard_negative_line_loss(
     if not batch_losses:
         return logits.new_tensor(0.0)
     return torch.stack(batch_losses).mean()
+
+
+def _optional_non_crease_loss(
+    outputs: dict[str, torch.Tensor],
+    targets: dict[str, torch.Tensor],
+    pos_weight: torch.Tensor,
+) -> torch.Tensor:
+    if "non_crease_logits" not in outputs or "v2_non_crease_mask" not in targets:
+        return outputs["line_logits"].new_tensor(0.0)
+    return F.binary_cross_entropy_with_logits(
+        outputs["non_crease_logits"],
+        targets["v2_non_crease_mask"],
+        pos_weight=pos_weight.to(outputs["non_crease_logits"].device),
+    )
+
+
+def _optional_line_style_loss(
+    outputs: dict[str, torch.Tensor],
+    targets: dict[str, torch.Tensor],
+    *,
+    ignore_index: int,
+) -> torch.Tensor:
+    if "line_style_logits" not in outputs or "v2_line_style" not in targets:
+        return outputs["line_logits"].new_tensor(0.0)
+    return F.cross_entropy(
+        outputs["line_style_logits"],
+        targets["v2_line_style"],
+        ignore_index=ignore_index,
+    )
 
 
 def _masked_l1(

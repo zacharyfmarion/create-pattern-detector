@@ -106,6 +106,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--backbone", type=str, default="tiny")
     parser.add_argument("--hidden-channels", type=int, default=128)
     parser.add_argument(
+        "--v2-heads",
+        action="store_true",
+        help="Enable V2 auxiliary non-crease and line-style heads.",
+    )
+    parser.add_argument("--non-crease-weight", type=float, default=0.0)
+    parser.add_argument("--line-style-weight", type=float, default=0.0)
+    parser.add_argument(
+        "--use-v2-observed-assignment",
+        action="store_true",
+        help="Train assignment logits against observed labels, marking ambiguous M/V as U.",
+    )
+    parser.add_argument(
         "--batchnorm-mode",
         choices=BATCHNORM_MODES,
         default="eval",
@@ -166,7 +178,7 @@ def seed_everything(seed: int) -> None:
 
 
 def move_targets(batch: dict[str, Any], device: torch.device) -> dict[str, torch.Tensor]:
-    return {
+    targets = {
         "line_prob": batch["line_prob"].to(device),
         "angle": batch["angle"].to(device),
         "junction_heatmap": batch["junction_heatmap"].to(device),
@@ -174,6 +186,15 @@ def move_targets(batch: dict[str, Any], device: torch.device) -> dict[str, torch
         "junction_mask": batch["junction_mask"].to(device),
         "assignment": batch["assignment"].to(device),
     }
+    for key in [
+        "v2_non_crease_mask",
+        "v2_target_line_mask",
+        "v2_line_style",
+        "v2_observed_assignment",
+    ]:
+        if key in batch:
+            targets[key] = batch[key].to(device)
+    return targets
 
 
 def scalar_losses(losses: dict[str, torch.Tensor]) -> dict[str, float]:
@@ -263,6 +284,7 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         backbone=args.backbone,
         pretrained=False,
         hidden_channels=args.hidden_channels,
+        v2_heads=args.v2_heads,
     ).to(device)
     init_checkpoint = args.init_checkpoint
     if init_checkpoint is not None:
@@ -270,12 +292,15 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
             init_checkpoint if init_checkpoint.is_absolute() else REPO_ROOT / init_checkpoint
         )
         loaded = torch.load(init_checkpoint, map_location=device, weights_only=False)
-        model.load_state_dict(loaded["model_state_dict"])
+        model.load_state_dict(loaded["model_state_dict"], strict=not args.v2_heads)
     criterion = CPLineLoss(
         CPLineLossConfig(
             line_hard_negative_weight=args.line_hard_negative_weight,
             line_hard_negative_ratio=args.line_hard_negative_ratio,
             line_hard_negative_multiplier=args.line_hard_negative_multiplier,
+            non_crease_weight=args.non_crease_weight,
+            line_style_weight=args.line_style_weight,
+            use_observed_assignment_target=args.use_v2_observed_assignment,
         )
     )
     optimizer = torch.optim.AdamW(model.get_param_groups(args.lr), lr=args.lr, weight_decay=1e-4)
@@ -293,6 +318,7 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         "skip_graph_eval": args.skip_graph_eval,
         "backbone": args.backbone,
         "hidden_channels": args.hidden_channels,
+        "v2_heads": args.v2_heads,
         "batchnorm_mode": args.batchnorm_mode,
         "init_checkpoint": init_checkpoint.as_posix() if init_checkpoint is not None else None,
         "augment_profile": augment_profile,
@@ -304,6 +330,9 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         "line_hard_negative_weight": args.line_hard_negative_weight,
         "line_hard_negative_ratio": args.line_hard_negative_ratio,
         "line_hard_negative_multiplier": args.line_hard_negative_multiplier,
+        "non_crease_weight": args.non_crease_weight,
+        "line_style_weight": args.line_style_weight,
+        "use_v2_observed_assignment": args.use_v2_observed_assignment,
         "seed": args.seed,
     }
     (output_dir / "run_config.json").write_text(

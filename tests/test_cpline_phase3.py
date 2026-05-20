@@ -20,6 +20,7 @@ from src.data.cpline_dataset import (
     select_records,
 )
 from src.data.fold_parser import CreasePattern, FOLDParser
+from src.data.v2_augmentations import V2_LINE_STYLE_IDS
 from src.models import CPLineNet
 from src.models.batchnorm import model_eval_with_batchnorm_mode
 from src.models.losses import CPLineLoss, CPLineLossConfig
@@ -362,6 +363,73 @@ def test_cpline_monochrome_style_does_not_hallucinate_mv_targets():
     assert 3 in sample.assignment
 
 
+def test_v2_text_augmentation_emits_non_crease_targets():
+    sample = render_cpline_sample(
+        simple_mv_cp(),
+        image_size=128,
+        padding=8,
+        line_width=2,
+        augment_profile="v2-text",
+        seed=4,
+    )
+
+    assert sample.metadata["selected_profile"] == "v2-text"
+    assert sample.metadata["v2_augmentation"]["modes"] == ["text"]
+    assert np.count_nonzero(sample.v2_non_crease_mask) > 0
+    assert np.count_nonzero(sample.v2_target_line_mask) > 0
+    assert sample.v2_line_style[sample.v2_target_line_mask > 0].max() == V2_LINE_STYLE_IDS["solid"]
+
+
+def test_v2_dashed_augmentation_preserves_solid_carrier_target():
+    sample = render_cpline_sample(
+        simple_mv_cp(),
+        image_size=128,
+        padding=8,
+        line_width=2,
+        augment_profile="v2-dashed",
+        seed=5,
+    )
+
+    assert "dashed" in sample.metadata["v2_augmentation"]["modes"]
+    assert np.count_nonzero(sample.v2_line_style == V2_LINE_STYLE_IDS["dashed"]) > 0
+    assert sample.line_prob.max() > 0.9
+    assert np.count_nonzero(sample.v2_target_line_mask) == np.count_nonzero(sample.line_prob > 0.05)
+
+
+def test_v2_ambiguous_mv_marks_observed_assignment_unknown():
+    sample = render_cpline_sample(
+        simple_mv_cp(),
+        image_size=128,
+        padding=8,
+        line_width=2,
+        augment_profile="v2-ambiguous-mv",
+        seed=6,
+    )
+
+    assert "ambiguous_mv" in sample.metadata["v2_augmentation"]["modes"]
+    assert 0 not in sample.v2_observed_assignment
+    assert 1 not in sample.v2_observed_assignment
+    assert 3 in sample.v2_observed_assignment
+
+
+def test_v2_issue_mix_samples_combined_profile():
+    cp = simple_mv_cp()
+    seen = {
+        render_cpline_sample(
+            cp,
+            image_size=96,
+            padding=8,
+            line_width=2,
+            augment_profile="v2-issue-mix",
+            seed=seed,
+        ).metadata["selected_profile"]
+        for seed in range(80)
+    }
+
+    assert "v2-combined" in seen
+    assert "v2-text" in seen
+
+
 def test_cpline_dataset_does_not_cache_random_augmented_tensors(tmp_path):
     manifest = _write_manifest(tmp_path, count=2)
     dataset = CplineFoldDataset(
@@ -396,6 +464,26 @@ def test_cpline_dataset_workers_use_independent_augmentation_rngs(tmp_path):
     first, second = [batch["image"][0] for batch in loader]
 
     assert not torch.equal(first, second)
+
+
+def test_cpline_dataset_collates_v2_targets(tmp_path):
+    manifest = _write_manifest(tmp_path, count=2)
+    dataset = CplineFoldDataset(
+        manifest,
+        split="train",
+        limit=1,
+        max_edges=20,
+        image_size=96,
+        augment_profile="v2-watermark",
+        seed=5,
+    )
+    loader = DataLoader(dataset, batch_size=1, num_workers=0, collate_fn=cpline_collate)
+    batch = next(iter(loader))
+
+    assert batch["v2_non_crease_mask"].shape == (1, 1, 96, 96)
+    assert batch["v2_target_line_mask"].shape == (1, 1, 96, 96)
+    assert batch["v2_line_style"].shape == (1, 96, 96)
+    assert batch["v2_observed_assignment"].shape == (1, 96, 96)
 
 
 def test_cpline_dataset_limit_samples_across_ordered_mixed_manifest():
@@ -629,6 +717,43 @@ def test_cpline_net_outputs_roadmap_fields():
     assert outputs["junction_logits"].shape == (2, 1, 64, 64)
     assert outputs["junction_offset"].shape == (2, 2, 64, 64)
     assert outputs["assignment_logits"].shape == (2, 4, 64, 64)
+
+
+def test_cpline_net_optional_v2_heads_and_losses():
+    model = CPLineNet(backbone="tiny", hidden_channels=32, v2_heads=True)
+    outputs = model(torch.zeros(2, 3, 64, 64))
+
+    assert outputs["non_crease_logits"].shape == (2, 1, 64, 64)
+    assert outputs["line_style_logits"].shape == (2, 4, 64, 64)
+
+    targets = {
+        "line_prob": torch.zeros((2, 1, 64, 64), dtype=torch.float32),
+        "angle": torch.zeros((2, 2, 64, 64), dtype=torch.float32),
+        "junction_heatmap": torch.zeros((2, 1, 64, 64), dtype=torch.float32),
+        "junction_offset": torch.zeros((2, 2, 64, 64), dtype=torch.float32),
+        "junction_mask": torch.zeros((2, 64, 64), dtype=torch.bool),
+        "assignment": torch.full((2, 64, 64), -100, dtype=torch.long),
+        "v2_non_crease_mask": torch.zeros((2, 1, 64, 64), dtype=torch.float32),
+        "v2_line_style": torch.full((2, 64, 64), -100, dtype=torch.long),
+        "v2_observed_assignment": torch.full((2, 64, 64), -100, dtype=torch.long),
+    }
+    targets["line_prob"][:, :, 10:14, 10:14] = 1.0
+    targets["angle"][:, 0, 10:14, 10:14] = 1.0
+    targets["assignment"][:, 10:14, 10:14] = 3
+    targets["v2_observed_assignment"][:, 10:14, 10:14] = 3
+    targets["v2_non_crease_mask"][:, :, 30:34, 30:34] = 1.0
+    targets["v2_line_style"][:, 10:14, 10:14] = V2_LINE_STYLE_IDS["dashed"]
+    criterion = CPLineLoss(
+        CPLineLossConfig(
+            non_crease_weight=1.0,
+            line_style_weight=1.0,
+            use_observed_assignment_target=True,
+        )
+    )
+    losses = criterion(outputs, targets)
+
+    assert losses["non_crease"] > 0
+    assert losses["line_style"] > 0
 
 
 def test_cpline_outputs_convert_to_vectorizer_evidence():
