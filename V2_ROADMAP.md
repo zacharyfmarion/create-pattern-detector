@@ -62,8 +62,8 @@ Conclusion:
   decoder is unlikely to reach 0.99.
 - Real-world failures also happen before topology decoding: text is detected as
   crease evidence, guide grids become false folds, dashed lines lose support,
-  rectifier crops can remove border evidence, symmetric structures can be
-  partially missed, and dense CPs collapse below the effective image scale.
+  rectifier crops can remove unrecoverable border evidence, and naturally dense
+  CPs can fall below the effective image scale.
 
 The system needs to model the square-domain graph directly, but it also needs
 better evidence hygiene and rectification confidence.
@@ -113,11 +113,17 @@ The square prior is powerful, but it does not solve all V1 failures by itself.
 - Dashed or gapped crease styles need carrier-level support. Sampling every
   pixel along a segment as if the line is continuous will under-score valid
   dashed creases.
-- Dense structures need an explicit scale policy. V2 should know when a CP is
-  below the minimum readable spacing for the chosen input size and should either
-  reprocess at higher resolution or report the envelope violation.
-- Symmetry is useful evidence, not a default repair. Symmetry completion should
-  only run as a confidence-scored hypothesis/refinement mode.
+- Dense structures need an explicit scale policy, but not a synthetic
+  degradation augmentation. V2 should learn dense CPs from the real/synthetic
+  FOLD distribution, train at larger sizes, and know when minimum readable
+  spacing requires higher-resolution or tiled reprocessing.
+- Cropped-away borders and missing source regions are not recoverable visual
+  evidence. V2 should detect/report these as unsupported or low-confidence
+  inputs, not train a model to hallucinate the border that would have been
+  there.
+- Symmetry completion is out of scope for V2. It may become a V3 recovery mode,
+  but V2 should not silently add mirrored creases or optimize on synthetic
+  one-sided-miss examples.
 - Flat-foldability should validate geometry and optionally solve assignments
   after strict gates. It should not add missing creases by default.
 
@@ -146,8 +152,6 @@ Required metrics:
 - `homography_error_px`: corner or frame reprojection error on labeled panels.
 - `minimum_readable_spacing_px`: smallest predicted/GT spacing bucket per
   example, used to separate model errors from resolution-envelope failures.
-- `symmetry_hypothesis_precision/recall`: only for examples where symmetry is
-  detected or labeled, not as a universal score.
 - `unsplit_crossing_count`: predicted crossings that are not graph vertices.
 - `flat_foldable_vertex_rate`: interior vertices passing local Kawasaki and
   Maekawa where assignments are known or inferred.
@@ -160,22 +164,38 @@ Every V2 candidate should report the issue-slice metrics separately.
 
 ## Phase V2.0: Issue Benchmark And Bottleneck Map
 
-Goal: turn the observed V1 failures into a frozen benchmark and prove which part
-of the system is limiting the 0.99 target before paying for high-resolution
-training.
+Goal: turn the observed V1 failures into a frozen synthetic benchmark and prove
+which part of the system is limiting the 0.99 target before paying for
+high-resolution training.
 
-Build a V2 issue benchmark from the real-world and synthetic examples that
-exercise:
+There are no labeled real-world CP issue examples yet. The first V2.0 benchmark
+must therefore be synthetic: render known square CP graphs, inject the observed
+failure modes, save the exact clean target graph, and produce visual contact
+sheets for manual approval. Real-world examples can be added later as visual QA
+or lightly labeled fixtures, but they must not be treated as labeled metrics
+until annotations exist.
+
+Build a V2 issue benchmark from generated square CP examples that exercise:
 
 - Text/watermark false positives.
 - Guide-grid false positives.
-- Cropped or missing source borders.
-- Non-square or low-confidence rectification.
 - Dashed/gapped crease styles.
-- Symmetric structures with one-sided misses.
-- Dense/tiny Rabbit Ear geometry.
 - Faint or low-contrast crease evidence.
 - Monochrome or visually ambiguous M/V assignments.
+
+Do not include a `dense_scale_collapse` or low-resolution downsample
+augmentation. Dense/tiny CPs are already present in the underlying `.fold`
+distribution and should be handled through sampling, minimum-spacing buckets,
+higher-resolution training, and supported-envelope reporting. The benchmark may
+still include naturally dense examples as clean geometry cases, but it should
+not train or score the model on deliberately destroyed pixel evidence.
+
+Do not include cropped/missing borders or one-sided symmetry misses as positive
+recovery slices. They are hallucination traps: if source pixels are gone, V2
+should report `outside_supported_envelope`, `low_rectifier_confidence`, or
+`incomplete_source_square` rather than learn to invent structure. Symmetry
+completion should stay out of V2 and be reconsidered only as an explicit V3
+hypothesis mode.
 
 Run these ablations on the same held-out `.fold` validation slice:
 
@@ -196,13 +216,18 @@ Questions to answer:
 - If line carriers are perfect, does interior edge recall approach 0.99?
 - If dashed carrier support is perfect, do dashed examples stop failing?
 - If topology is perfect, are M/V assignments already good enough?
-- Are current failures mostly boundary contacts, dense interior creases, or
-  assignment ambiguity?
+- Are current failures mostly boundary contacts, naturally dense interior
+  creases, artifact evidence, dashed support, faint evidence, or assignment
+  ambiguity?
 
 Exit criteria:
 
 - A written bottleneck table for TreeMaker, Rabbit Ear, and real-world examples.
-- A frozen V2 issue benchmark with per-issue metrics and contact sheets.
+- A frozen synthetic V2 issue benchmark with per-issue metrics, manifest rows,
+  clean references, issue images, oracle masks/targets where applicable, and
+  contact sheets for visual inspection.
+- Real-world issue examples remain a separate unlabeled visual-inspection queue
+  until manual annotations are added.
 - A ranked list of which model heads or decoder changes buy the largest metric
   gain.
 - No high-resolution GPU run until this table exists.
@@ -233,9 +258,8 @@ From each FOLD example, derive:
   - dashed or gapped line style
   - guide-grid/text/watermark negative regions when synthetically generated or
     manually labeled
-  - symmetry group or expected symmetry axes when known
   - minimum edge length and closest-vertex spacing buckets
-  - source-frame/crop labels for rectification fixtures
+  - source-frame/crop labels for report-only rectification fixtures
 
 This schema should be emitted as small deterministic sidecars next to training
 records and eval fixtures. It should be inspectable without rendering images.
@@ -251,6 +275,8 @@ Exit criteria:
   border artifacts.
 - Dashed/gapped carrier labels that preserve the full intended crease carrier
   even when rendered pixels are discontinuous.
+- Minimum-spacing buckets from naturally dense CPs, without generating
+  low-resolution collapse augmentations.
 
 ## Phase V2.2: CPLineNet-V2 Evidence Heads
 
@@ -289,6 +315,8 @@ De-risking runs before high resolution:
 4. Boundary-contact eval through the decoder, not just heatmap loss.
 5. Hard-negative run on text/grid/watermark synthetic overlays.
 6. Dashed/gapped-line run with carrier-level metrics.
+7. Naturally dense sample run at the chosen input size, reported by
+   minimum-spacing bucket rather than by an artificial downsample augmentation.
 
 Exit criteria before high-res training:
 
@@ -334,8 +362,7 @@ Important constraints:
 - Do not connect arbitrary nearby points. Candidate edges must lie on an
   accepted crease carrier or on the square boundary.
 - The boundary chain should be deterministic after boundary contacts are chosen.
-- Symmetry may re-rank or propose hypotheses only when detected with confidence;
-  it must not silently add mirrored creases by default.
+- Symmetry completion is not part of the V2 decoder.
 
 Exit criteria:
 
@@ -421,7 +448,8 @@ Training strategy:
   supported envelope.
 - Consider patch/crop auxiliary losses for dense regions, but final inference
   must still reconcile one global square graph.
-- Keep exact square symmetries and render-style augmentations from V1.
+- Keep square rotations/reflections and render-style augmentations from V1, but
+  do not add symmetry-completion or dense-scale-collapse targets.
 - Add real-world render issues only when labels and eval exist:
   faint scans, mild perspective residue, page margins, compression, and dark
   backgrounds.
@@ -450,14 +478,14 @@ track:
   - obvious missing/extra creases
   - M/V availability
 - Build issue tags:
-  - cropped border
+  - cropped border or incomplete source square, reported as unrecoverable unless
+    a human supplies missing structure
   - uncertain rectification
   - missing boundary contact
   - extra watermark/text/grid line
   - dashed/gapped crease
   - faint crease
   - dense tiny region
-  - symmetric miss
   - ambiguous M/V
   - non-square or non-CP input
 
@@ -513,10 +541,11 @@ V2 is complete when a frozen validation suite meets:
 
 ## Near-Term Next Steps
 
-1. Freeze a V2 issue benchmark from the V1 failures: text, guide grid,
-   symmetry, cropped border, dense geometry, dashed lines, and ambiguous M/V.
-2. Add boundary-contact, carrier, rectifier/crop, artifact false-positive,
-   dashed-line, and dense-spacing metrics.
+1. Freeze a V2 issue benchmark from the V1 failures that are recoverable from
+   visual evidence: text, guide grid, watermark, dashed lines, faint lines, and
+   ambiguous M/V.
+2. Add boundary-contact, carrier, rectifier/crop report-status,
+   artifact false-positive, dashed-line, and natural minimum-spacing metrics.
 3. Implement V2 oracle ablations for rectification, artifact suppression,
    boundary contacts, carriers, topology, and assignments.
 4. Build the FOLD-derived V2 label sidecar generator.
