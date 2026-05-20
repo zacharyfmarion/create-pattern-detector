@@ -58,6 +58,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--batchnorm-mode", choices=BATCHNORM_MODES, default="eval")
     parser.add_argument("--pred-contact-threshold", type=float, default=0.55)
     parser.add_argument("--max-pred-contacts", type=int, default=16)
+    parser.add_argument(
+        "--mode",
+        choices=["simple", "debug"],
+        default="simple",
+        help="simple shows image/true contacts only; debug shows every boundary head.",
+    )
     return parser.parse_args()
 
 
@@ -125,7 +131,10 @@ def main() -> None:
                 }
             )
 
-    _write_sheet(rows, output_path=output_path)
+    if args.mode == "debug":
+        _write_debug_sheet(rows, output_path=output_path)
+    else:
+        _write_simple_sheet(rows, output_path=output_path)
     _write_sidecar(
         rows,
         output_path=output_path.with_suffix(".json"),
@@ -153,7 +162,51 @@ def _pred_contact_mask(heatmap: np.ndarray, *, threshold: float, max_contacts: i
     return mask
 
 
-def _write_sheet(rows: list[dict[str, Any]], *, output_path: Path) -> None:
+def _write_simple_sheet(rows: list[dict[str, Any]], *, output_path: Path) -> None:
+    columns = [
+        "input image",
+        "correct labels: green dots",
+    ]
+    fig, axes = plt.subplots(
+        len(rows),
+        len(columns),
+        figsize=(3.4 * len(columns), max(2.8, 2.8 * len(rows))),
+        squeeze=False,
+    )
+    for row_idx, row in enumerate(rows):
+        images = [
+            row["input"],
+            _contact_dot_overlay(row["input"], row["target_mask"], color=(0, 230, 95)),
+        ]
+        for col_idx, image in enumerate(images):
+            axes[row_idx, col_idx].imshow(image)
+            axes[row_idx, col_idx].axis("off")
+            if row_idx == 0:
+                axes[row_idx, col_idx].set_title(columns[col_idx], fontsize=10)
+            if col_idx == 0:
+                axes[row_idx, col_idx].text(
+                    0.02,
+                    0.98,
+                    f"{row['selected_profile']}\n{row['id']}",
+                    transform=axes[row_idx, col_idx].transAxes,
+                    va="top",
+                    ha="left",
+                    fontsize=7,
+                    color="black",
+                    bbox={"facecolor": "white", "alpha": 0.78, "edgecolor": "none", "pad": 1.5},
+                )
+    fig.text(
+        0.01,
+        0.012,
+        "Green dots are the labels we train the boundary-contact head to find: places where a real crease touches the square edge.",
+        fontsize=9,
+    )
+    fig.tight_layout(rect=(0, 0.035, 1, 1))
+    fig.savefig(output_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+
+
+def _write_debug_sheet(rows: list[dict[str, Any]], *, output_path: Path) -> None:
     columns = [
         "input",
         "target contact",
@@ -212,6 +265,28 @@ def _heat_overlay(image: np.ndarray, heatmap: np.ndarray, *, color: tuple[int, i
     return base.clip(0, 255).astype(np.uint8)
 
 
+def _contact_dot_overlay(image: np.ndarray, mask: np.ndarray, *, color: tuple[int, int, int]) -> np.ndarray:
+    overlay = image.copy()
+    for row, col in np.argwhere(mask):
+        cv2.circle(
+            overlay,
+            (int(col), int(row)),
+            4,
+            color,
+            -1,
+            lineType=cv2.LINE_AA,
+        )
+        cv2.circle(
+            overlay,
+            (int(col), int(row)),
+            5,
+            (255, 255, 255),
+            1,
+            lineType=cv2.LINE_AA,
+        )
+    return overlay
+
+
 def _label_overlay(
     image: np.ndarray,
     labels: np.ndarray,
@@ -252,6 +327,7 @@ def _write_sidecar(
         "augment_profile": args.augment_profile,
         "image_size": args.image_size,
         "split": args.split,
+        "mode": args.mode,
         "checkpoint_config": config,
         "rows": [
             {
