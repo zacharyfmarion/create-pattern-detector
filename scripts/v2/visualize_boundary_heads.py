@@ -165,7 +165,7 @@ def _pred_contact_mask(heatmap: np.ndarray, *, threshold: float, max_contacts: i
 def _write_simple_sheet(rows: list[dict[str, Any]], *, output_path: Path) -> None:
     columns = [
         "input image",
-        "correct labels: green dots",
+        "labels: yellow corners, green contacts",
     ]
     fig, axes = plt.subplots(
         len(rows),
@@ -176,7 +176,7 @@ def _write_simple_sheet(rows: list[dict[str, Any]], *, output_path: Path) -> Non
     for row_idx, row in enumerate(rows):
         images = [
             row["input"],
-            _contact_dot_overlay(row["input"], row["target_mask"], color=(0, 230, 95)),
+            _boundary_label_overlay(row["input"], row["target_vertex"], row["target_mask"]),
         ]
         for col_idx, image in enumerate(images):
             axes[row_idx, col_idx].imshow(image)
@@ -198,7 +198,7 @@ def _write_simple_sheet(rows: list[dict[str, Any]], *, output_path: Path) -> Non
     fig.text(
         0.01,
         0.012,
-        "Green dots are the labels we train the boundary-contact head to find: places where a real crease touches the square edge.",
+        "Yellow dots are fixed square corners. Green dots are non-corner boundary-contact labels: places where a real crease touches a side and creates an extra boundary vertex.",
         fontsize=9,
     )
     fig.tight_layout(rect=(0, 0.035, 1, 1))
@@ -285,6 +285,15 @@ def _contact_dot_overlay(image: np.ndarray, mask: np.ndarray, *, color: tuple[in
             lineType=cv2.LINE_AA,
         )
     return overlay
+
+
+def _boundary_label_overlay(
+    image: np.ndarray,
+    vertex_type: np.ndarray,
+    contact_mask: np.ndarray,
+) -> np.ndarray:
+    overlay = _contact_dot_overlay(image, vertex_type == 1, color=(255, 220, 35))
+    return _contact_dot_overlay(overlay, contact_mask, color=(0, 230, 95))
 
 
 def _label_overlay(
