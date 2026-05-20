@@ -432,6 +432,38 @@ def test_v2_dark_profile_combines_dark_mode_with_issue_targets():
     assert np.count_nonzero(sample.v2_non_crease_mask) > 0
 
 
+def test_v2_dark_ambiguous_keeps_readable_monochrome_contrast():
+    sample = render_cpline_sample(
+        simple_mv_cp(),
+        image_size=128,
+        padding=8,
+        line_width=2,
+        augment_profile="v2-dark-ambiguous-mv",
+        seed=29,
+    )
+    grayscale = sample.image.astype(np.float32).mean(axis=2)
+    target = sample.v2_target_line_mask > 0
+    background = np.array(sample.metadata["params"]["background"], dtype=np.float32).mean()
+
+    assert float(grayscale[target].mean()) - float(background) > 35.0
+
+
+def test_v2_dark_faint_keeps_minimum_readable_contrast():
+    sample = render_cpline_sample(
+        simple_mv_cp(),
+        image_size=128,
+        padding=8,
+        line_width=2,
+        augment_profile="v2-dark-faint",
+        seed=31,
+    )
+    grayscale = sample.image.astype(np.float32).mean(axis=2)
+    target = sample.v2_target_line_mask > 0
+    background = np.array(sample.metadata["params"]["background"], dtype=np.float32).mean()
+
+    assert float(grayscale[target].mean()) - float(background) > 20.0
+
+
 def test_v2_issue_mix_samples_combined_profile():
     cp = simple_mv_cp()
     seen = {

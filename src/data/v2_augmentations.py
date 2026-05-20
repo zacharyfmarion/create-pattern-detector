@@ -91,6 +91,7 @@ def apply_v2_augmentation(
             rng=rng,
             dashed_non_border=True,
             monochrome=issue_profile == "v2-combined",
+            dark_mode=dark_mode,
         )
         non_border = _line_mask(
             vertices,
@@ -116,6 +117,7 @@ def apply_v2_augmentation(
                 rng=rng,
                 dashed_non_border=False,
                 monochrome=True,
+                dark_mode=dark_mode,
             )
         non_border = _line_mask(
             vertices,
@@ -133,7 +135,13 @@ def apply_v2_augmentation(
         modes.append("ambiguous_mv")
 
     if issue_profile in {"v2-faint", "v2-combined"}:
-        result = _fade_lines(result, background=background, rng=rng, combined=issue_profile == "v2-combined")
+        result = _fade_lines(
+            result,
+            background=background,
+            rng=rng,
+            combined=issue_profile == "v2-combined",
+            dark_mode=dark_mode,
+        )
         non_border = _line_mask(
             vertices,
             edges,
@@ -148,7 +156,12 @@ def apply_v2_augmentation(
         modes.append("faint")
 
     if issue_profile in {"v2-guide-grid", "v2-combined"}:
-        result, mask = _add_guide_grid(result, rng=rng, dark_mode=dark_mode)
+        result, mask = _add_guide_grid(
+            result,
+            rng=rng,
+            dark_mode=dark_mode,
+            combined=issue_profile == "v2-combined",
+        )
         non_crease_mask = np.maximum(non_crease_mask, mask.astype(np.float32))
         modes.append("guide_grid")
 
@@ -208,11 +221,12 @@ def _render_cp_lines(
     rng: np.random.Generator,
     dashed_non_border: bool,
     monochrome: bool,
+    dark_mode: bool,
 ) -> np.ndarray:
     image = np.full((image_size, image_size, 3), background, dtype=np.uint8)
     dash_px = max(6.0, float(image_size) * float(rng.uniform(0.015, 0.026)))
     gap_px = dash_px * float(rng.uniform(0.75, 1.25))
-    mono_shade = int(rng.integers(35, 105))
+    mono_shade = int(rng.integers(135, 190) if dark_mode else rng.integers(45, 115))
     for edge_idx, edge in enumerate(edges):
         assignment = int(assignments[edge_idx])
         color = palette.get(assignment, palette.get(3, (120, 120, 120)))
@@ -259,9 +273,15 @@ def _fade_lines(
     background: tuple[int, int, int],
     rng: np.random.Generator,
     combined: bool,
+    dark_mode: bool,
 ) -> np.ndarray:
     bg = np.full_like(image, background, dtype=np.uint8).astype(np.float32)
-    alpha = float(rng.uniform(0.18, 0.36) if combined else rng.uniform(0.08, 0.18))
+    if dark_mode and combined:
+        alpha = float(rng.uniform(0.58, 0.74))
+    elif dark_mode:
+        alpha = float(rng.uniform(0.42, 0.58))
+    else:
+        alpha = float(rng.uniform(0.18, 0.36) if combined else rng.uniform(0.08, 0.18))
     faded = bg * (1.0 - alpha) + image.astype(np.float32) * alpha
     noise = rng.normal(0.0, 1.2 if combined else 1.8, faded.shape).astype(np.float32)
     faded = np.clip(faded + noise, 0, 255).astype(np.uint8)
@@ -327,6 +347,7 @@ def _add_guide_grid(
     *,
     rng: np.random.Generator,
     dark_mode: bool,
+    combined: bool,
 ) -> tuple[np.ndarray, np.ndarray]:
     result = image.copy()
     mask = np.zeros(image.shape[:2], dtype=np.uint8)
@@ -335,11 +356,12 @@ def _add_guide_grid(
     spacing = max(12, spacing)
     offset_x = int(rng.integers(0, spacing))
     offset_y = int(rng.integers(0, spacing))
-    color = (
-        tuple(int(v) for v in rng.integers(85, 135, size=3))
-        if dark_mode
-        else tuple(int(v) for v in rng.integers(165, 218, size=3))
-    )
+    if dark_mode and combined:
+        color = tuple(int(v) for v in rng.integers(68, 108, size=3))
+    elif dark_mode:
+        color = tuple(int(v) for v in rng.integers(85, 135, size=3))
+    else:
+        color = tuple(int(v) for v in rng.integers(165, 218, size=3))
     for x in range(offset_x, w, spacing):
         cv2.line(result, (x, 0), (x, h - 1), color, 1, cv2.LINE_AA)
         cv2.line(mask, (x, 0), (x, h - 1), 255, 2, cv2.LINE_AA)
@@ -348,7 +370,10 @@ def _add_guide_grid(
         cv2.line(mask, (0, y), (w - 1, y), 255, 2, cv2.LINE_AA)
     if rng.random() < 0.35:
         major = spacing * int(rng.choice([2, 3]))
-        major_color = (150, 150, 150) if dark_mode else (145, 145, 145)
+        if dark_mode and combined:
+            major_color = (118, 118, 118)
+        else:
+            major_color = (150, 150, 150) if dark_mode else (145, 145, 145)
         for x in range(offset_x, w, major):
             cv2.line(result, (x, 0), (x, h - 1), major_color, 1, cv2.LINE_AA)
             cv2.line(mask, (x, 0), (x, h - 1), 255, 3, cv2.LINE_AA)
