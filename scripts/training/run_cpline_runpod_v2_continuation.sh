@@ -22,6 +22,7 @@ SEED="${SEED:-17}"
 LOG_EVERY="${LOG_EVERY:-50}"
 CHECKPOINT_EVERY="${CHECKPOINT_EVERY:-400}"
 SKIP_GRAPH_EVAL="${SKIP_GRAPH_EVAL:-1}"
+SKIP_FINAL_EVAL="${SKIP_FINAL_EVAL:-0}"
 EVAL_THRESHOLDS="${EVAL_THRESHOLDS:-0.35,0.45,0.55,0.65,0.75,0.85}"
 
 PROFILE="${PROFILE:-v2-all-issue-mix}"
@@ -116,6 +117,9 @@ run_stage() {
   fi
   if [[ "$SKIP_GRAPH_EVAL" == "1" ]]; then
     args+=(--skip-graph-eval)
+  fi
+  if [[ "$SKIP_FINAL_EVAL" == "1" ]]; then
+    args+=(--skip-final-eval)
   fi
   mkdir -p "$output_dir"
   local log_path="$output_dir/train.log"

@@ -78,6 +78,14 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Skip PlanarGraphBuilder eval and write pixel-loss summaries only.",
     )
+    parser.add_argument(
+        "--skip-final-eval",
+        action="store_true",
+        help=(
+            "Skip post-training pixel/vector validation. Useful for chunked "
+            "continuation runs where only a resumable checkpoint is needed."
+        ),
+    )
     parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument(
         "--line-hard-negative-weight",
@@ -418,6 +426,7 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         "checkpoint_every": args.checkpoint_every,
         "graph_eval_count": args.graph_eval_count,
         "skip_graph_eval": args.skip_graph_eval,
+        "skip_final_eval": args.skip_final_eval,
         "backbone": args.backbone,
         "hidden_channels": args.hidden_channels,
         "v2_heads": args.v2_heads,
@@ -520,6 +529,37 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         },
         output_dir / "post_train.pt",
     )
+    if args.skip_final_eval:
+        checkpoint = {
+            "model_state_dict": model.state_dict(),
+            "optimizer_state_dict": optimizer.state_dict(),
+            "config": run_config,
+            "history": history,
+            "val_loss": None,
+            "aug_val_loss": None,
+            "train_graph_sweep": None,
+            "val_graph_sweep": None,
+            "aug_val_graph_sweep": None,
+        }
+        torch.save(checkpoint, output_dir / "latest.pt")
+        summary = {
+            **run_config,
+            "elapsed_seconds": perf_counter() - start,
+            "first_train_loss": history[0]["total"] if history else None,
+            "last_train_loss": history[-1]["total"] if history else None,
+            "val_loss": None,
+            "aug_val_loss": None,
+            "train_graph_sweep": None,
+            "val_graph_sweep": None,
+            "aug_val_graph_sweep": None,
+            "checkpoint": (output_dir / "latest.pt").as_posix(),
+            "training_checkpoint": (output_dir / "latest_train.pt").as_posix(),
+        }
+        (output_dir / "summary.json").write_text(
+            json.dumps(summary, indent=2) + "\n", encoding="utf-8"
+        )
+        print(json.dumps(summary, indent=2), flush=True)
+        return summary
 
     val_loss = evaluate_pixel_loss(
         model,
