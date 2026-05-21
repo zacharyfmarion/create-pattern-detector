@@ -30,7 +30,14 @@ class CPLineLossConfig:
     use_observed_assignment_target: bool = False
     boundary_contact_weight: float = 0.0
     boundary_contact_pos_weight: float = 50.0
+    boundary_contact_corner_negative_weight: float = 4.0
+    boundary_contact_hard_negative_weight: float = 0.0
+    boundary_contact_hard_negative_ratio: float = 0.02
+    boundary_contact_hard_negative_multiplier: float = 8.0
+    boundary_contact_hard_negative_min_pixels: int = 256
     vertex_type_weight: float = 0.0
+    vertex_type_class_weights: tuple[float, float, float, float] = (0.05, 4.0, 8.0, 1.5)
+    vertex_type_focal_gamma: float = 1.5
     boundary_side_weight: float = 0.0
     boundary_side_ignore_index: int = -100
     boundary_offset_weight: float = 0.0
@@ -47,6 +54,10 @@ class CPLineLoss(nn.Module):
         self.register_buffer(
             "boundary_contact_pos_weight",
             torch.tensor([self.config.boundary_contact_pos_weight]),
+        )
+        self.register_buffer(
+            "vertex_type_class_weights",
+            torch.tensor(self.config.vertex_type_class_weights, dtype=torch.float32),
         )
 
     def forward(
@@ -93,9 +104,22 @@ class CPLineLoss(nn.Module):
         boundary_contact_loss = _optional_boundary_contact_loss(
             outputs,
             targets,
-            self.boundary_contact_pos_weight,
+            positive_weight=self.config.boundary_contact_pos_weight,
+            corner_negative_weight=self.config.boundary_contact_corner_negative_weight,
         )
-        vertex_type_loss = _optional_vertex_type_loss(outputs, targets)
+        boundary_contact_hard_negative_loss = _optional_boundary_contact_hard_negative_loss(
+            outputs,
+            targets,
+            ratio=self.config.boundary_contact_hard_negative_ratio,
+            multiplier=self.config.boundary_contact_hard_negative_multiplier,
+            min_pixels=self.config.boundary_contact_hard_negative_min_pixels,
+        )
+        vertex_type_loss = _optional_vertex_type_loss(
+            outputs,
+            targets,
+            self.vertex_type_class_weights,
+            focal_gamma=self.config.vertex_type_focal_gamma,
+        )
         boundary_side_loss = _optional_boundary_side_loss(
             outputs,
             targets,
@@ -113,6 +137,7 @@ class CPLineLoss(nn.Module):
             + self.config.non_crease_weight * non_crease_loss
             + self.config.line_style_weight * line_style_loss
             + self.config.boundary_contact_weight * boundary_contact_loss
+            + self.config.boundary_contact_hard_negative_weight * boundary_contact_hard_negative_loss
             + self.config.vertex_type_weight * vertex_type_loss
             + self.config.boundary_side_weight * boundary_side_loss
             + self.config.boundary_offset_weight * boundary_offset_loss
@@ -129,6 +154,7 @@ class CPLineLoss(nn.Module):
             "non_crease": non_crease_loss,
             "line_style": line_style_loss,
             "boundary_contact": boundary_contact_loss,
+            "boundary_contact_hard_negative": boundary_contact_hard_negative_loss,
             "vertex_type": vertex_type_loss,
             "boundary_side": boundary_side_loss,
             "boundary_offset": boundary_offset_loss,
@@ -209,24 +235,113 @@ def _optional_line_style_loss(
 def _optional_boundary_contact_loss(
     outputs: dict[str, torch.Tensor],
     targets: dict[str, torch.Tensor],
-    pos_weight: torch.Tensor,
+    *,
+    positive_weight: float,
+    corner_negative_weight: float,
 ) -> torch.Tensor:
     if "boundary_contact_logits" not in outputs or "v2_boundary_contact_heatmap" not in targets:
         return outputs["line_logits"].new_tensor(0.0)
-    return F.binary_cross_entropy_with_logits(
+    logits = outputs["boundary_contact_logits"]
+    target = targets["v2_boundary_contact_heatmap"]
+    loss = F.binary_cross_entropy_with_logits(logits, target, reduction="none")
+    positive_weight = float(positive_weight)
+    corner_weight = float(corner_negative_weight)
+    batch_losses = []
+    vertex_type = targets.get("v2_vertex_type")
+    for item_loss, item_target, item_vertex_type in zip(
+        loss,
+        target,
+        [None] * len(target) if vertex_type is None else vertex_type,
+    ):
+        weighted_terms = []
+        weights = []
+        positive_mask = item_target >= 0.1
+        if torch.any(positive_mask):
+            weighted_terms.append(item_loss[positive_mask].mean() * positive_weight)
+            weights.append(positive_weight)
+        negative_mask = item_target < 0.05
+        if torch.any(negative_mask):
+            weighted_terms.append(item_loss[negative_mask].mean())
+            weights.append(1.0)
+        if item_vertex_type is not None and corner_weight > 0.0:
+            corner_mask = (item_vertex_type.unsqueeze(0) == 1) & negative_mask
+            if torch.any(corner_mask):
+                weighted_terms.append(item_loss[corner_mask].mean() * corner_weight)
+                weights.append(corner_weight)
+        if weighted_terms:
+            batch_losses.append(torch.stack(weighted_terms).sum() / max(1e-6, sum(weights)))
+    if not batch_losses:
+        return logits.new_tensor(0.0)
+    return torch.stack(batch_losses).mean()
+
+
+def _optional_boundary_contact_hard_negative_loss(
+    outputs: dict[str, torch.Tensor],
+    targets: dict[str, torch.Tensor],
+    *,
+    ratio: float,
+    multiplier: float,
+    min_pixels: int,
+) -> torch.Tensor:
+    if "boundary_contact_logits" not in outputs or "v2_boundary_contact_heatmap" not in targets:
+        return outputs["line_logits"].new_tensor(0.0)
+    if ratio <= 0.0 or multiplier <= 0.0:
+        return outputs["line_logits"].new_tensor(0.0)
+    per_pixel = F.binary_cross_entropy_with_logits(
         outputs["boundary_contact_logits"],
         targets["v2_boundary_contact_heatmap"],
-        pos_weight=pos_weight.to(outputs["boundary_contact_logits"].device),
+        reduction="none",
     )
+    batch_losses = []
+    for item_loss, item_target in zip(per_pixel, targets["v2_boundary_contact_heatmap"]):
+        negative_mask = item_target < 0.05
+        if not torch.any(negative_mask):
+            continue
+        negative_losses = item_loss[negative_mask]
+        negative_count = int(negative_losses.numel())
+        positive_count = int(torch.count_nonzero(item_target >= 0.1).item())
+        ratio_k = max(1, int(round(negative_count * ratio)))
+        positive_k = max(1, int(round(max(positive_count, 1) * multiplier)))
+        k = min(negative_count, max(min_pixels, min(ratio_k, positive_k)))
+        batch_losses.append(torch.topk(negative_losses, k=k, largest=True).values.mean())
+    if not batch_losses:
+        return outputs["line_logits"].new_tensor(0.0)
+    return torch.stack(batch_losses).mean()
 
 
 def _optional_vertex_type_loss(
     outputs: dict[str, torch.Tensor],
     targets: dict[str, torch.Tensor],
+    class_weights: torch.Tensor,
+    *,
+    focal_gamma: float,
 ) -> torch.Tensor:
     if "vertex_type_logits" not in outputs or "v2_vertex_type" not in targets:
         return outputs["line_logits"].new_tensor(0.0)
-    return F.cross_entropy(outputs["vertex_type_logits"], targets["v2_vertex_type"])
+    logits = outputs["vertex_type_logits"]
+    target = targets["v2_vertex_type"]
+    weight = class_weights.to(logits.device)
+    per_pixel = F.cross_entropy(logits, target, reduction="none")
+    if focal_gamma <= 0.0:
+        weighted_pixel = per_pixel
+    else:
+        probs = F.softmax(logits, dim=1).gather(1, target.unsqueeze(1)).squeeze(1)
+        focal = torch.pow((1.0 - probs).clamp(0.0, 1.0), float(focal_gamma))
+        weighted_pixel = per_pixel * focal
+
+    weighted_terms = []
+    weights = []
+    class_count = min(int(logits.shape[1]), int(weight.numel()))
+    for class_id in range(class_count):
+        class_mask = target == class_id
+        if not torch.any(class_mask):
+            continue
+        class_weight = weight[class_id]
+        weighted_terms.append(weighted_pixel[class_mask].mean() * class_weight)
+        weights.append(class_weight)
+    if not weighted_terms:
+        return logits.new_tensor(0.0)
+    return torch.stack(weighted_terms).sum() / torch.stack(weights).sum().clamp_min(1e-6)
 
 
 def _optional_boundary_side_loss(

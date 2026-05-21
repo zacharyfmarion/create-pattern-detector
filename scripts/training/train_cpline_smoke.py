@@ -113,7 +113,20 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--non-crease-weight", type=float, default=0.0)
     parser.add_argument("--line-style-weight", type=float, default=0.0)
     parser.add_argument("--boundary-contact-weight", type=float, default=0.0)
+    parser.add_argument("--boundary-contact-pos-weight", type=float, default=50.0)
+    parser.add_argument("--boundary-contact-corner-negative-weight", type=float, default=4.0)
+    parser.add_argument("--boundary-contact-hard-negative-weight", type=float, default=0.0)
+    parser.add_argument("--boundary-contact-hard-negative-ratio", type=float, default=0.02)
+    parser.add_argument("--boundary-contact-hard-negative-multiplier", type=float, default=8.0)
+    parser.add_argument("--boundary-contact-hard-negative-min-pixels", type=int, default=256)
     parser.add_argument("--vertex-type-weight", type=float, default=0.0)
+    parser.add_argument(
+        "--vertex-type-class-weights",
+        type=str,
+        default="0.05,4.0,8.0,1.5",
+        help="Comma-separated class weights for V2 vertex background, corner, contact, interior.",
+    )
+    parser.add_argument("--vertex-type-focal-gamma", type=float, default=1.5)
     parser.add_argument("--boundary-side-weight", type=float, default=0.0)
     parser.add_argument("--boundary-offset-weight", type=float, default=0.0)
     parser.add_argument("--boundary-coord-weight", type=float, default=0.0)
@@ -159,6 +172,13 @@ def parse_args() -> argparse.Namespace:
         help="Comma-separated line thresholds to sweep through PlanarGraphBuilder.",
     )
     return parser.parse_args()
+
+
+def parse_float_tuple(value: str, *, expected: int) -> tuple[float, ...]:
+    result = tuple(float(item.strip()) for item in value.split(",") if item.strip())
+    if len(result) != expected:
+        raise SystemExit(f"Expected {expected} comma-separated floats, got {len(result)}: {value}")
+    return result
 
 
 def select_device(requested: str) -> torch.device:
@@ -313,7 +333,15 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
             line_style_weight=args.line_style_weight,
             use_observed_assignment_target=args.use_v2_observed_assignment,
             boundary_contact_weight=args.boundary_contact_weight,
+            boundary_contact_pos_weight=args.boundary_contact_pos_weight,
+            boundary_contact_corner_negative_weight=args.boundary_contact_corner_negative_weight,
+            boundary_contact_hard_negative_weight=args.boundary_contact_hard_negative_weight,
+            boundary_contact_hard_negative_ratio=args.boundary_contact_hard_negative_ratio,
+            boundary_contact_hard_negative_multiplier=args.boundary_contact_hard_negative_multiplier,
+            boundary_contact_hard_negative_min_pixels=args.boundary_contact_hard_negative_min_pixels,
             vertex_type_weight=args.vertex_type_weight,
+            vertex_type_class_weights=parse_float_tuple(args.vertex_type_class_weights, expected=4),
+            vertex_type_focal_gamma=args.vertex_type_focal_gamma,
             boundary_side_weight=args.boundary_side_weight,
             boundary_offset_weight=args.boundary_offset_weight,
             boundary_coord_weight=args.boundary_coord_weight,
@@ -349,7 +377,15 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         "non_crease_weight": args.non_crease_weight,
         "line_style_weight": args.line_style_weight,
         "boundary_contact_weight": args.boundary_contact_weight,
+        "boundary_contact_pos_weight": args.boundary_contact_pos_weight,
+        "boundary_contact_corner_negative_weight": args.boundary_contact_corner_negative_weight,
+        "boundary_contact_hard_negative_weight": args.boundary_contact_hard_negative_weight,
+        "boundary_contact_hard_negative_ratio": args.boundary_contact_hard_negative_ratio,
+        "boundary_contact_hard_negative_multiplier": args.boundary_contact_hard_negative_multiplier,
+        "boundary_contact_hard_negative_min_pixels": args.boundary_contact_hard_negative_min_pixels,
         "vertex_type_weight": args.vertex_type_weight,
+        "vertex_type_class_weights": parse_float_tuple(args.vertex_type_class_weights, expected=4),
+        "vertex_type_focal_gamma": args.vertex_type_focal_gamma,
         "boundary_side_weight": args.boundary_side_weight,
         "boundary_offset_weight": args.boundary_offset_weight,
         "boundary_coord_weight": args.boundary_coord_weight,
