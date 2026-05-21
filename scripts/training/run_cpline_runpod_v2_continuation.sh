@@ -35,6 +35,7 @@ STEPS_FULL="${STEPS_FULL:-4800}"
 RUN_WARMUP="${RUN_WARMUP:-1}"
 RUN_FULL="${RUN_FULL:-1}"
 FULL_INIT_CHECKPOINT="${FULL_INIT_CHECKPOINT:-$OUTPUT_ROOT/warmup/latest.pt}"
+CHECKPOINT_LOAD_MODE="${CHECKPOINT_LOAD_MODE:-init}"
 
 LINE_HARD_NEGATIVE_WEIGHT="${LINE_HARD_NEGATIVE_WEIGHT:-0.25}"
 LINE_HARD_NEGATIVE_RATIO="${LINE_HARD_NEGATIVE_RATIO:-0.05}"
@@ -107,8 +108,12 @@ run_stage() {
     --boundary-offset-weight "$BOUNDARY_OFFSET_WEIGHT"
     --boundary-coord-weight "$BOUNDARY_COORD_WEIGHT"
     --use-v2-observed-assignment
-    --init-checkpoint "$init_checkpoint"
   )
+  if [[ "$CHECKPOINT_LOAD_MODE" == "resume" ]]; then
+    args+=(--resume-checkpoint "$init_checkpoint")
+  else
+    args+=(--init-checkpoint "$init_checkpoint")
+  fi
   if [[ "$SKIP_GRAPH_EVAL" == "1" ]]; then
     args+=(--skip-graph-eval)
   fi

@@ -159,6 +159,15 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Optional checkpoint whose model weights initialize this run; optimizer starts fresh.",
     )
+    parser.add_argument(
+        "--resume-checkpoint",
+        type=Path,
+        default=None,
+        help=(
+            "Optional checkpoint whose model and optimizer state resume this run. "
+            "The dataloader still starts a fresh local stream."
+        ),
+    )
     parser.add_argument("--augment-profile", choices=AUGMENT_PROFILES, default="clean")
     parser.add_argument(
         "--render-noise",
@@ -353,12 +362,19 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         hidden_channels=args.hidden_channels,
         v2_heads=args.v2_heads,
     ).to(device)
+    if args.init_checkpoint is not None and args.resume_checkpoint is not None:
+        raise ValueError("Use only one of --init-checkpoint or --resume-checkpoint.")
+
     init_checkpoint = args.init_checkpoint
-    if init_checkpoint is not None:
-        init_checkpoint = (
-            init_checkpoint if init_checkpoint.is_absolute() else REPO_ROOT / init_checkpoint
+    resume_checkpoint = args.resume_checkpoint
+    checkpoint_path = init_checkpoint or resume_checkpoint
+    loaded_checkpoint = None
+    if checkpoint_path is not None:
+        checkpoint_path = (
+            checkpoint_path if checkpoint_path.is_absolute() else REPO_ROOT / checkpoint_path
         )
-        loaded = torch.load(init_checkpoint, map_location=device, weights_only=False)
+        loaded_checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+        loaded = loaded_checkpoint
         model.load_state_dict(loaded["model_state_dict"], strict=not args.v2_heads)
     criterion = CPLineLoss(
         CPLineLossConfig(
@@ -384,6 +400,11 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         )
     )
     optimizer = torch.optim.AdamW(model.get_param_groups(args.lr), lr=args.lr, weight_decay=1e-4)
+    if resume_checkpoint is not None and loaded_checkpoint is not None:
+        optimizer_state = loaded_checkpoint.get("optimizer_state_dict")
+        if optimizer_state is None:
+            raise ValueError(f"Checkpoint has no optimizer_state_dict: {checkpoint_path}")
+        optimizer.load_state_dict(optimizer_state)
 
     run_config = {
         "device": str(device),
@@ -402,6 +423,10 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         "v2_heads": args.v2_heads,
         "batchnorm_mode": args.batchnorm_mode,
         "init_checkpoint": init_checkpoint.as_posix() if init_checkpoint is not None else None,
+        "resume_checkpoint": (
+            resume_checkpoint.as_posix() if resume_checkpoint is not None else None
+        ),
+        "loaded_checkpoint": checkpoint_path.as_posix() if checkpoint_path is not None else None,
         "augment_profile": augment_profile,
         "eval_augment_profile": args.eval_augment_profile,
         "render_noise": args.render_noise,
