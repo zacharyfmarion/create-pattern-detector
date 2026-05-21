@@ -103,6 +103,15 @@ def parse_args() -> argparse.Namespace:
         default=50,
         help="Write a JSONL training row every N steps. Set to 0 to disable.",
     )
+    parser.add_argument(
+        "--checkpoint-every",
+        type=int,
+        default=0,
+        help=(
+            "Write latest_train.pt every N steps during training. Set to 0 to "
+            "only save after the training loop finishes."
+        ),
+    )
     parser.add_argument("--backbone", type=str, default="tiny")
     parser.add_argument("--hidden-channels", type=int, default=128)
     parser.add_argument(
@@ -232,6 +241,33 @@ def scalar_losses(losses: dict[str, torch.Tensor]) -> dict[str, float]:
     return {key: float(value.detach().cpu()) for key, value in losses.items()}
 
 
+def save_training_checkpoint(
+    output_dir: Path,
+    *,
+    model: CPLineNet,
+    optimizer: torch.optim.Optimizer,
+    run_config: dict[str, Any],
+    history: list[dict[str, float]],
+    step: int,
+    elapsed_seconds: float,
+    filename: str = "latest_train.pt",
+) -> None:
+    tmp_path = output_dir / f".{filename}.tmp"
+    final_path = output_dir / filename
+    torch.save(
+        {
+            "model_state_dict": model.state_dict(),
+            "optimizer_state_dict": optimizer.state_dict(),
+            "config": {**run_config, "checkpoint_step": step},
+            "history": history,
+            "checkpoint_step": step,
+            "elapsed_seconds": elapsed_seconds,
+        },
+        tmp_path,
+    )
+    tmp_path.replace(final_path)
+
+
 def train(args: argparse.Namespace) -> dict[str, Any]:
     seed_everything(args.seed)
     output_dir = args.output_dir if args.output_dir.is_absolute() else REPO_ROOT / args.output_dir
@@ -358,6 +394,7 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         "batch_size": args.batch_size,
         "max_steps": args.max_steps,
         "log_every": args.log_every,
+        "checkpoint_every": args.checkpoint_every,
         "graph_eval_count": args.graph_eval_count,
         "skip_graph_eval": args.skip_graph_eval,
         "backbone": args.backbone,
@@ -424,6 +461,30 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
             with history_path.open("a", encoding="utf-8") as handle:
                 handle.write(json.dumps(log_row) + "\n")
             print(json.dumps({"event": "train_step", **log_row}), flush=True)
+        if args.checkpoint_every > 0 and (
+            step % args.checkpoint_every == 0 or step == args.max_steps
+        ):
+            elapsed_seconds = perf_counter() - start
+            save_training_checkpoint(
+                output_dir,
+                model=model,
+                optimizer=optimizer,
+                run_config=run_config,
+                history=history,
+                step=step,
+                elapsed_seconds=elapsed_seconds,
+            )
+            print(
+                json.dumps(
+                    {
+                        "event": "training_checkpoint",
+                        "step": step,
+                        "path": (output_dir / "latest_train.pt").as_posix(),
+                        "elapsed_seconds": elapsed_seconds,
+                    }
+                ),
+                flush=True,
+            )
 
     torch.save(
         {

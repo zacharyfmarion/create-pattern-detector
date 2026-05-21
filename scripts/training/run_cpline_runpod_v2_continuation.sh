@@ -20,6 +20,7 @@ NUM_WORKERS="${NUM_WORKERS:-4}"
 LR="${LR:-0.0002}"
 SEED="${SEED:-17}"
 LOG_EVERY="${LOG_EVERY:-50}"
+CHECKPOINT_EVERY="${CHECKPOINT_EVERY:-400}"
 SKIP_GRAPH_EVAL="${SKIP_GRAPH_EVAL:-1}"
 EVAL_THRESHOLDS="${EVAL_THRESHOLDS:-0.35,0.45,0.55,0.65,0.75,0.85}"
 
@@ -31,7 +32,9 @@ STEPS_WARMUP="${STEPS_WARMUP:-1200}"
 TRAIN_COUNT_FULL="${TRAIN_COUNT_FULL:-2048}"
 VAL_COUNT_FULL="${VAL_COUNT_FULL:-256}"
 STEPS_FULL="${STEPS_FULL:-4800}"
+RUN_WARMUP="${RUN_WARMUP:-1}"
 RUN_FULL="${RUN_FULL:-1}"
+FULL_INIT_CHECKPOINT="${FULL_INIT_CHECKPOINT:-$OUTPUT_ROOT/warmup/latest.pt}"
 
 LINE_HARD_NEGATIVE_WEIGHT="${LINE_HARD_NEGATIVE_WEIGHT:-0.25}"
 LINE_HARD_NEGATIVE_RATIO="${LINE_HARD_NEGATIVE_RATIO:-0.05}"
@@ -80,6 +83,7 @@ run_stage() {
     --lr "$LR"
     --seed "$SEED"
     --log-every "$LOG_EVERY"
+    --checkpoint-every "$CHECKPOINT_EVERY"
     --augment-profile "$PROFILE"
     --eval-augment-profile "$EVAL_PROFILE"
     --eval-thresholds "$EVAL_THRESHOLDS"
@@ -114,8 +118,10 @@ run_stage() {
   TQDM_DISABLE="${TQDM_DISABLE:-1}" "$PYTHON" "${args[@]}" 2>&1 | tee -a "$log_path"
 }
 
-run_stage "warmup" "$STEPS_WARMUP" "$TRAIN_COUNT_WARMUP" "$VAL_COUNT_WARMUP" "$OUTPUT_ROOT/warmup" "$INIT_CHECKPOINT"
+if [[ "$RUN_WARMUP" == "1" ]]; then
+  run_stage "warmup" "$STEPS_WARMUP" "$TRAIN_COUNT_WARMUP" "$VAL_COUNT_WARMUP" "$OUTPUT_ROOT/warmup" "$INIT_CHECKPOINT"
+fi
 
 if [[ "$RUN_FULL" == "1" ]]; then
-  run_stage "full" "$STEPS_FULL" "$TRAIN_COUNT_FULL" "$VAL_COUNT_FULL" "$OUTPUT_ROOT/full" "$OUTPUT_ROOT/warmup/latest.pt"
+  run_stage "full" "$STEPS_FULL" "$TRAIN_COUNT_FULL" "$VAL_COUNT_FULL" "$OUTPUT_ROOT/full" "$FULL_INIT_CHECKPOINT"
 fi
