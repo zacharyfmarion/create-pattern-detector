@@ -377,6 +377,7 @@ class StageInspectorService:
             backbone=config.get("backbone", "hrnet_w18"),
             pretrained=False,
             hidden_channels=int(config.get("hidden_channels", 128)),
+            v2_heads=bool(config.get("v2_heads", False)),
         ).to(device)
         model.load_state_dict(loaded["model_state_dict"])
         model.eval()
