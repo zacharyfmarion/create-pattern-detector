@@ -71,8 +71,13 @@ V2_DARK_AUGMENT_MIX = tuple(
         strict=True,
     )
 )
+V2_ALL_AUGMENT_MIX = tuple(
+    (profile, weight * 0.5, style_variant)
+    for profile, weight, style_variant in (*V2_AUGMENT_MIX, *V2_DARK_AUGMENT_MIX)
+)
 AUGMENT_MIXES["v2-issue-mix"] = V2_AUGMENT_MIX
 AUGMENT_MIXES["v2-dark-issue-mix"] = V2_DARK_AUGMENT_MIX
+AUGMENT_MIXES["v2-all-issue-mix"] = V2_ALL_AUGMENT_MIX
 MIXED_PROFILE_ENTRIES = AUGMENT_MIXES["stage-balanced"]
 MIXED_AUGMENT_PROFILES = tuple(AUGMENT_MIXES) + ("mixed",)
 AUGMENT_PROFILES = (
