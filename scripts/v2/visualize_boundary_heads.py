@@ -60,9 +60,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-pred-contacts", type=int, default=16)
     parser.add_argument(
         "--mode",
-        choices=["simple", "debug"],
+        choices=["simple", "prediction", "debug"],
         default="simple",
-        help="simple shows image/true contacts only; debug shows every boundary head.",
+        help="simple shows image/true contacts only; prediction adds contact confidence; debug shows every boundary head.",
     )
     return parser.parse_args()
 
@@ -133,6 +133,8 @@ def main() -> None:
 
     if args.mode == "debug":
         _write_debug_sheet(rows, output_path=output_path)
+    elif args.mode == "prediction":
+        _write_prediction_sheet(rows, output_path=output_path)
     else:
         _write_simple_sheet(rows, output_path=output_path)
     _write_sidecar(
@@ -206,6 +208,64 @@ def _write_simple_sheet(rows: list[dict[str, Any]], *, output_path: Path) -> Non
     plt.close(fig)
 
 
+def _write_prediction_sheet(rows: list[dict[str, Any]], *, output_path: Path) -> None:
+    columns = [
+        "input image",
+        "labels: yellow corners, green contacts",
+        "model contact confidence",
+    ]
+    fig, axes = plt.subplots(
+        len(rows),
+        len(columns),
+        figsize=(3.4 * len(columns), max(2.8, 2.8 * len(rows))),
+        squeeze=False,
+    )
+    for row_idx, row in enumerate(rows):
+        images = [
+            row["input"],
+            _boundary_label_overlay(row["input"], row["target_vertex"], row["target_mask"]),
+            _prediction_heat_overlay(row["input"], row["pred_contact"], color=(255, 40, 190)),
+        ]
+        for col_idx, image in enumerate(images):
+            axes[row_idx, col_idx].imshow(image)
+            axes[row_idx, col_idx].axis("off")
+            if row_idx == 0:
+                axes[row_idx, col_idx].set_title(columns[col_idx], fontsize=10)
+            if col_idx == 0:
+                axes[row_idx, col_idx].text(
+                    0.02,
+                    0.98,
+                    f"{row['selected_profile']}\n{row['id']}",
+                    transform=axes[row_idx, col_idx].transAxes,
+                    va="top",
+                    ha="left",
+                    fontsize=7,
+                    color="black",
+                    bbox={"facecolor": "white", "alpha": 0.78, "edgecolor": "none", "pad": 1.5},
+                )
+            if col_idx == 2:
+                axes[row_idx, col_idx].text(
+                    0.02,
+                    0.98,
+                    f"max={float(np.max(row['pred_contact'])):.2f}",
+                    transform=axes[row_idx, col_idx].transAxes,
+                    va="top",
+                    ha="left",
+                    fontsize=7,
+                    color="black",
+                    bbox={"facecolor": "white", "alpha": 0.78, "edgecolor": "none", "pad": 1.5},
+                )
+    fig.text(
+        0.01,
+        0.012,
+        "Pink shows the model's boundary-contact confidence. After a useful smoke, pink should concentrate near the green contact dots instead of filling the whole image.",
+        fontsize=9,
+    )
+    fig.tight_layout(rect=(0, 0.035, 1, 1))
+    fig.savefig(output_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+
+
 def _write_debug_sheet(rows: list[dict[str, Any]], *, output_path: Path) -> None:
     columns = [
         "input",
@@ -261,6 +321,22 @@ def _heat_overlay(image: np.ndarray, heatmap: np.ndarray, *, color: tuple[int, i
     color_arr = np.array(color, dtype=np.float32)
     alpha = (0.15 + 0.75 * heat)[..., None]
     mask = heat > 0.02
+    base[mask] = (1.0 - alpha[mask]) * base[mask] + alpha[mask] * color_arr
+    return base.clip(0, 255).astype(np.uint8)
+
+
+def _prediction_heat_overlay(
+    image: np.ndarray,
+    heatmap: np.ndarray,
+    *,
+    color: tuple[int, int, int],
+    threshold: float = 0.5,
+) -> np.ndarray:
+    base = image.copy().astype(np.float32)
+    score = np.clip((heatmap.astype(np.float32) - threshold) / max(1e-6, 1.0 - threshold), 0.0, 1.0)
+    color_arr = np.array(color, dtype=np.float32)
+    alpha = (0.20 + 0.80 * score)[..., None]
+    mask = score > 0.0
     base[mask] = (1.0 - alpha[mask]) * base[mask] + alpha[mask] * color_arr
     return base.clip(0, 255).astype(np.uint8)
 

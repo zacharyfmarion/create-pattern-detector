@@ -485,8 +485,12 @@ Training strategy:
 - Keep square rotations/reflections and render-style augmentations from V1, but
   do not add symmetry-completion or dense-scale-collapse targets.
 - Add real-world render issues only when labels and eval exist:
-  faint scans, mild perspective residue, page margins, compression, and dark
-  backgrounds.
+  faint scans, page margins around an already-rectified square, compression,
+  and dark backgrounds.
+- Do not train CPLineNet-V2 on skew/perspective as a normal augmentation. The
+  rectifier owns perspective correction; residual homography/skew should be
+  measured as rectifier confidence/error and reported before square-domain
+  decoding.
 
 High-res promotion gates:
 
