@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "id": "runpod-v2-continuation-final-w4",
+  "status": "candidate",
+  "phase": "v2.0",
+  "checkpoint": {
+    "gitTracked": false,
+    "relativePath": "checkpoints/runpod_v2_continuation_final_w4/full/latest.pt",
+    "sha256": "66dfa346ba3af5afa5133cdb788a1b9bcde2b09cc20278bcd822c0edb3f85cf9",
+    "sizeBytes": 138456480
+  },
+  "model": {
+    "class": "CPLineNet",
+    "backbone": "hrnet_w18",
+    "hiddenChannels": 128,
+    "imageSize": 1024,
+    "v2Heads": true
+  },
+  "inference": {
+    "batchnormMode": "batch-stats",
+    "vectorizerThreshold": 0.65
+  }
+}
