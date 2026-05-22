@@ -331,7 +331,7 @@ Exit criteria before high-res training:
 - Dashed carrier recall is measured separately and improves over V1 support
   sampling.
 
-Progress as of May 20, 2026:
+Progress as of May 21, 2026:
 
 - V2.0 synthetic issue benchmark tooling is in place for text, watermark, guide
   grid, dashed/gapped support, faint/low-contrast evidence, and visually
@@ -361,13 +361,71 @@ Progress as of May 20, 2026:
   sheets were generated under `visualizations/v2_boundary_validation_smoke/`.
   The prediction columns are still diffuse after this tiny smoke and should not
   be treated as learned localization quality yet.
-- This is only a wiring validation. No 1024 de-risking run, carrier-support
-  head, decoder boundary-contact eval, or high-resolution training run has been
-  launched yet.
+- A 1024 V2 continuation candidate has been trained and pulled locally as
+  `artifacts/checkpoints/runpod-v2-continuation-final-w4.json`. Against the
+  Phase 3 baseline, it improved the synthetic V2 issue mix substantially:
+  edge F1 `0.5548 -> 0.8269`, vertex F1 `0.6434 -> 0.8834`, border F1
+  `0.5197 -> 0.8463`, structural validity `0.9688 -> 0.9844`, and mean
+  vertex error `1.3308 -> 1.1161` px. On clean examples it slightly regressed:
+  edge F1 `0.9318 -> 0.9140`, vertex F1 `0.9716 -> 0.9579`, border F1
+  `0.8893 -> 0.8931`, assignment accuracy `0.9861 -> 0.9825`.
+- The result is useful but incomplete. It proves V2 issue training improves
+  robustness under synthetic artifacts, but it does not prove the architecture
+  can reach structurally exact CP output because the production vectorizer still
+  mostly used V1 evidence paths.
+- The immediate implementation priority is now decoder wiring, not more
+  training: make inference/eval consume V2 non-crease and boundary-contact
+  evidence, then build the full square-aware topology decoder.
+- The first local V2 evidence bridge is implemented for inference, checkpoint
+  eval, training graph eval, and Stage Inspector recompute. It carries the V2
+  auxiliary outputs and lets the existing graph builder suppress high-confidence
+  non-crease pixels and merge boundary-contact heatmaps into junction
+  candidates.
+- A small local 1024 validation slice (`n=4/profile`) comparing Phase 3 to the
+  V2 continuation with the bridge enabled showed strong issue-profile gains:
+  aggregate edge F1 `0.6128 -> 0.8419`, vertex F1 `0.7152 -> 0.9039`, border
+  F1 `0.6345 -> 0.8875`, and mean vertex error `1.4709 -> 1.2646` px.
+  `v2-guide-grid`, `v2-dashed`, and `v2-combined` improved the most. Clean was
+  effectively flat, but the older `line-style` profile regressed badly:
+  edge F1 `0.8923 -> 0.6952`, border F1 `0.9027 -> 0.7203`.
+- A targeted bridge ablation on selected examples showed that regression is
+  mostly in the V2 checkpoint/curriculum rather than the bridge itself:
+  disabling V2 auxiliary evidence still left the V2 model over-generating on
+  `line-style`. The bridge is useful plumbing, but it is not yet the
+  square-topology solution.
+- A corrective replay curriculum is now defined as `v2-replay-corrective`:
+  40% `stage-balanced` replay, 25% extra `line-style`, 25% `v2-all-issue-mix`,
+  and 10% extra `v2-combined`/`v2-dark-combined` stress. The intended run starts
+  from `runpod-v2-continuation-final-w4` with a fresh optimizer and lower
+  learning rate, so it preserves V2 issue robustness while restoring the old
+  readable profile distribution.
 
 ## Phase V2.3: SquareTopologyDecoder
 
 Goal: upgrade `PlanarGraphBuilder` into a square-aware graph decoder.
+
+Current implementation plan:
+
+1. Add a V2 evidence adapter that carries optional `non_crease`,
+   `line_style`, `boundary_contact`, `vertex_type`, `boundary_side`,
+   `boundary_offset`, and `boundary_coord` predictions through inference,
+   training graph eval, checkpoint eval, and Stage Inspector recompute.
+2. Add a conservative V2 bridge inside `PlanarGraphBuilder`:
+   - suppress high-confidence non-crease pixels before Hough/carrier extraction;
+   - merge boundary-contact heatmap peaks into junction candidates;
+   - keep existing repair/reporting as the final safety guard.
+3. Re-run Phase 3 vs V2 checkpoint metrics with the V2 evidence bridge enabled
+   to separate model gains from decoder gains/regressions.
+4. Only after that bridge is measured, implement the real
+   `SquareTopologyDecoder`:
+   - fixed unit-square frame and four corners;
+   - accepted crease carriers only;
+   - deterministic side-sorted boundary-contact chain;
+   - artifact-aware carrier scoring;
+   - dashed/gapped support scoring;
+   - analytic carrier/boundary intersections and graph splitting.
+5. Add Stage Inspector overlays for V2 evidence so failures can be assigned to
+   the model heads or the decoder rather than guessed from the final graph.
 
 Decoder contract:
 
@@ -579,17 +637,19 @@ V2 is complete when a frozen validation suite meets:
 
 ## Near-Term Next Steps
 
-1. Review the generated V2 augmentation and prediction/target contact sheets as
-   the final visual QA gate for the current augmentation set.
-2. Add the missing V2 structural heads needed for the square prior:
-   boundary-contact heatmap/type/side targets first, then carrier support if
-   contact metrics show carrier evidence is the next bottleneck.
+1. Promote the local bridge eval to a larger validation run after deciding
+   whether `line-style` should remain part of the V2 training mix or get a
+   corrective short run.
+2. Run the `v2-replay-corrective` fine-tune from the V2 checkpoint, then compare
+   against Phase 3 and the issue-only V2 checkpoint on clean, `line-style`,
+   stage-balanced, every V2 issue profile, and combined stress slices.
 3. Add Stage Inspector overlays for boundary contacts, non-crease/artifact
    evidence, line style, and observed-vs-latent assignment targets.
-4. Run the first short 1024 de-risking run with V2 heads enabled on the
-   approved issue mix. Compare artifact false-positive rate, dashed carrier
-   recall, faint-line recall, and ambiguous-assignment behavior against V1.
-5. Use the 1024 results to decide whether to add carrier-support heads,
-   adjust augment weights, or proceed to the square topology decoder changes.
-6. Only after 1024 graph metrics improve should we launch 1536/2048 or tiled
-   inference experiments.
+4. Implement the first real `SquareTopologyDecoder` pass with fixed square
+   corners and deterministic boundary-chain construction.
+5. Add exact square-CP compile gates: canonical border cycle, every boundary
+   contact represented, no duplicate/zero edges, no unsplit crossings, and
+   internal FOLD parse.
+6. Use the decoder results to decide whether carrier-support heads or 1536/2048
+   training should be next. Do not treat more 1024 training as the main path to
+   0.99 border metrics unless the decoder has already consumed the V2 heads.

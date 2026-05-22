@@ -352,6 +352,42 @@ def test_cpline_stage_balanced_samples_dark_and_photo_dark_without_grid():
     assert photo_dark_sample.metadata["geometry_applied"] is True
 
 
+def test_v2_replay_corrective_mix_preserves_old_profiles_and_v2_stress_cases():
+    entries = AUGMENT_MIXES["v2-replay-corrective"]
+    profile_weights: dict[str, float] = {}
+    for profile, weight, _ in entries:
+        profile_weights[profile] = profile_weights.get(profile, 0.0) + weight
+
+    old_profiles = {
+        "clean",
+        "square-symmetry",
+        "line-style",
+        "print-light",
+        "print-medium",
+        "photo-light",
+        "dark-mode",
+        "photo-dark",
+    }
+    v2_profiles = {
+        "v2-text",
+        "v2-watermark",
+        "v2-guide-grid",
+        "v2-dashed",
+        "v2-faint",
+        "v2-ambiguous-mv",
+        "v2-combined",
+        "v2-dark-text",
+        "v2-dark-combined",
+    }
+
+    assert old_profiles <= set(profile_weights)
+    assert v2_profiles <= set(profile_weights)
+    assert abs(sum(weight for _, weight, _ in entries) - 1.0) < 1e-6
+    assert profile_weights["line-style"] > profile_weights["clean"]
+    assert profile_weights["v2-combined"] > profile_weights["v2-text"]
+    assert profile_weights["v2-dark-combined"] > profile_weights["v2-dark-text"]
+
+
 def test_cpline_style_profiles_do_not_apply_square_symmetry_by_default():
     cp = asymmetric_mv_cp()
     clean = render_cpline_sample(
@@ -911,6 +947,20 @@ def test_cpline_outputs_convert_to_vectorizer_evidence():
     assert evidence.angle.shape == (64, 64, 2)
     assert evidence.junction_heatmap.shape == (64, 64)
     assert evidence.assignment_labels.shape == (64, 64)
+
+
+def test_cpline_outputs_convert_v2_heads_to_vectorizer_evidence():
+    model = CPLineNet(backbone="tiny", hidden_channels=32, v2_heads=True)
+    outputs = model(torch.zeros(1, 3, 64, 64))
+    evidence = cpline_outputs_to_evidence(outputs, line_threshold=0.0)
+
+    assert evidence.non_crease_prob.shape == (64, 64)
+    assert evidence.line_style_prob.shape == (64, 64, 4)
+    assert evidence.boundary_contact_heatmap.shape == (64, 64)
+    assert evidence.vertex_type_prob.shape == (64, 64, 4)
+    assert evidence.boundary_side_prob.shape == (64, 64, 4)
+    assert evidence.boundary_offset.shape == (64, 64, 2)
+    assert evidence.boundary_coord.shape == (64, 64)
 
 
 def _write_manifest(tmp_path, *, count: int) -> str:

@@ -22,7 +22,7 @@ from torch.utils.data import DataLoader
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 
-from src.data.cpline_augmentations import BASE_AUGMENT_PROFILES  # noqa: E402
+from src.data.cpline_augmentations import AUGMENT_PROFILES  # noqa: E402
 from src.data.cpline_dataset import CplineFoldDataset, cpline_collate  # noqa: E402
 from src.models import CPLineNet  # noqa: E402
 from src.models.batchnorm import BATCHNORM_MODES, model_eval_with_batchnorm_mode  # noqa: E402
@@ -34,10 +34,10 @@ from src.vectorization import (  # noqa: E402
     QualityReportConfig,
     RepairAction,
     RepairConfig,
-    VectorizerEvidence,
     attribute_graph_from_logits,
     build_quality_report,
     conservative_repair,
+    cpline_outputs_to_evidence,
     evaluate_graph,
 )
 from src.vectorization.metrics import GraphMetrics, metrics_from_results  # noqa: E402
@@ -75,7 +75,7 @@ def parse_args() -> argparse.Namespace:
         "--profiles",
         nargs="+",
         default=["clean", "line-style", "print-light", "dark-mode", "photo-light", "photo-dark"],
-        choices=BASE_AUGMENT_PROFILES,
+        choices=AUGMENT_PROFILES,
     )
     parser.add_argument(
         "--family-sampling",
@@ -220,16 +220,13 @@ def evaluate_sample(
     sample_index: int,
 ) -> tuple[dict[str, Any], GraphMetrics, dict[str, Any]]:
     outputs = model(batch["image"].to(device))
-    line_prob = torch.sigmoid(outputs["line_logits"][0, 0]).detach().cpu().numpy()
-    angle = outputs["angle"][0].detach().cpu().permute(1, 2, 0).numpy()
-    junction_heatmap = torch.sigmoid(outputs["junction_logits"][0, 0]).detach().cpu().numpy()
-
-    evidence = VectorizerEvidence(
-        line_prob=line_prob.astype(np.float32),
-        angle=angle.astype(np.float32),
-        junction_heatmap=junction_heatmap.astype(np.float32),
-        assignment_labels=None,
+    evidence = cpline_outputs_to_evidence(
+        outputs,
+        batch_index=0,
+        line_threshold=threshold,
     )
+    line_prob = evidence.line_prob
+    junction_heatmap = evidence.junction_heatmap
     graph_result = builder.build(evidence)
     attributed = attribute_graph_from_logits(
         graph_result,
@@ -482,6 +479,7 @@ def load_model(checkpoint: Path, device: torch.device) -> CPLineNet:
         backbone=config.get("backbone", "hrnet_w18"),
         pretrained=False,
         hidden_channels=int(config.get("hidden_channels", 128)),
+        v2_heads=bool(config.get("v2_heads", False)),
     ).to(device)
     model.load_state_dict(loaded["model_state_dict"])
     model.eval()

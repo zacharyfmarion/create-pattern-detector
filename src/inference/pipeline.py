@@ -27,10 +27,10 @@ from src.vectorization import (
     QualityReportConfig,
     RepairConfig,
     RepairResult,
-    VectorizerEvidence,
     attribute_graph_from_logits,
     build_quality_report,
     conservative_repair,
+    cpline_outputs_to_evidence,
     save_fold,
 )
 
@@ -124,15 +124,13 @@ class CPDetectPipeline:
         ):
             outputs = self.model(image_tensor)
 
-        line_prob = torch.sigmoid(outputs["line_logits"][0, 0]).detach().cpu().numpy()
-        angle = outputs["angle"][0].detach().cpu().permute(1, 2, 0).numpy()
-        junction_heatmap = torch.sigmoid(outputs["junction_logits"][0, 0]).detach().cpu().numpy()
-        evidence = VectorizerEvidence(
-            line_prob=line_prob.astype(np.float32),
-            angle=angle.astype(np.float32),
-            junction_heatmap=junction_heatmap.astype(np.float32),
-            assignment_labels=None,
+        evidence = cpline_outputs_to_evidence(
+            outputs,
+            batch_index=0,
+            line_threshold=self.threshold,
         )
+        line_prob = evidence.line_prob
+        junction_heatmap = evidence.junction_heatmap
         graph_result = self.builder.build(evidence)
         attributed = attribute_graph_from_logits(
             graph_result,

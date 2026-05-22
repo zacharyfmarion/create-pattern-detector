@@ -35,11 +35,11 @@ from src.vectorization import (  # noqa: E402
     PlanarGraphBuilderConfig,
     QualityReportConfig,
     RepairConfig,
-    VectorizerEvidence,
     attribute_graph_from_logits,
     build_quality_report,
     build_stage4_diagnostic_payload,
     conservative_repair,
+    cpline_outputs_to_evidence,
     evaluate_graph,
 )
 
@@ -258,15 +258,12 @@ class StageInspectorService:
             batchnorm_mode=str(summary.get("batchnorm_mode", "batch-stats")),
         ):
             outputs = model(batch["image"].to(device))
-            line_prob = torch.sigmoid(outputs["line_logits"][0, 0]).detach().cpu().numpy()
-            angle = outputs["angle"][0].detach().cpu().permute(1, 2, 0).numpy()
-            junction_heatmap = torch.sigmoid(outputs["junction_logits"][0, 0]).detach().cpu().numpy()
-            evidence = VectorizerEvidence(
-                line_prob=line_prob.astype(np.float32),
-                angle=angle.astype(np.float32),
-                junction_heatmap=junction_heatmap.astype(np.float32),
-                assignment_labels=None,
+            evidence = cpline_outputs_to_evidence(
+                outputs,
+                batch_index=0,
+                line_threshold=threshold,
             )
+            line_prob = evidence.line_prob
             graph_result = builder.build(evidence)
             attributed = attribute_graph_from_logits(
                 graph_result,

@@ -75,9 +75,17 @@ V2_ALL_AUGMENT_MIX = tuple(
     (profile, weight * 0.5, style_variant)
     for profile, weight, style_variant in (*V2_AUGMENT_MIX, *V2_DARK_AUGMENT_MIX)
 )
+V2_REPLAY_CORRECTIVE_MIX = (
+    *((profile, weight * 0.40, style_variant) for profile, weight, style_variant in AUGMENT_MIXES["stage-balanced"]),
+    ("line-style", 0.25, None),
+    *((profile, weight * 0.25, style_variant) for profile, weight, style_variant in V2_ALL_AUGMENT_MIX),
+    ("v2-combined", 0.05, None),
+    ("v2-dark-combined", 0.05, None),
+)
 AUGMENT_MIXES["v2-issue-mix"] = V2_AUGMENT_MIX
 AUGMENT_MIXES["v2-dark-issue-mix"] = V2_DARK_AUGMENT_MIX
 AUGMENT_MIXES["v2-all-issue-mix"] = V2_ALL_AUGMENT_MIX
+AUGMENT_MIXES["v2-replay-corrective"] = V2_REPLAY_CORRECTIVE_MIX
 MIXED_PROFILE_ENTRIES = AUGMENT_MIXES["stage-balanced"]
 MIXED_AUGMENT_PROFILES = tuple(AUGMENT_MIXES) + ("mixed",)
 AUGMENT_PROFILES = (

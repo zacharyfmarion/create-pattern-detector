@@ -118,6 +118,66 @@ def test_rendered_evidence_canonicalizes_metric_edges():
     assert rendered.assignments.tolist() == [3, 3]
 
 
+def test_v2_non_crease_evidence_suppresses_artifact_lines():
+    line_prob = np.zeros((64, 64), dtype=np.float32)
+    line_prob[32, 4:60] = 0.8
+    builder = PlanarGraphBuilder(
+        PlanarGraphBuilderConfig(
+            image_size=64,
+            line_threshold=0.5,
+            hough_threshold=4,
+            hough_min_line_length=8,
+            hough_max_line_gap=2,
+            min_edge_support=0.5,
+        )
+    )
+
+    baseline = builder.build(VectorizerEvidence(line_prob=line_prob))
+    suppressed = builder.build(
+        VectorizerEvidence(
+            line_prob=line_prob,
+            non_crease_prob=np.ones_like(line_prob, dtype=np.float32),
+        )
+    )
+
+    assert baseline.num_edges >= 1
+    assert suppressed.num_edges == 0
+    assert suppressed.debug["v2_evidence"]["non_crease_suppressed_pixels"] > 0
+
+
+def test_v2_boundary_contact_heatmap_adds_boundary_vertex_candidate():
+    line_prob = np.zeros((64, 64), dtype=np.float32)
+    line_prob[:53, 32] = 1.0
+    junction_heatmap = np.zeros_like(line_prob)
+    junction_heatmap[52, 32] = 1.0
+    contact_heatmap = np.zeros_like(line_prob)
+    contact_heatmap[0, 32] = 1.0
+    builder = PlanarGraphBuilder(
+        PlanarGraphBuilderConfig(
+            image_size=64,
+            line_threshold=0.5,
+            hough_threshold=4,
+            hough_min_line_length=8,
+            hough_max_line_gap=2,
+            junction_threshold=0.2,
+            min_edge_support=0.5,
+            direct_edge_fallback=False,
+        )
+    )
+
+    result = builder.build(
+        VectorizerEvidence(
+            line_prob=line_prob,
+            junction_heatmap=junction_heatmap,
+            boundary_contact_heatmap=contact_heatmap,
+        )
+    )
+
+    assert result.num_edges >= 1
+    assert np.min(result.pixel_vertices[:, 1]) <= 1.0
+    assert result.debug["v2_evidence"]["boundary_contact_available"] is True
+
+
 def test_planar_cleanup_splits_edges_at_intermediate_vertices():
     vertices = np.array([[0.0, 0.0], [10.0, 0.0], [5.0, 0.2]], dtype=np.float32)
     edges = np.array([[0, 1]], dtype=np.int64)
