@@ -16,7 +16,6 @@ import os
 import random
 import resource
 import sys
-from itertools import cycle
 from pathlib import Path
 from time import perf_counter
 from typing import Any
@@ -309,6 +308,14 @@ def memory_stats(device: torch.device) -> dict[str, float]:
     return stats
 
 
+def next_training_batch(loader: DataLoader, iterator: Any) -> tuple[dict[str, Any], Any]:
+    try:
+        return next(iterator), iterator
+    except StopIteration:
+        iterator = iter(loader)
+        return next(iterator), iterator
+
+
 def save_training_checkpoint(
     output_dir: Path,
     *,
@@ -527,10 +534,10 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
     model.train()
     history: list[dict[str, float]] = []
     start = perf_counter()
-    iterator = cycle(train_loader)
+    iterator = iter(train_loader)
     progress = tqdm(range(1, args.max_steps + 1), desc="CPLineNet local smoke")
     for step in progress:
-        batch = next(iterator)
+        batch, iterator = next_training_batch(train_loader, iterator)
         images = batch["image"].to(device)
         targets = move_targets(batch, device)
         optimizer.zero_grad(set_to_none=True)
