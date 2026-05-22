@@ -635,6 +635,41 @@ V2 is complete when a frozen validation suite meets:
 - Real-world curated set has no silent catastrophic failures; failures are
   reported as ambiguous, outside-envelope, or failed with inspectable reasons.
 
+## V2 RunPod Philosophy
+
+V2 paid GPU work should optimize for the least expensive GPU that can complete
+the run reliably without making turnaround painfully slow. The default target
+for 1024px HRNet W18 continuation runs is a 24GB-class GPU: RTX 4090 first,
+then comparable 24GB cards such as RTX A5000 or L4 if the 4090 is unavailable.
+Use larger cards such as L40S/A6000 only when the 24GB class fails a measured
+memory or throughput gate. Do not use premium H100/H200/A100-class GPUs for V2
+continuation or replay runs unless the roadmap explicitly records the measured
+need and the user has approved the cost.
+
+Dataset logistics should not drive GPU selection. The synthetic training mix is
+small enough to re-upload when needed; re-uploading data is preferable to
+renting an expensive GPU solely because a network volume already exists in that
+region. Network volumes are useful for repeated cheap runs in the same region,
+but convenience does not override GPU cost.
+
+Every V2 RunPod run should follow this order:
+
+1. Run local CPU/MPS smoke tests and objective/label checks.
+2. Create a short-lived 24GB-class pod with an auto-stop.
+3. Upload only the required dataset slice/checkpoint artifacts to ephemeral
+   storage unless a cheap matching-region volume is already available.
+4. Run a tiny CUDA preflight that verifies dataset links, checkpoint loading,
+   one training step, CUDA memory, and expected loss keys.
+5. Launch the short corrective or validation run, monitor early steps for memory
+   and throughput, and stop early if graph metrics are not likely to improve.
+6. Copy back checkpoints/logs/metrics, then stop or delete the pod promptly.
+
+Budget intent: spend money where it buys information about graph quality, not
+where it buys idle convenience or unused VRAM. For this V2 replay correction,
+the appropriate run target is a 1024px, batch-size-1, 24GB-class GPU run from
+the V2 checkpoint, followed by metric comparison against Phase 3 and the
+issue-only V2 checkpoint.
+
 ## Near-Term Next Steps
 
 1. Promote the local bridge eval to a larger validation run after deciding
