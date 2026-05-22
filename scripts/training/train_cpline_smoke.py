@@ -14,6 +14,7 @@ import argparse
 import json
 import os
 import random
+import resource
 import sys
 from itertools import cycle
 from pathlib import Path
@@ -67,6 +68,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-steps", type=int, default=120)
     parser.add_argument("--batch-size", type=int, default=2)
     parser.add_argument("--num-workers", type=int, default=0)
+    parser.add_argument(
+        "--no-pin-memory",
+        action="store_true",
+        help="Disable CUDA DataLoader pinned-memory staging. Useful for memory-capped pods.",
+    )
+    parser.add_argument(
+        "--log-memory",
+        action="store_true",
+        help="Include process and CUDA memory stats in logged train_step rows.",
+    )
     parser.add_argument(
         "--graph-eval-count",
         type=int,
@@ -258,6 +269,46 @@ def scalar_losses(losses: dict[str, torch.Tensor]) -> dict[str, float]:
     return {key: float(value.detach().cpu()) for key, value in losses.items()}
 
 
+def process_rss_mb() -> float:
+    status_path = Path("/proc/self/status")
+    if status_path.exists():
+        for line in status_path.read_text(encoding="utf-8").splitlines():
+            if line.startswith("VmRSS:"):
+                parts = line.split()
+                if len(parts) >= 2:
+                    return float(parts[1]) / 1024.0
+    value = float(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
+    if sys.platform == "darwin":
+        return value / (1024.0 * 1024.0)
+    return value / 1024.0
+
+
+def process_max_rss_mb() -> float:
+    value = float(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
+    if sys.platform == "darwin":
+        return value / (1024.0 * 1024.0)
+    return value / 1024.0
+
+
+def memory_stats(device: torch.device) -> dict[str, float]:
+    stats = {
+        "process_rss_mb": process_rss_mb(),
+        "process_max_rss_mb": process_max_rss_mb(),
+    }
+    if device.type == "cuda":
+        stats.update(
+            {
+                "cuda_allocated_mb": float(torch.cuda.memory_allocated(device)) / (1024.0 * 1024.0),
+                "cuda_reserved_mb": float(torch.cuda.memory_reserved(device)) / (1024.0 * 1024.0),
+                "cuda_max_allocated_mb": float(torch.cuda.max_memory_allocated(device))
+                / (1024.0 * 1024.0),
+                "cuda_max_reserved_mb": float(torch.cuda.max_memory_reserved(device))
+                / (1024.0 * 1024.0),
+            }
+        )
+    return stats
+
+
 def save_training_checkpoint(
     output_dir: Path,
     *,
@@ -328,7 +379,7 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
             augment_profile=args.eval_augment_profile,
             seed=args.seed + 2,
         )
-    pin_memory = device.type == "cuda"
+    pin_memory = device.type == "cuda" and not args.no_pin_memory
     train_loader = DataLoader(
         train_dataset,
         batch_size=args.batch_size,
@@ -421,8 +472,11 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         "val_samples": len(val_dataset),
         "image_size": args.image_size,
         "batch_size": args.batch_size,
+        "num_workers": args.num_workers,
+        "pin_memory": pin_memory,
         "max_steps": args.max_steps,
         "log_every": args.log_every,
+        "log_memory": args.log_memory,
         "checkpoint_every": args.checkpoint_every,
         "graph_eval_count": args.graph_eval_count,
         "skip_graph_eval": args.skip_graph_eval,
@@ -492,6 +546,8 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
             step == 1 or step % args.log_every == 0 or step == args.max_steps
         ):
             log_row = {**row, "elapsed_seconds": perf_counter() - start}
+            if args.log_memory:
+                log_row.update(memory_stats(device))
             with history_path.open("a", encoding="utf-8") as handle:
                 handle.write(json.dumps(log_row) + "\n")
             print(json.dumps({"event": "train_step", **log_row}), flush=True)

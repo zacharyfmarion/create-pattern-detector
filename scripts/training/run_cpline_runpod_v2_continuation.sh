@@ -17,9 +17,11 @@ MAX_EDGES="${MAX_EDGES:-300}"
 TRAIN_FAMILY_SAMPLING="${TRAIN_FAMILY_SAMPLING:-balanced}"
 BATCH_SIZE="${BATCH_SIZE:-1}"
 NUM_WORKERS="${NUM_WORKERS:-4}"
+NO_PIN_MEMORY="${NO_PIN_MEMORY:-0}"
 LR="${LR:-0.0002}"
 SEED="${SEED:-17}"
 LOG_EVERY="${LOG_EVERY:-50}"
+LOG_MEMORY="${LOG_MEMORY:-0}"
 CHECKPOINT_EVERY="${CHECKPOINT_EVERY:-400}"
 SKIP_GRAPH_EVAL="${SKIP_GRAPH_EVAL:-1}"
 SKIP_FINAL_EVAL="${SKIP_FINAL_EVAL:-0}"
@@ -110,6 +112,12 @@ run_stage() {
     --boundary-coord-weight "$BOUNDARY_COORD_WEIGHT"
     --use-v2-observed-assignment
   )
+  if [[ "$NO_PIN_MEMORY" == "1" ]]; then
+    args+=(--no-pin-memory)
+  fi
+  if [[ "$LOG_MEMORY" == "1" ]]; then
+    args+=(--log-memory)
+  fi
   if [[ "$CHECKPOINT_LOAD_MODE" == "resume" ]]; then
     args+=(--resume-checkpoint "$init_checkpoint")
   else
