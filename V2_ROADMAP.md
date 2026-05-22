@@ -331,7 +331,7 @@ Exit criteria before high-res training:
 - Dashed carrier recall is measured separately and improves over V1 support
   sampling.
 
-Progress as of May 21, 2026:
+Progress as of May 22, 2026:
 
 - V2.0 synthetic issue benchmark tooling is in place for text, watermark, guide
   grid, dashed/gapped support, faint/low-contrast evidence, and visually
@@ -393,12 +393,61 @@ Progress as of May 21, 2026:
   disabling V2 auxiliary evidence still left the V2 model over-generating on
   `line-style`. The bridge is useful plumbing, but it is not yet the
   square-topology solution.
-- A corrective replay curriculum is now defined as `v2-replay-corrective`:
+- A corrective replay curriculum was defined as `v2-replay-corrective`:
   40% `stage-balanced` replay, 25% extra `line-style`, 25% `v2-all-issue-mix`,
-  and 10% extra `v2-combined`/`v2-dark-combined` stress. The intended run starts
-  from `runpod-v2-continuation-final-w4` with a fresh optimizer and lower
-  learning rate, so it preserves V2 issue robustness while restoring the old
-  readable profile distribution.
+  and 10% extra `v2-combined`/`v2-dark-combined` stress. It starts from
+  `runpod-v2-continuation-final-w4` with a fresh optimizer and lower learning
+  rate, so it can preserve V2 issue robustness while restoring the old readable
+  profile distribution.
+- The corrective replay curriculum has now been trained on the full available
+  synthetic FOLD dataset pack at 1024px:
+  `artifacts/checkpoints/runpod-v2-replay-correction-full-4000ada.json`.
+  The run used 5,202 train examples, 638 validation examples, `max_edges=300`,
+  batch size 1, 800 steps, and the full `v2-replay-corrective` mix. The
+  training loader memory leak found during the interrupted RunPod attempts was
+  fixed before the full run.
+- The current reusable comparison snapshot is committed at
+  `artifacts/evaluations/v2-checkpoint-comparison-20260522.json`, with a human
+  summary in `docs/v2-checkpoint-metrics.md`. This means future checkpoint
+  screens can compare against the stored Phase 3, V2 issue-only, partial replay,
+  and full replay numbers without rerunning those older checkpoints.
+- On a 1024px Stage 4 checkpoint screen (`n=16/profile`, profiles `clean`,
+  `line-style`, `v2-all-issue-mix`, and `v2-dark-issue-mix`), the full replay
+  checkpoint is the best balanced candidate so far:
+  aggregate edge P/R `0.877/0.877`, border P/R/F1 `0.860/0.892/0.876`,
+  assignment accuracy `0.987`, and structural validity `1.000`. It improves
+  over the V2 issue-only checkpoint by `+0.114` edge precision, `+0.042` edge
+  recall, and `+0.054` border F1.
+- The replay run restored most of the old-profile `line-style` regression:
+  border F1 moved from `0.721` on V2 issue-only to `0.862` on full replay.
+  Clean border F1 is now `0.906`; V2 all-issue border F1 is `0.857`; V2 dark
+  issue border F1 is `0.878`.
+- Boundary-contact heads are not the main bottleneck on the current synthetic
+  contact eval. The full replay checkpoint is around `0.94` contact F1 across
+  clean, line-style, V2 issue, and V2 dark issue slices. The remaining gap to
+  0.99 structural output is downstream topology: carrier selection, analytic
+  intersections, deterministic boundary-chain splitting, artifact rejection,
+  dashed support, and compile/flat-foldability gates.
+- The full replay checkpoint should be treated as the current V2 candidate for
+  Stage Inspector visual review and decoder work, not as a production-ready V2
+  model. Many outputs are parseable and complete-border, but quality reports
+  still often land in `ambiguous` or `outside_v1_envelope` because of short
+  edges, crowded junctions, Kawasaki/Maekawa warnings, and assignment
+  uncertainty.
+- `SquareTopologyDecoder` is now implemented and wired into Stage 4 checkpoint
+  eval, Stage Inspector recompute, and the production inference builder. It
+  uses a fixed rectified square frame, fixed corners, border-carrier
+  suppression, V2 non-crease/boundary-contact evidence, junction snapping to
+  analytic carrier intersections, deterministic side-sorted border chains, and
+  planar cleanup. It deliberately does not add every analytic carrier-carrier
+  intersection by default, because that over-generated unreadable graphs.
+- A square-topology Stage Inspector bundle was generated at
+  `visualizations/v2_square_topology_inspector/eval` with 66 synthetic examples
+  across clean, `line-style`, isolated V2 issue profiles, combined, dark
+  combined, and replay-corrective profiles. Aggregate structural validity is
+  `1.000`, edge P/R is `0.868/0.795`, and border P/R/F1 is
+  `0.925/0.893/0.909`. Clean border F1 is `0.951`; `line-style` border F1 is
+  `0.923`; combined and dark-combined remain lower at roughly `0.865`.
 
 ## Phase V2.3: SquareTopologyDecoder
 
@@ -406,25 +455,30 @@ Goal: upgrade `PlanarGraphBuilder` into a square-aware graph decoder.
 
 Current implementation plan:
 
-1. Add a V2 evidence adapter that carries optional `non_crease`,
+1. Done: add a V2 evidence adapter that carries optional `non_crease`,
    `line_style`, `boundary_contact`, `vertex_type`, `boundary_side`,
    `boundary_offset`, and `boundary_coord` predictions through inference,
    training graph eval, checkpoint eval, and Stage Inspector recompute.
-2. Add a conservative V2 bridge inside `PlanarGraphBuilder`:
+2. Done: add a conservative V2 bridge inside `PlanarGraphBuilder`:
    - suppress high-confidence non-crease pixels before Hough/carrier extraction;
    - merge boundary-contact heatmap peaks into junction candidates;
    - keep existing repair/reporting as the final safety guard.
-3. Re-run Phase 3 vs V2 checkpoint metrics with the V2 evidence bridge enabled
-   to separate model gains from decoder gains/regressions.
-4. Only after that bridge is measured, implement the real
-   `SquareTopologyDecoder`:
+3. Done: re-run Phase 3 vs V2 checkpoint metrics with the V2 evidence bridge
+   enabled, then train and compare a corrective replay checkpoint. The stored
+   snapshot is `artifacts/evaluations/v2-checkpoint-comparison-20260522.json`.
+4. Done: implement the first real `SquareTopologyDecoder`:
    - fixed unit-square frame and four corners;
-   - accepted crease carriers only;
+   - accepted crease carriers only, with border-carrier suppression;
    - deterministic side-sorted boundary-contact chain;
-   - artifact-aware carrier scoring;
-   - dashed/gapped support scoring;
-   - analytic carrier/boundary intersections and graph splitting.
-5. Add Stage Inspector overlays for V2 evidence so failures can be assigned to
+   - artifact-aware carrier scoring through non-crease evidence;
+   - gap-tolerant dashed support scoring;
+   - analytic carrier/boundary intersections and graph splitting;
+   - junction snapping to analytic intersections without adding all
+     carrier-carrier intersections as vertices by default.
+5. Next: visually inspect the square-topology Stage Inspector bundle and tune
+   remaining combined/dark/replay-corrective failures before broadening to
+   real-image validation.
+6. Add Stage Inspector overlays for V2 evidence so failures can be assigned to
    the model heads or the decoder rather than guessed from the final graph.
 
 Decoder contract:
@@ -672,19 +726,24 @@ issue-only V2 checkpoint.
 
 ## Near-Term Next Steps
 
-1. Promote the local bridge eval to a larger validation run after deciding
-   whether `line-style` should remain part of the V2 training mix or get a
-   corrective short run.
-2. Run the `v2-replay-corrective` fine-tune from the V2 checkpoint, then compare
-   against Phase 3 and the issue-only V2 checkpoint on clean, `line-style`,
-   stage-balanced, every V2 issue profile, and combined stress slices.
-3. Add Stage Inspector overlays for boundary contacts, non-crease/artifact
-   evidence, line style, and observed-vs-latent assignment targets.
-4. Implement the first real `SquareTopologyDecoder` pass with fixed square
-   corners and deterministic boundary-chain construction.
-5. Add exact square-CP compile gates: canonical border cycle, every boundary
+1. Use `runpod-v2-replay-correction-full-4000ada` as the current V2 candidate
+   in Stage Inspector visual review on the existing real-world examples. Record
+   whether failures are line evidence, artifact suppression, boundary contacts,
+   topology splitting, assignment ambiguity, or rectifier/source-envelope
+   problems.
+2. Add Stage Inspector overlays for boundary contacts, non-crease/artifact
+   evidence, line style, and observed-vs-latent assignment targets. The model
+   already emits these signals; the product path needs to expose them clearly.
+3. Visually review `visualizations/v2_square_topology_inspector/eval` in Stage
+   Inspector, focusing on the combined, dark-combined, and replay-corrective
+   profiles where edge/border metrics remain weakest.
+4. Add exact square-CP compile gates: canonical border cycle, every boundary
    contact represented, no duplicate/zero edges, no unsplit crossings, and
    internal FOLD parse.
-6. Use the decoder results to decide whether carrier-support heads or 1536/2048
-   training should be next. Do not treat more 1024 training as the main path to
-   0.99 border metrics unless the decoder has already consumed the V2 heads.
+5. Run the stored checkpoint screen only for new candidate checkpoints, using
+   `artifacts/evaluations/v2-checkpoint-comparison-20260522.json` as the cached
+   baseline for older checkpoints.
+6. Use the decoder results to decide whether carrier-support heads, dashed
+   carrier heads, or 1536/2048 training should be next. Do not treat more 1024
+   training as the main path to 0.99 border metrics unless the decoder has
+   already consumed the V2 heads and compile gates.

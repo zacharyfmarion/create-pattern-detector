@@ -34,6 +34,7 @@ from .quality_report import (
     QualityWarning,
     build_quality_report,
 )
+from .square_topology_decoder import SquareTopologyDecoder, SquareTopologyDecoderConfig
 
 __all__ = [
     "AttributedPlanarGraph",
@@ -50,6 +51,8 @@ __all__ = [
     "RepairConfig",
     "RepairResult",
     "RenderedVectorizerEvidence",
+    "SquareTopologyDecoder",
+    "SquareTopologyDecoderConfig",
     "StructuralValidity",
     "VectorizerEvidence",
     "assign_edges_from_logits",

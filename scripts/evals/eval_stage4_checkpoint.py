@@ -34,6 +34,8 @@ from src.vectorization import (  # noqa: E402
     QualityReportConfig,
     RepairAction,
     RepairConfig,
+    SquareTopologyDecoder,
+    SquareTopologyDecoderConfig,
     attribute_graph_from_logits,
     build_quality_report,
     conservative_repair,
@@ -90,6 +92,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--threshold", type=float, default=0.65)
     parser.add_argument(
+        "--decoder",
+        choices=["planar", "square"],
+        default="square",
+        help="Topology decoder to use. V2 defaults to the square-aware decoder.",
+    )
+    parser.add_argument(
         "--repair-near-endpoint-crossings",
         action=argparse.BooleanOptionalAction,
         default=False,
@@ -125,9 +133,10 @@ def main() -> None:
 
     device = select_device(args.device)
     model = load_model(checkpoint, device)
-    builder = make_builder(
+    builder = make_decoder(
         args.image_size,
         args.threshold,
+        decoder=args.decoder,
         repair_near_endpoint_crossings=args.repair_near_endpoint_crossings,
     )
     assignment_config = EdgeAssignmentConfig()
@@ -208,7 +217,7 @@ def evaluate_sample(
     model: torch.nn.Module,
     batch: dict[str, Any],
     device: torch.device,
-    builder: PlanarGraphBuilder,
+    builder: Any,
     assignment_config: EdgeAssignmentConfig,
     repair_config: RepairConfig,
     report_config: QualityReportConfig,
@@ -501,12 +510,28 @@ def select_device(requested: str) -> torch.device:
     return device
 
 
-def make_builder(
+def make_decoder(
     image_size: int,
     threshold: float,
     *,
+    decoder: str = "square",
     repair_near_endpoint_crossings: bool = False,
-) -> PlanarGraphBuilder:
+) -> Any:
+    if decoder == "square":
+        return SquareTopologyDecoder(
+            SquareTopologyDecoderConfig(
+                image_size=image_size,
+                line_threshold=threshold,
+                hough_threshold=10,
+                hough_min_line_length=6,
+                hough_max_line_gap=4,
+                min_edge_support=0.45,
+                junction_threshold=0.20,
+                junction_nms_radius=2,
+                vertex_merge_px=max(1.0, 1.5 * image_size / 768),
+                line_vertex_distance_px=max(2.0, 4.0 * image_size / 768),
+            )
+        )
     return PlanarGraphBuilder(
         PlanarGraphBuilderConfig(
             image_size=image_size,
@@ -599,6 +624,7 @@ def build_summary(
         "threshold": args.threshold,
         "repair_near_endpoint_crossings": bool(args.repair_near_endpoint_crossings),
         "batchnorm_mode": args.batchnorm_mode,
+        "decoder": args.decoder,
         "image_size": args.image_size,
         "max_edges": args.max_edges,
         "seed": args.seed,

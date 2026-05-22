@@ -1,0 +1,82 @@
+{
+  "schemaVersion": 1,
+  "id": "runpod-v2-replay-correction-full-4000ada",
+  "status": "candidate",
+  "phase": "v2.2",
+  "registeredAt": "2026-05-22",
+  "description": "Current best balanced V2 CPLineNet checkpoint after corrective replay on the full synthetic FOLD dataset.",
+  "checkpoint": {
+    "gitTracked": false,
+    "relativePath": "checkpoints/runpod_v2_replay_correction_full_4000ada/full/latest.pt",
+    "originalRunpodPath": "/workspace/create-pattern-detector/checkpoints/runpod_v2_replay_correction_full_4000ada/full/latest.pt",
+    "sha256": "e3f9aa7ebb06a6c631512ba567038c34f37ae05edd04672afa39ea5b142956f2",
+    "sizeBytes": 138584736
+  },
+  "model": {
+    "class": "CPLineNet",
+    "backbone": "hrnet_w18",
+    "hiddenChannels": 128,
+    "imageSize": 1024,
+    "v2Heads": true
+  },
+  "training": {
+    "device": "cuda",
+    "gpu": "RTX 4000 Ada",
+    "runpodPodId": "9nqsjzmdwee92f",
+    "dataset": "cp_training_mix_v1",
+    "manifest": "data/generated/synthetic/cp_training_mix_v1/raw-manifest.jsonl",
+    "trainSamples": 5202,
+    "valSamples": 638,
+    "maxEdges": 300,
+    "batchSize": 1,
+    "maxSteps": 800,
+    "seed": 31,
+    "augmentProfile": "v2-replay-corrective",
+    "evalAugmentProfile": "v2-replay-corrective",
+    "initCheckpoint": "checkpoints/runpod_v2_replay_correction_full_4000ada/init_latest_train_r3_w0.pt",
+    "loadedCheckpoint": "/workspace/create-pattern-detector/checkpoints/runpod_v2_replay_correction_full_4000ada/init_latest_train_r3_w0.pt",
+    "learningRate": 0.00005,
+    "trainFamilySampling": "balanced",
+    "batchnormMode": "batch-stats",
+    "skipGraphEvalDuringTraining": true,
+    "skipFinalEval": true,
+    "elapsedSeconds": 4119.393030887004,
+    "firstTrainLoss": 0.6627165675163269,
+    "lastTrainLoss": 0.6193689107894897
+  },
+  "inference": {
+    "batchnormMode": "batch-stats",
+    "vectorizerThreshold": 0.65,
+    "supportedEnvelope": "Readable rectified 1024px square CP inputs. Dense/tiny CPs and real-world artifacts still require decoder and real-world validation work before V2 production readiness."
+  },
+  "evaluation": {
+    "source": "artifacts/evaluations/v2-checkpoint-comparison-20260522.json",
+    "script": "scripts/evals/eval_stage4_checkpoint.py",
+    "imageSize": 1024,
+    "maxEdges": 300,
+    "threshold": 0.65,
+    "batchnormMode": "batch-stats",
+    "samplesPerProfile": 16,
+    "profiles": [
+      "clean",
+      "line-style",
+      "v2-all-issue-mix",
+      "v2-dark-issue-mix"
+    ],
+    "aggregate": {
+      "edgePrecision": 0.8770,
+      "edgeRecall": 0.8770,
+      "borderPrecision": 0.8597,
+      "borderRecall": 0.8919,
+      "borderF1": 0.8755,
+      "assignmentAccuracy": 0.9868,
+      "structuralValidityRate": 1.0
+    },
+    "knownCaveat": "Best balanced V2 checkpoint so far, but still far below the 0.99 border/valid-FOLD goal. Boundary-contact heads are not the main bottleneck; the next gain should come from the square-aware topology decoder and FOLD compile gates."
+  },
+  "relatedDocs": [
+    "docs/checkpoint-management.md",
+    "docs/v2-checkpoint-metrics.md",
+    "V2_ROADMAP.md"
+  ]
+}

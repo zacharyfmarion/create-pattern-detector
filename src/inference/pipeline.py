@@ -27,6 +27,8 @@ from src.vectorization import (
     QualityReportConfig,
     RepairConfig,
     RepairResult,
+    SquareTopologyDecoder,
+    SquareTopologyDecoderConfig,
     attribute_graph_from_logits,
     build_quality_report,
     conservative_repair,
@@ -181,6 +183,28 @@ class CPDetectPipeline:
 
 
 def build_stage4_builder(
+    image_size: int,
+    threshold: float,
+    *,
+    repair_near_endpoint_crossings: bool = False,
+) -> SquareTopologyDecoder:
+    return SquareTopologyDecoder(
+        SquareTopologyDecoderConfig(
+            image_size=image_size,
+            line_threshold=threshold,
+            hough_threshold=10,
+            hough_min_line_length=6,
+            hough_max_line_gap=4,
+            min_edge_support=0.45,
+            junction_threshold=0.20,
+            junction_nms_radius=2,
+            vertex_merge_px=max(1.0, 1.5 * image_size / 768),
+            line_vertex_distance_px=max(2.0, 4.0 * image_size / 768),
+        )
+    )
+
+
+def build_legacy_stage4_builder(
     image_size: int,
     threshold: float,
     *,

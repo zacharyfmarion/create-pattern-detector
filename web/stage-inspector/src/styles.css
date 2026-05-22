@@ -292,9 +292,8 @@ input[type="number"] {
 }
 
 .controls-band {
-  display: grid;
-  gap: 12px;
-  grid-template-columns: 1fr auto;
+  display: flex;
+  justify-content: flex-end;
 }
 
 .layer-panel {

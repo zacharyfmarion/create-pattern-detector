@@ -48,6 +48,7 @@ const STAGE_COPY: Record<string, string> = {
   stage1: "Synthetic dataset composition, generation failures, and fold distribution checks.",
   stage2: "Deterministic vectorizer behavior on clean evidence maps and curated/stress fixtures.",
   stage3: "CPLineNet dense line, junction, angle, and assignment evidence from the Phase 3 checkpoint.",
+  stage4: "Square topology decoding, assignment attribution, repair status, and FOLD-readiness diagnostics.",
   stage5: "Production cp-detect runs on real scraped CP images, including rectification, reports, and FOLD export.",
 };
 
@@ -174,7 +175,6 @@ function InspectorExplorer({ stage }: { stage: "stage4" | "stage5" }) {
         <StageSummary rows={rows} diagnostic={diagnostic} stage={stage} />
         {stage === "stage4" && (
           <div className="controls-band">
-            <LayerToggles />
             <div className="recompute-controls">
               <label>
                 threshold
@@ -526,18 +526,16 @@ function GraphWorkspace({
   if (stage === "stage5") {
     return (
       <section className="graph-grid stage5-graph-grid">
-        <GraphCanvas diagnostic={diagnostic} mode="input" title="Input image" />
-        <GraphCanvas diagnostic={diagnostic} mode="pred" title="Predicted result" />
+        <GraphCanvas diagnostic={diagnostic} mode="input" title="Input CP image" />
+        <GraphCanvas diagnostic={diagnostic} mode="pred" title="Output prediction" />
       </section>
     );
   }
 
   return (
-    <section className="graph-grid">
-      <GraphCanvas diagnostic={diagnostic} mode="input" title="Input image" />
-      <GraphCanvas diagnostic={diagnostic} mode="gt" title="Ground truth CP" />
-      <GraphCanvas diagnostic={diagnostic} mode="pred" title="Stage 4 prediction" />
-      <GraphCanvas diagnostic={diagnostic} mode="overlay" title="Overlay and issues" />
+    <section className="graph-grid stage4-graph-grid">
+      <GraphCanvas diagnostic={diagnostic} mode="input" title="Input CP image" />
+      <GraphCanvas diagnostic={diagnostic} mode="pred" title="Output prediction" />
     </section>
   );
 }

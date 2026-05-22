@@ -1,0 +1,305 @@
+{
+  "schemaVersion": 1,
+  "id": "v2-checkpoint-comparison-20260522",
+  "createdAt": "2026-05-22",
+  "purpose": "Compact checkpoint-comparison snapshot so future V2 runs can compare against prior checkpoints without rerunning them.",
+  "evaluation": {
+    "script": "scripts/evals/eval_stage4_checkpoint.py",
+    "imageSize": 1024,
+    "maxEdges": 300,
+    "split": "val",
+    "samplesPerProfile": 16,
+    "profiles": [
+      "clean",
+      "line-style",
+      "v2-all-issue-mix",
+      "v2-dark-issue-mix"
+    ],
+    "familySampling": "balanced",
+    "batchnormMode": "batch-stats",
+    "threshold": 0.65,
+    "reconstructSquareBorderChain": true,
+    "oracleBorderChain": false,
+    "device": "mps"
+  },
+  "checkpoints": {
+    "phase3_v1": {
+      "label": "Phase 3 V1",
+      "relativePath": "checkpoints/runpod_phase3_curriculum/stage-balanced/latest.pt",
+      "manifest": "artifacts/checkpoints/phase3-v1-cpline.json"
+    },
+    "v2_issue_only": {
+      "label": "V2 issue-only",
+      "relativePath": "checkpoints/runpod_v2_continuation_final_w4/full/latest.pt",
+      "manifest": "artifacts/checkpoints/runpod-v2-continuation-final-w4.json"
+    },
+    "v2_replay_partial": {
+      "label": "V2 replay partial",
+      "relativePath": "checkpoints/runpod_v2_replay_correction_4090_r3_w0/full/latest_train.pt"
+    },
+    "v2_replay_full": {
+      "label": "V2 replay full",
+      "relativePath": "checkpoints/runpod_v2_replay_correction_full_4000ada/full/latest.pt",
+      "manifest": "artifacts/checkpoints/runpod-v2-replay-correction-full-4000ada.json"
+    }
+  },
+  "metrics": {
+    "phase3_v1": {
+      "aggregate": {
+        "edgePrecision": 0.7236,
+        "edgeRecall": 0.7809,
+        "borderPrecision": 0.7149,
+        "borderRecall": 0.7615,
+        "borderF1": 0.7374,
+        "assignmentAccuracy": 0.9784,
+        "structuralValidityRate": 1.0
+      },
+      "byProfile": {
+        "clean": {
+          "edgePrecision": 0.9432,
+          "edgeRecall": 0.9067,
+          "borderPrecision": 0.8620,
+          "borderRecall": 0.8599,
+          "borderF1": 0.8609,
+          "assignmentAccuracy": 0.9869,
+          "structuralValidityRate": 1.0
+        },
+        "line-style": {
+          "edgePrecision": 0.9042,
+          "edgeRecall": 0.8738,
+          "borderPrecision": 0.8317,
+          "borderRecall": 0.8357,
+          "borderF1": 0.8337,
+          "assignmentAccuracy": 0.9837,
+          "structuralValidityRate": 1.0
+        },
+        "v2-all-issue-mix": {
+          "edgePrecision": 0.5899,
+          "edgeRecall": 0.6041,
+          "borderPrecision": 0.4920,
+          "borderRecall": 0.5966,
+          "borderF1": 0.5393,
+          "assignmentAccuracy": 0.9893,
+          "structuralValidityRate": 1.0
+        },
+        "v2-dark-issue-mix": {
+          "edgePrecision": 0.5414,
+          "edgeRecall": 0.7388,
+          "borderPrecision": 0.7206,
+          "borderRecall": 0.7536,
+          "borderF1": 0.7367,
+          "assignmentAccuracy": 0.9527,
+          "structuralValidityRate": 1.0
+        }
+      }
+    },
+    "v2_issue_only": {
+      "aggregate": {
+        "edgePrecision": 0.7634,
+        "edgeRecall": 0.8350,
+        "borderPrecision": 0.7960,
+        "borderRecall": 0.8484,
+        "borderF1": 0.8214,
+        "assignmentAccuracy": 0.9904,
+        "structuralValidityRate": 0.9844
+      },
+      "byProfile": {
+        "clean": {
+          "edgePrecision": 0.9251,
+          "edgeRecall": 0.9054,
+          "borderPrecision": 0.8625,
+          "borderRecall": 0.8937,
+          "borderF1": 0.8778,
+          "assignmentAccuracy": 0.9903,
+          "structuralValidityRate": 1.0
+        },
+        "line-style": {
+          "edgePrecision": 0.5972,
+          "edgeRecall": 0.7558,
+          "borderPrecision": 0.6840,
+          "borderRecall": 0.7633,
+          "borderF1": 0.7215,
+          "assignmentAccuracy": 0.9865,
+          "structuralValidityRate": 0.9375
+        },
+        "v2-all-issue-mix": {
+          "edgePrecision": 0.7905,
+          "edgeRecall": 0.8385,
+          "borderPrecision": 0.7916,
+          "borderRecall": 0.8623,
+          "borderF1": 0.8254,
+          "assignmentAccuracy": 0.9903,
+          "structuralValidityRate": 1.0
+        },
+        "v2-dark-issue-mix": {
+          "edgePrecision": 0.7851,
+          "edgeRecall": 0.8402,
+          "borderPrecision": 0.8558,
+          "borderRecall": 0.8744,
+          "borderF1": 0.8650,
+          "assignmentAccuracy": 0.9939,
+          "structuralValidityRate": 1.0
+        }
+      }
+    },
+    "v2_replay_partial": {
+      "aggregate": {
+        "edgePrecision": 0.8546,
+        "edgeRecall": 0.8652,
+        "borderPrecision": 0.8478,
+        "borderRecall": 0.8810,
+        "borderF1": 0.8641,
+        "assignmentAccuracy": 0.9868,
+        "structuralValidityRate": 1.0
+      },
+      "byProfile": {
+        "clean": {
+          "edgePrecision": 0.9162,
+          "edgeRecall": 0.9050,
+          "borderPrecision": 0.8548,
+          "borderRecall": 0.8961,
+          "borderF1": 0.8750,
+          "assignmentAccuracy": 0.9843,
+          "structuralValidityRate": 1.0
+        },
+        "line-style": {
+          "edgePrecision": 0.7746,
+          "edgeRecall": 0.8172,
+          "borderPrecision": 0.7878,
+          "borderRecall": 0.8430,
+          "borderF1": 0.8145,
+          "assignmentAccuracy": 0.9846,
+          "structuralValidityRate": 1.0
+        },
+        "v2-all-issue-mix": {
+          "edgePrecision": 0.8603,
+          "edgeRecall": 0.8606,
+          "borderPrecision": 0.8612,
+          "borderRecall": 0.8841,
+          "borderF1": 0.8725,
+          "assignmentAccuracy": 0.9894,
+          "structuralValidityRate": 1.0
+        },
+        "v2-dark-issue-mix": {
+          "edgePrecision": 0.8723,
+          "edgeRecall": 0.8782,
+          "borderPrecision": 0.8902,
+          "borderRecall": 0.9010,
+          "borderF1": 0.8956,
+          "assignmentAccuracy": 0.9888,
+          "structuralValidityRate": 1.0
+        }
+      }
+    },
+    "v2_replay_full": {
+      "aggregate": {
+        "edgePrecision": 0.8770,
+        "edgeRecall": 0.8770,
+        "borderPrecision": 0.8597,
+        "borderRecall": 0.8919,
+        "borderF1": 0.8755,
+        "assignmentAccuracy": 0.9868,
+        "structuralValidityRate": 1.0
+      },
+      "byProfile": {
+        "clean": {
+          "edgePrecision": 0.9322,
+          "edgeRecall": 0.9050,
+          "borderPrecision": 0.8960,
+          "borderRecall": 0.9155,
+          "borderF1": 0.9056,
+          "assignmentAccuracy": 0.9884,
+          "structuralValidityRate": 1.0
+        },
+        "line-style": {
+          "edgePrecision": 0.8492,
+          "edgeRecall": 0.8599,
+          "borderPrecision": 0.8364,
+          "borderRecall": 0.8889,
+          "borderF1": 0.8618,
+          "assignmentAccuracy": 0.9838,
+          "structuralValidityRate": 1.0
+        },
+        "v2-all-issue-mix": {
+          "edgePrecision": 0.8581,
+          "edgeRecall": 0.8677,
+          "borderPrecision": 0.8467,
+          "borderRecall": 0.8671,
+          "borderF1": 0.8568,
+          "assignmentAccuracy": 0.9883,
+          "structuralValidityRate": 1.0
+        },
+        "v2-dark-issue-mix": {
+          "edgePrecision": 0.8707,
+          "edgeRecall": 0.8752,
+          "borderPrecision": 0.8608,
+          "borderRecall": 0.8961,
+          "borderF1": 0.8781,
+          "assignmentAccuracy": 0.9864,
+          "structuralValidityRate": 1.0
+        }
+      }
+    }
+  },
+  "boundaryContactHeadCheck": {
+    "script": "scripts/v2/eval_boundary_contacts.py",
+    "imageSize": 1024,
+    "maxEdges": 300,
+    "count": 24,
+    "note": "The V2 boundary-contact head is not the current bottleneck on this synthetic contact eval; all V2 checkpoints score around 0.94 F1.",
+    "v2_replay_full": {
+      "clean": {
+        "threshold": 0.75,
+        "precision": 0.963,
+        "recall": 0.919,
+        "f1": 0.941
+      },
+      "line-style": {
+        "threshold": 0.65,
+        "precision": 0.961,
+        "recall": 0.919,
+        "f1": 0.939
+      },
+      "v2-all-issue-mix": {
+        "threshold": 0.75,
+        "precision": 0.969,
+        "recall": 0.916,
+        "f1": 0.942
+      },
+      "v2-dark-issue-mix": {
+        "threshold": 0.25,
+        "precision": 0.961,
+        "recall": 0.919,
+        "f1": 0.939
+      }
+    }
+  },
+  "interpretation": {
+    "currentCandidate": "v2_replay_full",
+    "summary": "The full replay checkpoint is the best balanced checkpoint so far. It restores old-profile line-style behavior damaged by issue-only V2 training while preserving most V2 issue robustness.",
+    "fullMinusIssueOnly": {
+      "edgePrecision": 0.1137,
+      "edgeRecall": 0.0420,
+      "borderPrecision": 0.0637,
+      "borderRecall": 0.0435,
+      "borderF1": 0.0541,
+      "assignmentAccuracy": -0.0036,
+      "structuralValidityRate": 0.0156
+    },
+    "fullMinusPartial": {
+      "edgePrecision": 0.0224,
+      "edgeRecall": 0.0117,
+      "borderPrecision": 0.0120,
+      "borderRecall": 0.0109,
+      "borderF1": 0.0114,
+      "assignmentAccuracy": 0.0,
+      "structuralValidityRate": 0.0
+    },
+    "caveat": "These are synthetic Stage 4 structural metrics, not proof that exported FOLD files fold cleanly in Orieta. The quality report still often flags ambiguous/outside-envelope cases because of short edges, crowded junctions, Kawasaki/Maekawa warnings, and assignment uncertainty."
+  },
+  "localIgnoredArtifacts": {
+    "summaryDir": "visualizations/v2_checkpoint_comparison_20260522/summary",
+    "stage4Dir": "visualizations/v2_checkpoint_comparison_20260522/stage4_n16",
+    "boundaryDir": "visualizations/v2_checkpoint_comparison_20260522/boundary_n24"
+  }
+}
