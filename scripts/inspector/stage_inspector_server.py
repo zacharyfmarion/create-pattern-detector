@@ -325,6 +325,12 @@ class StageInspectorService:
             report=report_dict,
             metrics=metrics,
             vertex_tolerance_px=vertex_tolerance_px,
+            line_prob=evidence.line_prob,
+            junction_heatmap=evidence.junction_heatmap,
+            boundary_contact_heatmap=evidence.boundary_contact_heatmap,
+            non_crease_prob=evidence.non_crease_prob,
+            line_style_prob=evidence.line_style_prob,
+            assignment_labels=evidence.assignment_labels,
         )
         diagnostic["recomputeParams"] = {
             "threshold": threshold,
@@ -736,7 +742,7 @@ def _example_key(row: dict[str, Any]) -> str:
 
 def _cache_key(row: dict[str, Any], params: dict[str, Any]) -> str:
     base = _example_key(row)
-    normalized = json.dumps({"version": 3, "params": params}, sort_keys=True, default=str)
+    normalized = json.dumps({"version": 5, "params": params}, sort_keys=True, default=str)
     suffix = hashlib.sha1(normalized.encode("utf-8")).hexdigest()[:12]
     return f"{base}__{suffix}"
 

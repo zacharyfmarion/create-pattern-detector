@@ -41,6 +41,7 @@ import type {
   GraphVertex,
   LayerKey,
   Stage4Diagnostic,
+  Stage4Evidence,
   Stage4ExampleRow,
 } from "./types";
 
@@ -67,6 +68,57 @@ const LAYER_LABELS: Record<LayerKey, string> = {
   repairs: "Repairs",
   labels: "Labels",
 };
+
+type EvidenceOverlayMode =
+  | "none"
+  | "line"
+  | "junction"
+  | "contacts"
+  | "artifacts"
+  | "style"
+  | "assignment";
+
+type LegendItem = { label: string; color: string; gradient?: string };
+
+const EVIDENCE_OPTIONS: {
+  key: EvidenceOverlayMode;
+  label: string;
+  field?: keyof Stage4Evidence;
+  description: string;
+}[] = [
+  { key: "none", label: "None", description: "Clean input image." },
+  { key: "line", label: "Lines", field: "lineProb", description: "Dense crease-line probability." },
+  {
+    key: "junction",
+    label: "Junctions",
+    field: "junctionHeatmap",
+    description: "Dense vertex and crossing evidence.",
+  },
+  {
+    key: "contacts",
+    label: "Contacts",
+    field: "boundaryContact",
+    description: "Predicted crease-to-square-boundary contacts.",
+  },
+  {
+    key: "artifacts",
+    label: "Artifacts",
+    field: "nonCrease",
+    description: "Predicted text, grid, watermark, or other non-crease evidence.",
+  },
+  {
+    key: "style",
+    label: "Style",
+    field: "lineStyle",
+    description: "Predicted solid, dashed, faint, and monochrome line style.",
+  },
+  {
+    key: "assignment",
+    label: "Assign",
+    field: "assignmentLabels",
+    description: "Observed dense assignment labels before graph decoding.",
+  },
+];
 
 export function App() {
   const stagesQuery = useQuery({ queryKey: ["stages"], queryFn: fetchStages });
@@ -131,6 +183,7 @@ function InspectorExplorer({ stage }: { stage: "stage4" | "stage5" }) {
   const [threshold, setThreshold] = useState(0.65);
   const [inferAssignments, setInferAssignments] = useState(false);
   const [snapBorderVertices, setSnapBorderVertices] = useState(false);
+  const [evidenceOverlay, setEvidenceOverlay] = useState<EvidenceOverlayMode>("none");
   const examplesQuery = useQuery({
     queryKey: [stage, "examples"],
     queryFn: stage === "stage4" ? fetchStage4Examples : fetchStage5Examples,
@@ -166,6 +219,13 @@ function InspectorExplorer({ stage }: { stage: "stage4" | "stage5" }) {
   const diagnostic = diagnosticQuery.data;
   const rows = examplesQuery.data?.rows ?? [];
 
+  useEffect(() => {
+    if (stage !== "stage4" || evidenceOverlay === "none") return;
+    if (diagnostic && !hasEvidenceForMode(diagnostic, evidenceOverlay)) {
+      setEvidenceOverlay("none");
+    }
+  }, [diagnostic, evidenceOverlay, stage]);
+
   return (
     <section className={clsx("stage4-layout", stage === "stage5" && "stage5-layout")}>
       <aside className="left-rail">
@@ -175,6 +235,11 @@ function InspectorExplorer({ stage }: { stage: "stage4" | "stage5" }) {
         <StageSummary rows={rows} diagnostic={diagnostic} stage={stage} />
         {stage === "stage4" && (
           <div className="controls-band">
+            <EvidenceControls
+              diagnostic={diagnostic}
+              mode={evidenceOverlay}
+              onChange={setEvidenceOverlay}
+            />
             <div className="recompute-controls">
               <label>
                 threshold
@@ -229,12 +294,48 @@ function InspectorExplorer({ stage }: { stage: "stage4" | "stage5" }) {
         ) : diagnosticQuery.isError ? (
           <div className="error-panel">{String(diagnosticQuery.error)}</div>
         ) : diagnostic ? (
-          <GraphWorkspace diagnostic={diagnostic} stage={stage} />
+          <GraphWorkspace diagnostic={diagnostic} evidenceOverlay={evidenceOverlay} stage={stage} />
         ) : (
           <div className="loading-panel">Select an example to inspect.</div>
         )}
       </section>
     </section>
+  );
+}
+
+function EvidenceControls({
+  diagnostic,
+  mode,
+  onChange,
+}: {
+  diagnostic?: Stage4Diagnostic;
+  mode: EvidenceOverlayMode;
+  onChange: (mode: EvidenceOverlayMode) => void;
+}) {
+  return (
+    <div className="evidence-controls">
+      <div className="evidence-label">
+        <Layers size={15} />
+        <span>Evidence</span>
+      </div>
+      <div className="segmented-control" role="group" aria-label="Evidence overlay">
+        {EVIDENCE_OPTIONS.map((option) => {
+          const available = option.key === "none" || Boolean(diagnostic && hasEvidenceForMode(diagnostic, option.key));
+          return (
+            <button
+              className={clsx("segment-button", mode === option.key && "active")}
+              disabled={!available}
+              key={option.key}
+              onClick={() => onChange(option.key)}
+              title={available ? option.description : "This diagnostic does not include that evidence head."}
+              type="button"
+            >
+              {option.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
@@ -518,24 +619,31 @@ function SelectFilter({
 
 function GraphWorkspace({
   diagnostic,
+  evidenceOverlay,
   stage,
 }: {
   diagnostic: Stage4Diagnostic;
+  evidenceOverlay: EvidenceOverlayMode;
   stage: "stage4" | "stage5";
 }) {
   if (stage === "stage5") {
     return (
       <section className="graph-grid stage5-graph-grid">
-        <GraphCanvas diagnostic={diagnostic} mode="input" title="Input CP image" />
-        <GraphCanvas diagnostic={diagnostic} mode="pred" title="Output prediction" />
+        <GraphCanvas diagnostic={diagnostic} evidenceOverlay="none" mode="input" title="Input CP image" />
+        <GraphCanvas diagnostic={diagnostic} evidenceOverlay="none" mode="pred" title="Output prediction" />
       </section>
     );
   }
 
   return (
     <section className="graph-grid stage4-graph-grid">
-      <GraphCanvas diagnostic={diagnostic} mode="input" title="Input CP image" />
-      <GraphCanvas diagnostic={diagnostic} mode="pred" title="Output prediction" />
+      <GraphCanvas
+        diagnostic={diagnostic}
+        evidenceOverlay={evidenceOverlay}
+        mode="input"
+        title="Input CP image"
+      />
+      <GraphCanvas diagnostic={diagnostic} evidenceOverlay="none" mode="pred" title="Output prediction" />
     </section>
   );
 }
@@ -564,10 +672,12 @@ function LayerToggles() {
 
 function GraphCanvas({
   diagnostic,
+  evidenceOverlay,
   mode,
   title,
 }: {
   diagnostic: Stage4Diagnostic;
+  evidenceOverlay: EvidenceOverlayMode;
   mode: "input" | "gt" | "pred" | "overlay";
   title: string;
 }) {
@@ -582,12 +692,20 @@ function GraphCanvas({
   const showImage = mode === "input" || mode === "overlay";
   const showGtGraph = mode === "gt" || (isOverlay && layers.gtGraph);
   const showPredGraph = mode === "pred" || (isOverlay && layers.predGraph);
+  const activeEvidence = mode === "input" && hasEvidenceForMode(diagnostic, evidenceOverlay)
+    ? evidenceOverlay
+    : "none";
+  const evidenceImage = useMemo(
+    () => evidenceOverlayImage(diagnostic, activeEvidence),
+    [activeEvidence, diagnostic],
+  );
+  const evidenceLabel = labelForEvidenceMode(activeEvidence);
 
   return (
     <section className="viewer-panel">
       <div className="viewer-title">
         <h3>{title}</h3>
-        <small>{diagnostic.row.id as string}</small>
+        <small>{evidenceLabel ? `${diagnostic.row.id as string} · ${evidenceLabel}` : diagnostic.row.id as string}</small>
       </div>
       <div className="graph-frame">
         <svg
@@ -604,6 +722,15 @@ function GraphCanvas({
               height={imageSize}
               preserveAspectRatio="none"
               opacity={mode === "overlay" ? 0.24 : 1}
+            />
+          )}
+          {evidenceImage && (
+            <image
+              href={evidenceImage}
+              width={imageSize}
+              height={imageSize}
+              preserveAspectRatio="none"
+              className="evidence-raster"
             />
           )}
           {showGtGraph && (
@@ -683,8 +810,157 @@ function GraphCanvas({
           {isOverlay && layers.labels && <GraphLabels diagnostic={diagnostic} mode={mode} />}
         </svg>
       </div>
+      {activeEvidence !== "none" && <EvidenceLegend mode={activeEvidence} />}
     </section>
   );
+}
+
+function EvidenceLegend({ mode }: { mode: EvidenceOverlayMode }) {
+  const items = legendItems(mode);
+  if (!items.length) return null;
+  return (
+    <div className="evidence-legend" aria-label={`${labelForEvidenceMode(mode)} legend`}>
+      {items.map((item) => (
+        <span className="legend-item" key={item.label}>
+          <span
+            className={clsx("legend-swatch", item.gradient && "legend-gradient")}
+            style={{ background: item.gradient ?? item.color }}
+          />
+          {item.label}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function hasEvidenceForMode(diagnostic: Stage4Diagnostic | undefined, mode: EvidenceOverlayMode) {
+  const field = fieldForEvidenceMode(mode);
+  return field ? Boolean(diagnostic?.evidence?.[field]) : true;
+}
+
+function fieldForEvidenceMode(mode: EvidenceOverlayMode): keyof Stage4Evidence | null {
+  return EVIDENCE_OPTIONS.find((option) => option.key === mode)?.field ?? null;
+}
+
+function labelForEvidenceMode(mode: EvidenceOverlayMode) {
+  if (mode === "none") return "";
+  return EVIDENCE_OPTIONS.find((option) => option.key === mode)?.label ?? "";
+}
+
+function evidenceOverlayImage(diagnostic: Stage4Diagnostic, mode: EvidenceOverlayMode) {
+  const field = fieldForEvidenceMode(mode);
+  if (!field) return null;
+  const raster = diagnostic.evidence?.[field];
+  if (!raster) return null;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = raster.width;
+  canvas.height = raster.height;
+  const context = canvas.getContext("2d");
+  if (!context) return null;
+  const imageData = context.createImageData(raster.width, raster.height);
+  const lineGate = mode === "style" ? matchingLineGate(diagnostic, raster.width, raster.height) : null;
+
+  for (let index = 0; index < raster.width * raster.height; index += 1) {
+    const offset = index * 4;
+    const pixel =
+      raster.kind === "float"
+        ? floatEvidencePixel(mode, raster.values[index] ?? 0)
+        : classEvidencePixel(mode, raster.labels[raster.values[index]] ?? "none", raster.confidence?.[index], lineGate?.[index]);
+    imageData.data[offset] = pixel[0];
+    imageData.data[offset + 1] = pixel[1];
+    imageData.data[offset + 2] = pixel[2];
+    imageData.data[offset + 3] = pixel[3];
+  }
+
+  context.putImageData(imageData, 0, 0);
+  return canvas.toDataURL("image/png");
+}
+
+function matchingLineGate(diagnostic: Stage4Diagnostic, width: number, height: number) {
+  const raster = diagnostic.evidence?.lineProb;
+  if (!raster || raster.width !== width || raster.height !== height) return null;
+  return raster.values;
+}
+
+function floatEvidencePixel(mode: EvidenceOverlayMode, rawValue: number): [number, number, number, number] {
+  const value = clamp01(rawValue);
+  if (value < 0.035) return [0, 0, 0, 0];
+  const [red, green, blue] =
+    mode === "junction"
+      ? [245, 158, 11]
+      : mode === "contacts"
+        ? [34, 197, 94]
+        : mode === "artifacts"
+          ? [217, 70, 239]
+          : [14, 165, 233];
+  return [red, green, blue, Math.round(255 * Math.min(0.78, value * 0.72))];
+}
+
+function classEvidencePixel(
+  mode: EvidenceOverlayMode,
+  label: string,
+  confidence = 1,
+  lineGate?: number,
+): [number, number, number, number] {
+  if (label === "none") return [0, 0, 0, 0];
+  const gate = mode === "style" ? clamp01(lineGate ?? 0) : 1;
+  if (mode === "style" && gate < 0.08) return [0, 0, 0, 0];
+  const [red, green, blue] = classColor(mode, label);
+  const alphaBase = mode === "style" ? 0.74 * Math.min(1, gate * 1.35) : 0.82;
+  const alpha = Math.round(255 * alphaBase * Math.max(0.35, clamp01(confidence)));
+  return [red, green, blue, alpha];
+}
+
+function classColor(mode: EvidenceOverlayMode, label: string): [number, number, number] {
+  if (mode === "assignment") {
+    if (label === "M") return [225, 29, 72];
+    if (label === "V") return [37, 99, 235];
+    if (label === "B") return [17, 24, 39];
+    return [107, 114, 128];
+  }
+  if (label === "dashed") return [8, 145, 178];
+  if (label === "faint") return [245, 158, 11];
+  if (label === "monochrome") return [124, 58, 237];
+  return [34, 197, 94];
+}
+
+function legendItems(mode: EvidenceOverlayMode): LegendItem[] {
+  if (mode === "style") {
+    return [
+      { label: "solid", color: "rgb(34, 197, 94)" },
+      { label: "dashed", color: "rgb(8, 145, 178)" },
+      { label: "faint", color: "rgb(245, 158, 11)" },
+      { label: "mono", color: "rgb(124, 58, 237)" },
+    ];
+  }
+  if (mode === "assignment") {
+    return [
+      { label: "M", color: "rgb(225, 29, 72)" },
+      { label: "V", color: "rgb(37, 99, 235)" },
+      { label: "B", color: "rgb(17, 24, 39)" },
+      { label: "U", color: "rgb(107, 114, 128)" },
+    ];
+  }
+  if (mode === "none") return [];
+  return [
+    {
+      label: "low -> high",
+      color: "transparent",
+      gradient: `linear-gradient(90deg, rgba(${legendColor(mode).join(", ")}, 0.08), rgba(${legendColor(mode).join(", ")}, 0.78))`,
+    },
+  ];
+}
+
+function legendColor(mode: EvidenceOverlayMode): [number, number, number] {
+  if (mode === "junction") return [245, 158, 11];
+  if (mode === "contacts") return [34, 197, 94];
+  if (mode === "artifacts") return [217, 70, 239];
+  return [14, 165, 233];
+}
+
+function clamp01(value: number) {
+  return Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0));
 }
 
 function GraphLine({

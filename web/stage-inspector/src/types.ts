@@ -100,6 +100,31 @@ export interface GraphEdge {
   match: EdgeMatch;
 }
 
+export interface FloatEvidenceRaster {
+  kind: "float";
+  width: number;
+  height: number;
+  values: number[];
+}
+
+export interface ClassEvidenceRaster {
+  kind: "class";
+  width: number;
+  height: number;
+  labels: string[];
+  values: number[];
+  confidence?: number[];
+}
+
+export interface Stage4Evidence {
+  lineProb?: FloatEvidenceRaster;
+  junctionHeatmap?: FloatEvidenceRaster;
+  boundaryContact?: FloatEvidenceRaster;
+  nonCrease?: FloatEvidenceRaster;
+  lineStyle?: ClassEvidenceRaster;
+  assignmentLabels?: ClassEvidenceRaster;
+}
+
 export interface Stage4Diagnostic {
   key: string;
   stage: "stage4" | "stage5";
@@ -114,6 +139,7 @@ export interface Stage4Diagnostic {
   repairs: RepairEntry[];
   repairCounts: Record<string, number>;
   whatIfStatuses: Record<string, string>;
+  evidence?: Stage4Evidence;
   graph: {
     groundTruth: {
       vertices: GraphVertex[];

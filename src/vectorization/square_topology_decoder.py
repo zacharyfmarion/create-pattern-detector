@@ -46,7 +46,7 @@ class SquareTopologyDecoderConfig:
     edge_sample_step_px: float = 1.0
     edge_sample_width_px: int = 3
     dashed_support_weight: float = 0.35
-    carrier_extent_padding_px: float = 8.0
+    carrier_extent_padding_px: float = 24.0
     frame_epsilon_px: float = 1.0
     border_carrier_tolerance_px: float = 4.0
     vertex_merge_px: float = 2.0

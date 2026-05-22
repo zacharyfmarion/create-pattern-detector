@@ -170,6 +170,27 @@ Interpretation:
 - Combined, dark-combined, and replay-corrective profiles remain the weakest
   slices and need visual inspection before another training or decoder pass.
 
+### Square Decoder Padding Sweep - May 22, 2026
+
+Visual inspection showed cases where the dense line head clearly saw a crease
+but the square topology decoder dropped the edge. A decoder sweep on the same
+66-example Stage Inspector validation set found that lowering the global line
+threshold or per-edge support gate hurt F1; the useful low-risk knob was
+extending finite Hough carriers before clipping them into square topology.
+
+Best tradeoff: set `carrier_extent_padding_px=24`.
+
+| setting | edge P/R/F1 | border F1 | assignment | vertex P/R |
+|---|---:|---:|---:|---:|
+| baseline, padding 8 | 0.8682 / 0.7950 / 0.8300 | 0.9087 | 0.9937 | 0.9218 / 0.9172 |
+| padding 16 | 0.8677 / 0.8066 / 0.8361 | 0.9075 | 0.9939 | 0.9220 / 0.9175 |
+| padding 24 | 0.8665 / 0.8121 / 0.8384 | 0.9078 | 0.9939 | 0.9213 / 0.9172 |
+| padding 24 + Hough gap 6 | 0.8669 / 0.8119 / 0.8385 | 0.9034 | 0.9934 | 0.9200 / 0.9155 |
+
+Conclusion: adopt padding 24 without changing line threshold, edge-support
+threshold, or Hough gap. It improves edge recall by `+0.0171` and edge F1 by
+`+0.0085` with only `-0.0016` edge precision and `-0.0009` border F1.
+
 ## Caveat
 
 These numbers are Stage 4 structural metrics, not proof that exported FOLD files

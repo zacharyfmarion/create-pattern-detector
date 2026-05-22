@@ -57,6 +57,8 @@ button {
 .panel-title,
 .viewer-title,
 .checkbox-row,
+.evidence-label,
+.legend-item,
 .primary-button,
 .status-pill {
   align-items: center;
@@ -292,8 +294,11 @@ input[type="number"] {
 }
 
 .controls-band {
+  align-items: end;
   display: flex;
-  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: space-between;
 }
 
 .layer-panel {
@@ -322,6 +327,63 @@ input[type="number"] {
   gap: 8px;
   grid-template-columns: 88px 96px 110px auto;
   padding: 10px;
+}
+
+.evidence-controls {
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid #d7dee8;
+  border-radius: 8px;
+  display: flex;
+  gap: 10px;
+  min-height: 58px;
+  padding: 10px;
+}
+
+.evidence-label {
+  color: #334155;
+  font-size: 12px;
+  font-weight: 700;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.segmented-control {
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  display: flex;
+  overflow: hidden;
+}
+
+.segment-button {
+  background: #ffffff;
+  border: 0;
+  border-right: 1px solid #cbd5e1;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 700;
+  height: 34px;
+  min-width: 62px;
+  padding: 0 10px;
+  white-space: nowrap;
+}
+
+.segment-button:last-child {
+  border-right: 0;
+}
+
+.segment-button:hover:not(:disabled) {
+  background: #eff6ff;
+}
+
+.segment-button.active {
+  background: #1d4ed8;
+  color: #ffffff;
+}
+
+.segment-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.36;
 }
 
 .primary-button {
@@ -394,6 +456,39 @@ input[type="number"] {
   display: block;
   height: 100%;
   width: 100%;
+}
+
+.evidence-raster {
+  image-rendering: auto;
+  pointer-events: none;
+}
+
+.evidence-legend {
+  align-items: center;
+  color: #475569;
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 12px;
+  gap: 8px 12px;
+  margin-top: 8px;
+  min-height: 18px;
+}
+
+.legend-item {
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.legend-swatch {
+  border: 1px solid rgba(15, 23, 42, 0.18);
+  border-radius: 3px;
+  display: inline-block;
+  height: 12px;
+  width: 20px;
+}
+
+.legend-gradient {
+  width: 48px;
 }
 
 .graph-edge {

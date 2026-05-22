@@ -64,6 +64,50 @@ def test_stage4_diagnostics_classifies_missing_and_extra_edges() -> None:
     assert "missing_gt_edge" in gt_edges_payload[1]["issues"]
 
 
+def test_stage4_diagnostics_serializes_v2_evidence_rasters() -> None:
+    vertices = np.array([[0, 0], [10, 0]], dtype=np.float32)
+    edges = np.array([[0, 1]], dtype=np.int64)
+    assignments = np.array([0], dtype=np.int8)
+    line_style_prob = np.zeros((4, 4, 4), dtype=np.float32)
+    line_style_prob[..., 0] = 0.1
+    line_style_prob[..., 1] = 0.9
+    assignment_labels = np.zeros((4, 4), dtype=np.uint8)
+    assignment_labels[1:3, 1:3] = 2
+
+    payload = build_stage4_diagnostic_payload(
+        row={"id": "example", "profile": "v2-dashed", "sample_index": 0, "status": "valid"},
+        image_url="/api/assets/example.png",
+        image_size=16,
+        gt_vertices=vertices,
+        gt_edges=edges,
+        gt_assignments=assignments,
+        pred_vertices=vertices,
+        pred_edges=edges,
+        pred_assignments=assignments,
+        pred_edge_support=np.array([0.9], dtype=np.float32),
+        pred_assignment_confidence=np.array([0.95], dtype=np.float32),
+        pred_assignment_margin=np.array([0.8], dtype=np.float32),
+        pred_assignment_source=["observed"],
+        report={"status": "valid", "warnings": [], "repair_actions": [], "structural_validity": {}},
+        metrics={"edge_recall": 1.0},
+        vertex_tolerance_px=1.0,
+        line_prob=np.ones((4, 4), dtype=np.float32),
+        junction_heatmap=np.eye(4, dtype=np.float32),
+        boundary_contact_heatmap=np.ones((4, 4), dtype=np.float32) * 0.5,
+        non_crease_prob=np.zeros((4, 4), dtype=np.float32),
+        line_style_prob=line_style_prob,
+        assignment_labels=assignment_labels,
+    )
+
+    evidence = payload["evidence"]
+    assert evidence["lineProb"]["kind"] == "float"
+    assert evidence["lineProb"]["width"] == 4
+    assert evidence["lineStyle"]["kind"] == "class"
+    assert evidence["lineStyle"]["labels"] == ["solid", "dashed", "faint", "monochrome"]
+    assert set(evidence["lineStyle"]["values"]) == {1}
+    assert evidence["assignmentLabels"]["labels"] == ["none", "M", "V", "B", "U"]
+
+
 def test_stage4_what_if_statuses_can_ignore_origami_diagnostics() -> None:
     statuses = compute_what_if_statuses(
         [

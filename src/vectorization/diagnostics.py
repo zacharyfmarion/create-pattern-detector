@@ -35,6 +35,9 @@ ORIGAMI_DIAGNOSTIC_CODES = {
     "maekawa_failures",
 }
 AMBIGUOUS_CODES = ASSIGNMENT_AMBIGUITY_CODES | ORIGAMI_DIAGNOSTIC_CODES
+LINE_STYLE_NAMES = {0: "solid", 1: "dashed", 2: "faint", 3: "monochrome"}
+ASSIGNMENT_RASTER_NAMES = {0: "none", 1: "M", 2: "V", 3: "B", 4: "U"}
+EVIDENCE_RASTER_MAX_SIZE = 192
 
 
 def build_stage4_diagnostic_payload(
@@ -55,6 +58,12 @@ def build_stage4_diagnostic_payload(
     report: Mapping[str, Any],
     metrics: Mapping[str, Any],
     vertex_tolerance_px: float,
+    line_prob: Any | None = None,
+    junction_heatmap: Any | None = None,
+    boundary_contact_heatmap: Any | None = None,
+    non_crease_prob: Any | None = None,
+    line_style_prob: Any | None = None,
+    assignment_labels: Any | None = None,
 ) -> dict[str, Any]:
     """Build the JSON payload consumed by the Stage Inspector UI."""
     gt_vertices_array = np.asarray(gt_vertices, dtype=np.float32)
@@ -163,7 +172,15 @@ def build_stage4_diagnostic_payload(
     repair_counts = Counter(str(item.get("code", "unknown")) for item in repair_entries)
     row_dict = dict(row)
     structural = dict(report.get("structural_validity") or metrics.get("structural_validity") or {})
-    return {
+    evidence_payload = _evidence_payload(
+        line_prob=line_prob,
+        junction_heatmap=junction_heatmap,
+        boundary_contact_heatmap=boundary_contact_heatmap,
+        non_crease_prob=non_crease_prob,
+        line_style_prob=line_style_prob,
+        assignment_labels=assignment_labels,
+    )
+    payload = {
         "key": _example_key(row_dict),
         "stage": "stage4",
         "imageUrl": image_url,
@@ -202,6 +219,9 @@ def build_stage4_diagnostic_payload(
             },
         },
     }
+    if evidence_payload:
+        payload["evidence"] = evidence_payload
+    return payload
 
 
 def compute_what_if_statuses(
@@ -389,6 +409,113 @@ def _match_error_for_pred(
     if gt_idx is None:
         return None
     return _float(np.linalg.norm(pred_vertices[pred_idx] - gt_vertices[gt_idx]))
+
+
+def _evidence_payload(
+    *,
+    line_prob: Any | None,
+    junction_heatmap: Any | None,
+    boundary_contact_heatmap: Any | None,
+    non_crease_prob: Any | None,
+    line_style_prob: Any | None,
+    assignment_labels: Any | None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {}
+    if line_prob is not None:
+        payload["lineProb"] = _float_raster_payload(line_prob)
+    if junction_heatmap is not None:
+        payload["junctionHeatmap"] = _float_raster_payload(junction_heatmap)
+    if boundary_contact_heatmap is not None:
+        payload["boundaryContact"] = _float_raster_payload(boundary_contact_heatmap)
+    if non_crease_prob is not None:
+        payload["nonCrease"] = _float_raster_payload(non_crease_prob)
+    if line_style_prob is not None:
+        payload["lineStyle"] = _class_raster_from_prob(
+            line_style_prob,
+            labels=LINE_STYLE_NAMES,
+        )
+    if assignment_labels is not None:
+        payload["assignmentLabels"] = _class_raster_from_labels(
+            assignment_labels,
+            labels=ASSIGNMENT_RASTER_NAMES,
+        )
+    return payload
+
+
+def _float_raster_payload(values: Any) -> dict[str, Any]:
+    array = np.asarray(values, dtype=np.float32)
+    if array.ndim == 3 and array.shape[-1] == 1:
+        array = array[..., 0]
+    if array.ndim != 2:
+        raise ValueError(f"Expected 2D evidence raster, got shape {array.shape}")
+    array = np.clip(np.nan_to_num(array, nan=0.0, posinf=1.0, neginf=0.0), 0.0, 1.0)
+    small = _downsample_mean(array, max_size=EVIDENCE_RASTER_MAX_SIZE)
+    return {
+        "kind": "float",
+        "width": int(small.shape[1]),
+        "height": int(small.shape[0]),
+        "values": _rounded_values(small),
+    }
+
+
+def _class_raster_from_prob(values: Any, *, labels: Mapping[int, str]) -> dict[str, Any]:
+    array = np.asarray(values, dtype=np.float32)
+    if array.ndim != 3:
+        raise ValueError(f"Expected 3D class probability raster, got shape {array.shape}")
+    array = np.nan_to_num(array, nan=0.0, posinf=1.0, neginf=0.0)
+    class_ids = np.argmax(array, axis=-1).astype(np.int16)
+    confidence = np.max(array, axis=-1).astype(np.float32)
+    class_small = _downsample_nearest(class_ids, max_size=EVIDENCE_RASTER_MAX_SIZE)
+    confidence_small = _downsample_mean(confidence, max_size=EVIDENCE_RASTER_MAX_SIZE)
+    return {
+        "kind": "class",
+        "width": int(class_small.shape[1]),
+        "height": int(class_small.shape[0]),
+        "labels": [labels[idx] for idx in sorted(labels)],
+        "values": [int(value) for value in class_small.reshape(-1)],
+        "confidence": _rounded_values(confidence_small),
+    }
+
+
+def _class_raster_from_labels(values: Any, *, labels: Mapping[int, str]) -> dict[str, Any]:
+    array = np.asarray(values, dtype=np.int16)
+    if array.ndim != 2:
+        raise ValueError(f"Expected 2D class label raster, got shape {array.shape}")
+    small = _downsample_nearest(array, max_size=EVIDENCE_RASTER_MAX_SIZE)
+    return {
+        "kind": "class",
+        "width": int(small.shape[1]),
+        "height": int(small.shape[0]),
+        "labels": [labels[idx] for idx in sorted(labels)],
+        "values": [int(value) for value in small.reshape(-1)],
+    }
+
+
+def _downsample_mean(array: np.ndarray, *, max_size: int) -> np.ndarray:
+    height, width = array.shape
+    if max(height, width) <= max_size:
+        return array.astype(np.float32, copy=False)
+    step = int(np.ceil(max(height, width) / max_size))
+    out_height = int(np.ceil(height / step))
+    out_width = int(np.ceil(width / step))
+    pad_height = out_height * step - height
+    pad_width = out_width * step - width
+    padded = np.pad(array, ((0, pad_height), (0, pad_width)), mode="edge")
+    return padded.reshape(out_height, step, out_width, step).mean(axis=(1, 3)).astype(np.float32)
+
+
+def _downsample_nearest(array: np.ndarray, *, max_size: int) -> np.ndarray:
+    height, width = array.shape
+    if max(height, width) <= max_size:
+        return array
+    step = int(np.ceil(max(height, width) / max_size))
+    out_height = int(np.ceil(height / step))
+    out_width = int(np.ceil(width / step))
+    return array[::step, ::step][:out_height, :out_width]
+
+
+def _rounded_values(array: np.ndarray) -> list[float]:
+    return [round(float(value), 4) for value in array.reshape(-1)]
 
 
 def _example_key(row: Mapping[str, Any]) -> str:
