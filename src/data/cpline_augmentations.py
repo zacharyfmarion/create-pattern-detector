@@ -325,7 +325,12 @@ def _sample_mix_entry(
     rng: np.random.Generator,
 ) -> tuple[str, str | None]:
     weights = np.array([entry[1] for entry in entries], dtype=np.float64)
-    index = int(rng.choice(len(entries), p=weights / weights.sum()))
+    total = float(weights.sum())
+    if total <= 0 or not np.isfinite(total):
+        raise ValueError("Augmentation mix weights must sum to a positive finite value")
+    threshold = float(rng.random()) * total
+    index = int(np.searchsorted(np.cumsum(weights), threshold, side="right"))
+    index = min(index, len(entries) - 1)
     selected_profile, _, style_variant = entries[index]
     return selected_profile, style_variant
 

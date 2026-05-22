@@ -11,6 +11,7 @@ from src.data.cpline_augmentations import (
     AUGMENT_MIXES,
     DARK_MODE_STYLE_VARIANTS,
     NON_IDENTITY_SQUARE_SYMMETRIES,
+    _sample_mix_entry,
 )
 from src.data.cpline_dataset import (
     CplineFoldDataset,
@@ -386,6 +387,14 @@ def test_v2_replay_corrective_mix_preserves_old_profiles_and_v2_stress_cases():
     assert profile_weights["line-style"] > profile_weights["clean"]
     assert profile_weights["v2-combined"] > profile_weights["v2-text"]
     assert profile_weights["v2-dark-combined"] > profile_weights["v2-dark-text"]
+
+
+def test_augment_mix_sampler_handles_all_registered_mixes_repeatedly():
+    rng = np.random.default_rng(123)
+    for entries in AUGMENT_MIXES.values():
+        seen = {_sample_mix_entry(entries, rng)[0] for _ in range(200)}
+        assert seen <= {profile for profile, _, _ in entries}
+        assert seen
 
 
 def test_cpline_style_profiles_do_not_apply_square_symmetry_by_default():
