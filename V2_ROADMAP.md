@@ -445,9 +445,32 @@ Progress as of May 22, 2026:
   `visualizations/v2_square_topology_inspector/eval` with 66 synthetic examples
   across clean, `line-style`, isolated V2 issue profiles, combined, dark
   combined, and replay-corrective profiles. Aggregate structural validity is
-  `1.000`, edge P/R is `0.868/0.795`, and border P/R/F1 is
-  `0.925/0.893/0.909`. Clean border F1 is `0.951`; `line-style` border F1 is
-  `0.923`; combined and dark-combined remain lower at roughly `0.865`.
+  `1.000`, edge P/R/F1 is `0.865/0.811/0.837`, and border P/R/F1 is
+  `0.924/0.892/0.908`. Clean border F1 is `0.951`; `line-style` border F1 is
+  `0.923`; combined and dark-combined remain lower at roughly `0.861` and
+  `0.864`.
+- Stage Inspector V2 evidence overlays are implemented for the current square
+  decoder path: line evidence, non-crease/artifact evidence, line style,
+  boundary contacts, assignment labels, and final topology can be toggled during
+  review.
+- Exact square-CP compile gates are now part of the quality report. In addition
+  to parse/duplicate/zero/crossing checks, reports can flag missing square
+  border, missing square corners, non-square border frame/edges, invalid border
+  cycle, and boundary contacts that reach the square without splitting the
+  border chain.
+- The first square-topology review of the 66-example synthetic inspector bundle
+  found no parseability failures, but still found square-compile warnings:
+  `boundary_contact_not_split` on 20 examples, `invalid_border_cycle` on 9,
+  `missing_square_corners` on 8, and `non_square_border_edges` on 1. These are
+  concentrated in combined, dark-combined, and replay-corrective profiles and
+  point to topology splitting/border-chain recovery rather than FOLD export.
+- `SquareTopologyDecoder` now has conservative dashed-support scoring: dashed
+  style evidence can rescue a gapped segment only when there is still line
+  evidence beneath it. Faint style does not rescue segments by itself.
+- Real-world Stage 5 visual review is still a separate queue in this worktree:
+  `visualizations/stage5_scraped_inspector/eval` and the shared scraped-data
+  symlink are not present here, so the completed review above is synthetic V2
+  issue coverage only.
 
 ## Phase V2.3: SquareTopologyDecoder
 
@@ -475,11 +498,19 @@ Current implementation plan:
    - analytic carrier/boundary intersections and graph splitting;
    - junction snapping to analytic intersections without adding all
      carrier-carrier intersections as vertices by default.
-5. Next: visually inspect the square-topology Stage Inspector bundle and tune
-   remaining combined/dark/replay-corrective failures before broadening to
-   real-image validation.
-6. Add Stage Inspector overlays for V2 evidence so failures can be assigned to
-   the model heads or the decoder rather than guessed from the final graph.
+5. Done: add Stage Inspector overlays for V2 evidence so failures can be
+   assigned to the model heads or the decoder rather than guessed from the final
+   graph.
+6. Done: visually inspect the square-topology Stage Inspector bundle and record
+   current synthetic failure categories. The weakest slices are combined,
+   dark-combined, and replay-corrective; the most actionable square-topology
+   warnings are unsplit boundary contacts, invalid border cycles, and missing
+   square corners after repair.
+7. Done: add exact square-CP compile gates to the quality report.
+8. Next: broaden visual review to cached real-image Stage 5 outputs once they
+   exist in this worktree, then tune carrier selection/rejection and
+   boundary-chain splitting on the examples that still show obvious missing
+   creases or square-cycle warnings.
 
 Decoder contract:
 
@@ -726,24 +757,22 @@ issue-only V2 checkpoint.
 
 ## Near-Term Next Steps
 
-1. Use `runpod-v2-replay-correction-full-4000ada` as the current V2 candidate
-   in Stage Inspector visual review on the existing real-world examples. Record
-   whether failures are line evidence, artifact suppression, boundary contacts,
-   topology splitting, assignment ambiguity, or rectifier/source-envelope
-   problems.
-2. Add Stage Inspector overlays for boundary contacts, non-crease/artifact
-   evidence, line style, and observed-vs-latent assignment targets. The model
-   already emits these signals; the product path needs to expose them clearly.
-3. Visually review `visualizations/v2_square_topology_inspector/eval` in Stage
-   Inspector, focusing on the combined, dark-combined, and replay-corrective
-   profiles where edge/border metrics remain weakest.
-4. Add exact square-CP compile gates: canonical border cycle, every boundary
-   contact represented, no duplicate/zero edges, no unsplit crossings, and
-   internal FOLD parse.
-5. Run the stored checkpoint screen only for new candidate checkpoints, using
+1. Generate or restore the cached Stage 5 scraped inspector bundle for
+   real-world examples, then review it with the same V2 evidence overlays. The
+   synthetic inspector work is complete enough to classify failure types, but
+   real-world visual review is blocked here until
+   `visualizations/stage5_scraped_inspector/eval` exists.
+2. Tune `SquareTopologyDecoder` on the remaining synthetic weak slices:
+   combined, dark-combined, and replay-corrective. Prioritize carrier
+   selection/rejection, boundary-contact snapping, deterministic border-chain
+   splitting, rejected-segment diagnostics, and artifact overlap scoring.
+3. Add first-class inspector overlays for rejected candidate segments and
+   carrier proposals, so missing obvious lines can be separated from rejected
+   evidence versus missing model evidence.
+4. Run the stored checkpoint screen only for new candidate checkpoints, using
    `artifacts/evaluations/v2-checkpoint-comparison-20260522.json` as the cached
    baseline for older checkpoints.
-6. Use the decoder results to decide whether carrier-support heads, dashed
+5. Use the decoder results to decide whether carrier-support heads, dashed
    carrier heads, or 1536/2048 training should be next. Do not treat more 1024
    training as the main path to 0.99 border metrics unless the decoder has
    already consumed the V2 heads and compile gates.

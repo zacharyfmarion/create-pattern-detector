@@ -288,6 +288,39 @@ def test_square_topology_decoder_accepts_boundary_contact_heatmap():
     assert result.debug["square_topology"]["border_edge_count"] >= 4
 
 
+def test_square_topology_decoder_uses_gapped_style_support_for_dashed_segments():
+    line_prob = np.zeros((64, 64), dtype=np.float32)
+    for x in range(8, 57, 8):
+        line_prob[32, x : x + 2] = 0.8
+    line_style_prob = np.zeros((64, 64, 4), dtype=np.float32)
+    line_style_prob[..., 0] = 1.0
+    line_style_prob[32, 8:57, 0] = 0.05
+    line_style_prob[32, 8:57, 1] = 0.95
+    decoder = SquareTopologyDecoder(
+        SquareTopologyDecoderConfig(
+            image_size=64,
+            line_threshold=0.5,
+            min_edge_support=0.45,
+            edge_sample_width_px=1,
+        )
+    )
+
+    plain = decoder._segment_support(
+        np.asarray([8.0, 32.0], dtype=np.float32),
+        np.asarray([56.0, 32.0], dtype=np.float32),
+        line_prob,
+    )
+    styled = decoder._segment_support(
+        np.asarray([8.0, 32.0], dtype=np.float32),
+        np.asarray([56.0, 32.0], dtype=np.float32),
+        line_prob,
+        line_style_prob=line_style_prob,
+    )
+
+    assert plain < decoder.config.min_edge_support
+    assert styled >= decoder.config.min_edge_support
+
+
 def test_planar_cleanup_splits_edges_at_intermediate_vertices():
     vertices = np.array([[0.0, 0.0], [10.0, 0.0], [5.0, 0.2]], dtype=np.float32)
     edges = np.array([[0, 1]], dtype=np.int64)

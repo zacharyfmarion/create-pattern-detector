@@ -46,6 +46,9 @@ class SquareTopologyDecoderConfig:
     edge_sample_step_px: float = 1.0
     edge_sample_width_px: int = 3
     dashed_support_weight: float = 0.35
+    gapped_style_support_weight: float = 0.55
+    gapped_style_min_confidence: float = 0.55
+    gapped_style_line_floor: float = 0.12
     carrier_extent_padding_px: float = 24.0
     frame_epsilon_px: float = 1.0
     border_carrier_tolerance_px: float = 4.0
@@ -121,7 +124,7 @@ class SquareTopologyDecoder:
             vertices,
             carriers,
             effective_line_prob,
-            evidence.assignment_labels,
+            evidence,
         )
         vertices, interior_edges, vertex_support, used_boundary = self._drop_unused_non_border_vertices(
             vertices,
@@ -129,7 +132,12 @@ class SquareTopologyDecoder:
             interior_support,
             vertex_meta,
         )
-        interior_support = self._support_for_edges(vertices, interior_edges, effective_line_prob)
+        interior_support = self._support_for_edges(
+            vertices,
+            interior_edges,
+            effective_line_prob,
+            evidence.line_style_prob,
+        )
         interior_assignments = self._assignments_for_edges(
             vertices,
             interior_edges,
@@ -389,12 +397,14 @@ class SquareTopologyDecoder:
         vertices: np.ndarray,
         carriers: list[_Carrier],
         line_prob: np.ndarray,
-        assignment_labels: np.ndarray | None,
+        evidence: VectorizerEvidence,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         edge_map: dict[tuple[int, int], tuple[float, int]] = {}
         if len(vertices) < 2:
             return self._empty_edges()
 
+        assignment_labels = evidence.assignment_labels
+        line_style_prob = evidence.line_style_prob
         for carrier in carriers:
             distances = np.abs(_point_line_distances(vertices, carrier.line))
             projections = vertices @ carrier.direction
@@ -412,7 +422,12 @@ class SquareTopologyDecoder:
                 p1 = vertices[int(v2)]
                 if np.linalg.norm(p1 - p0) < self.config.min_edge_length_px:
                     continue
-                support = self._segment_support(p0, p1, line_prob)
+                support = self._segment_support(
+                    p0,
+                    p1,
+                    line_prob,
+                    line_style_prob=line_style_prob,
+                )
                 if support < self.config.min_edge_support:
                     continue
                 key = (int(min(v1, v2)), int(max(v1, v2)))
@@ -572,9 +587,18 @@ class SquareTopologyDecoder:
         vertices: np.ndarray,
         edges: np.ndarray,
         line_prob: np.ndarray,
+        line_style_prob: np.ndarray | None = None,
     ) -> np.ndarray:
         return np.asarray(
-            [self._segment_support(vertices[int(a)], vertices[int(b)], line_prob) for a, b in edges],
+            [
+                self._segment_support(
+                    vertices[int(a)],
+                    vertices[int(b)],
+                    line_prob,
+                    line_style_prob=line_style_prob,
+                )
+                for a, b in edges
+            ],
             dtype=np.float32,
         )
 
@@ -594,7 +618,14 @@ class SquareTopologyDecoder:
             dtype=np.int8,
         )
 
-    def _segment_support(self, p0: np.ndarray, p1: np.ndarray, line_prob: np.ndarray) -> float:
+    def _segment_support(
+        self,
+        p0: np.ndarray,
+        p1: np.ndarray,
+        line_prob: np.ndarray,
+        *,
+        line_style_prob: np.ndarray | None = None,
+    ) -> float:
         samples = _sample_segment_points(p0, p1, self.config.edge_sample_step_px)
         if len(samples) == 0:
             return 0.0
@@ -617,7 +648,42 @@ class SquareTopologyDecoder:
         max_values = np.max(values, axis=1)
         hit_fraction = float(np.mean(max_values >= self.config.line_threshold))
         mean_prob = float(np.mean(max_values))
-        return float(max(hit_fraction, self.config.dashed_support_weight * mean_prob))
+        support = max(hit_fraction, self.config.dashed_support_weight * mean_prob)
+        style_support = self._gapped_style_support(
+            valid,
+            ys,
+            xs,
+            line_style_prob,
+            mean_line_prob=mean_prob,
+        )
+        return float(max(support, style_support))
+
+    def _gapped_style_support(
+        self,
+        valid: np.ndarray,
+        ys: np.ndarray,
+        xs: np.ndarray,
+        line_style_prob: np.ndarray | None,
+        *,
+        mean_line_prob: float,
+    ) -> float:
+        if line_style_prob is None or mean_line_prob < self.config.gapped_style_line_floor:
+            return 0.0
+        style_prob = np.asarray(line_style_prob, dtype=np.float32)
+        if style_prob.ndim != 3 or style_prob.shape[-1] < 2:
+            return 0.0
+        h, w, _ = style_prob.shape
+        valid = valid & (xs >= 0) & (xs < w) & (ys >= 0) & (ys < h)
+        if not np.any(valid):
+            return 0.0
+        values = np.zeros(valid.shape, dtype=np.float32)
+        gapped_prob = style_prob[..., 1]
+        values[valid] = gapped_prob[ys[valid], xs[valid]]
+        max_values = np.max(values, axis=1)
+        mean_style = float(np.mean(max_values))
+        if mean_style < self.config.gapped_style_min_confidence:
+            return 0.0
+        return float(self.config.gapped_style_support_weight * mean_style)
 
     def _vote_assignment(
         self,

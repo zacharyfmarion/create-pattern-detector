@@ -22,6 +22,12 @@ FAILED_CODES = {
 }
 OUTSIDE_CODES = {
     "incomplete_border",
+    "missing_square_border",
+    "missing_square_corners",
+    "non_square_border_frame",
+    "non_square_border_edges",
+    "invalid_border_cycle",
+    "boundary_contact_not_split",
     "very_short_edges",
     "crowded_junctions",
     "weak_edges",

@@ -428,6 +428,114 @@ def test_quality_report_warns_on_dense_geometry():
     assert report.status == "outside_v1_envelope"
 
 
+def test_quality_report_square_compile_gate_accepts_split_boundary_contact():
+    vertices = np.array(
+        [
+            [0.0, 0.0],
+            [10.0, 0.0],
+            [10.0, 10.0],
+            [0.0, 10.0],
+            [5.0, 0.0],
+            [5.0, 5.0],
+        ],
+        dtype=np.float32,
+    )
+    graph = _attributed(
+        vertices,
+        np.array([[0, 4], [4, 1], [1, 2], [2, 3], [3, 0], [4, 5]], dtype=np.int64),
+        np.array([2, 2, 2, 2, 2, 0], dtype=np.int8),
+        np.ones(6, dtype=np.float32),
+        confidence=np.ones(6, dtype=np.float32),
+        margin=np.ones(6, dtype=np.float32),
+        source=["observed"] * 6,
+        image_size=11,
+    )
+
+    report = build_quality_report(
+        graph,
+        config=QualityReportConfig(
+            image_size=11,
+            short_edge_warning_px=1.0,
+            crowded_junction_px=1.0,
+        ),
+    )
+    square_codes = {
+        "missing_square_border",
+        "missing_square_corners",
+        "non_square_border_frame",
+        "non_square_border_edges",
+        "invalid_border_cycle",
+        "boundary_contact_not_split",
+    }
+
+    assert {warning.code for warning in report.warnings}.isdisjoint(square_codes)
+
+
+def test_quality_report_square_compile_gate_warns_for_unsplit_boundary_contact():
+    vertices = np.array(
+        [
+            [0.0, 0.0],
+            [10.0, 0.0],
+            [10.0, 10.0],
+            [0.0, 10.0],
+            [5.0, 0.0],
+            [5.0, 5.0],
+        ],
+        dtype=np.float32,
+    )
+    graph = _attributed(
+        vertices,
+        np.array([[0, 1], [1, 2], [2, 3], [3, 0], [4, 5]], dtype=np.int64),
+        np.array([2, 2, 2, 2, 0], dtype=np.int8),
+        np.ones(5, dtype=np.float32),
+        confidence=np.ones(5, dtype=np.float32),
+        margin=np.ones(5, dtype=np.float32),
+        source=["observed"] * 5,
+        image_size=11,
+    )
+
+    report = build_quality_report(
+        graph,
+        config=QualityReportConfig(
+            image_size=11,
+            short_edge_warning_px=1.0,
+            crowded_junction_px=1.0,
+        ),
+    )
+    codes = {warning.code for warning in report.warnings}
+
+    assert "boundary_contact_not_split" in codes
+    assert report.status == "outside_v1_envelope"
+
+
+def test_quality_report_square_compile_gate_warns_for_missing_or_invalid_border():
+    graph = _attributed(
+        np.array([[0.0, 0.0], [10.0, 10.0], [5.0, 5.0]], dtype=np.float32),
+        np.array([[0, 1], [0, 2]], dtype=np.int64),
+        np.array([2, 0], dtype=np.int8),
+        np.ones(2, dtype=np.float32),
+        confidence=np.ones(2, dtype=np.float32),
+        margin=np.ones(2, dtype=np.float32),
+        source=["observed"] * 2,
+        image_size=11,
+    )
+
+    report = build_quality_report(
+        graph,
+        config=QualityReportConfig(
+            image_size=11,
+            short_edge_warning_px=1.0,
+            crowded_junction_px=1.0,
+        ),
+    )
+    codes = {warning.code for warning in report.warnings}
+
+    assert "missing_square_corners" in codes
+    assert "non_square_border_edges" in codes
+    assert "invalid_border_cycle" in codes
+    assert report.status == "outside_v1_envelope"
+
+
 def test_fold_writer_exports_required_fields_and_stage4_metadata():
     graph = _attributed(
         np.array([[0.0, 0.0], [10.0, 0.0]], dtype=np.float32),

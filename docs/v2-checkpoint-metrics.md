@@ -147,18 +147,18 @@ visualizations/v2_square_topology_inspector/eval
 
 | profile | edge P/R | border P/R/F1 | structural |
 |---|---:|---:|---:|
-| aggregate | 0.868/0.795 | 0.925/0.893/0.909 | 1.000 |
-| clean | 0.933/0.851 | 0.961/0.942/0.951 | 1.000 |
-| line-style | 0.901/0.789 | 0.929/0.917/0.923 | 1.000 |
-| v2-text | 0.861/0.810 | 0.961/0.923/0.942 | 1.000 |
-| v2-watermark | 0.874/0.820 | 0.961/0.923/0.942 | 1.000 |
-| v2-guide-grid | 0.913/0.833 | 0.929/0.923/0.926 | 1.000 |
-| v2-dashed | 0.865/0.805 | 0.921/0.891/0.906 | 1.000 |
-| v2-faint | 0.920/0.829 | 0.940/0.910/0.925 | 1.000 |
-| v2-ambiguous-mv | 0.918/0.831 | 0.921/0.897/0.909 | 1.000 |
-| v2-combined | 0.759/0.686 | 0.891/0.840/0.865 | 1.000 |
-| v2-dark-combined | 0.765/0.734 | 0.851/0.878/0.864 | 1.000 |
-| v2-replay-corrective | 0.848/0.755 | 0.924/0.784/0.838 | 1.000 |
+| aggregate | 0.865/0.811 | 0.924/0.892/0.908 | 1.000 |
+| clean | 0.933/0.866 | 0.961/0.942/0.951 | 1.000 |
+| line-style | 0.899/0.809 | 0.929/0.917/0.923 | 1.000 |
+| v2-text | 0.858/0.826 | 0.961/0.942/0.951 | 1.000 |
+| v2-watermark | 0.873/0.833 | 0.947/0.923/0.935 | 1.000 |
+| v2-guide-grid | 0.910/0.853 | 0.923/0.917/0.920 | 1.000 |
+| v2-dashed | 0.866/0.824 | 0.921/0.891/0.906 | 1.000 |
+| v2-faint | 0.921/0.848 | 0.940/0.910/0.925 | 1.000 |
+| v2-ambiguous-mv | 0.915/0.849 | 0.921/0.897/0.909 | 1.000 |
+| v2-combined | 0.744/0.699 | 0.890/0.833/0.861 | 1.000 |
+| v2-dark-combined | 0.760/0.748 | 0.851/0.878/0.864 | 1.000 |
+| v2-replay-corrective | 0.845/0.770 | 0.922/0.763/0.835 | 1.000 |
 
 Interpretation:
 
@@ -167,8 +167,14 @@ Interpretation:
 - Structural validity is perfect on this synthetic screen, so the next review
   should focus on missed/extra topology and border-contact placement rather
   than parseability failures.
+- Exact square-CP compile warnings are now emitted by the quality report. On
+  this 66-example screen: `boundary_contact_not_split` appears on 20 examples,
+  `invalid_border_cycle` on 9, `missing_square_corners` on 8, and
+  `non_square_border_edges` on 1.
 - Combined, dark-combined, and replay-corrective profiles remain the weakest
-  slices and need visual inspection before another training or decoder pass.
+  slices. The failures are now easier to classify: most are missing/split
+  boundary contacts and border-chain reconstruction failures, not serialization
+  failures.
 
 ### Square Decoder Padding Sweep - May 22, 2026
 
