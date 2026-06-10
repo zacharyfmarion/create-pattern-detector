@@ -40,7 +40,8 @@ JUNCTION_THRESHOLD = 0.5
 # Sharper sigma-1.5 heatmaps leave only ~3 pixels above 0.5 per vertex, so the
 # vote pass collects from a lower threshold and accepts smaller clusters.
 VOTE_THRESHOLD = 0.3
-CLUSTER_BANDWIDTH_PX = 1.5
+CLUSTER_BANDWIDTH_PX = 1.2
+CLUSTER_MERGE_PX = 1.0
 MIN_CLUSTER_SUPPORT = 0.8
 NMS_RADIUS_PX = 2
 
@@ -130,23 +131,51 @@ def decode_offset_clusters(
     votes = np.stack([votes_x, votes_y], axis=1)[order]
     weights = weights[order]
 
-    centers: list[np.ndarray] = []
+    # Seed-anchored assignment: votes attach to the nearest SEED (highest-
+    # weight vote that started the cluster), never to a drifting running mean.
+    # A running mean chains across the ~5px gap between close-pair modes and
+    # swallows the second vertex; anchored seeds cannot drift.
+    seeds: list[np.ndarray] = []
     sums: list[np.ndarray] = []
     mass: list[float] = []
     for vote, weight in zip(votes, weights):
         assigned = False
-        for index, center in enumerate(centers):
-            if np.hypot(*(vote - center)) <= CLUSTER_BANDWIDTH_PX:
+        for index, seed in enumerate(seeds):
+            if np.hypot(*(vote - seed)) <= CLUSTER_BANDWIDTH_PX:
                 sums[index] += vote * weight
                 mass[index] += weight
-                centers[index] = sums[index] / mass[index]
                 assigned = True
                 break
         if not assigned:
-            centers.append(vote.copy())
+            seeds.append(vote.copy())
             sums.append(vote * weight)
             mass.append(float(weight))
-    kept = [center for center, support in zip(centers, mass) if support >= MIN_CLUSTER_SUPPORT]
+    centers = [total / support for total, support in zip(sums, mass)]
+    # Merge pass: weighted means closer than the merge radius are duplicates
+    # of the same vertex (seeds quantize to the strongest vote).
+    merged_centers: list[np.ndarray] = []
+    merged_mass: list[float] = []
+    for center, support in sorted(
+        zip(centers, mass), key=lambda pair: -pair[1]
+    ):
+        merged = False
+        for index, existing in enumerate(merged_centers):
+            if np.hypot(*(center - existing)) <= CLUSTER_MERGE_PX:
+                total = merged_mass[index] + support
+                merged_centers[index] = (
+                    existing * merged_mass[index] + center * support
+                ) / total
+                merged_mass[index] = total
+                merged = True
+                break
+        if not merged:
+            merged_centers.append(center)
+            merged_mass.append(support)
+    kept = [
+        center
+        for center, support in zip(merged_centers, merged_mass)
+        if support >= MIN_CLUSTER_SUPPORT
+    ]
     return np.array(kept, dtype=np.float32).reshape(-1, 2)
 
 
