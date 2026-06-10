@@ -178,8 +178,17 @@ def render_augmented_cpline_sample(
     style_variant: str | None = None,
     square_symmetry: str | None = None,
     base_pixel_vertices: np.ndarray | None = None,
+    junction_sigma_px: float | None = None,
+    junction_offset_radius_px: float = 0.0,
 ) -> AugmentedCplineSample:
-    """Render an augmented CPLineNet input and matching dense labels."""
+    """Render an augmented CPLineNet input and matching dense labels.
+
+    ``junction_sigma_px=None`` keeps the legacy width formula
+    ``max(1.0, 2.5 * image_size / 768)`` (~3.33px at 1024), which fuses vertex
+    pairs closer than ~8px into a single heatmap blob.
+    ``junction_offset_radius_px=0`` keeps legacy sub-pixel offsets; >0 enables
+    radius-normalized nearest-vertex offsets (see ``_junction_offsets``).
+    """
     profile = normalize_augment_profile(augment_profile, render_noise=render_noise)
     local_rng = np.random.default_rng(seed) if rng is None else rng
     start = perf_counter()
@@ -208,13 +217,18 @@ def render_augmented_cpline_sample(
     target_assignments = _target_assignments(cp.assignments, params)
 
     target_line_width = int(params["target_line_width"])
+    junction_sigma = (
+        junction_sigma_px
+        if junction_sigma_px is not None
+        else max(1.0, 2.5 * image_size / 768)
+    )
     rendered = render_vectorizer_evidence_from_pixels(
         pixel_vertices=transformed_vertices,
         edges=cp.edges,
         assignments=target_assignments,
         image_size=image_size,
         line_width=target_line_width,
-        junction_sigma=max(1.0, 2.5 * image_size / 768),
+        junction_sigma=junction_sigma,
     )
     image = _render_input_image_from_pixels(
         transformed_vertices,
@@ -225,7 +239,12 @@ def render_augmented_cpline_sample(
     )
     image = _apply_photometric_effects(image, params, local_rng)
 
-    junction_offset, junction_mask = _junction_offsets(rendered.pixel_vertices, rendered.edges, image_size)
+    junction_offset, junction_mask = _junction_offsets(
+        rendered.pixel_vertices,
+        rendered.edges,
+        image_size,
+        radius_px=junction_offset_radius_px,
+    )
     assignment = rendered.evidence.assignment_labels.astype(np.int64) - 1
     assignment[rendered.evidence.assignment_labels == 0] = -100
     v2_non_crease_mask, v2_target_line_mask, v2_line_style, v2_observed_assignment = default_v2_targets(
@@ -668,22 +687,67 @@ def _junction_offsets(
     vertices: np.ndarray,
     edges: np.ndarray,
     image_size: int,
+    *,
+    radius_px: float = 0.0,
 ) -> tuple[np.ndarray, np.ndarray]:
+    """Dense junction offset targets.
+
+    With ``radius_px <= 0`` this is the legacy sub-pixel mode: the offset from
+    the rounded anchor pixel to the true vertex, supervised at that single
+    pixel, range [-0.5, 0.5].
+
+    With ``radius_px > 0`` every pixel within the radius of a degree>=1 vertex
+    is supervised with the vector toward its NEAREST vertex, normalized by the
+    radius (range [-1, 1]). Over a heatmap blob that fuses two close vertices
+    this field is bimodal, which is what lets the decoder split the blob.
+    """
     offset = np.zeros((image_size, image_size, 2), dtype=np.float32)
     mask = np.zeros((image_size, image_size), dtype=bool)
     degrees = np.zeros(len(vertices), dtype=np.int32)
     for v1, v2 in edges:
         degrees[int(v1)] += 1
         degrees[int(v2)] += 1
+
+    if radius_px <= 0.0:
+        for vertex_idx, (x, y) in enumerate(vertices):
+            if degrees[vertex_idx] < 1:
+                continue
+            col = int(round(float(x)))
+            row = int(round(float(y)))
+            if 0 <= row < image_size and 0 <= col < image_size:
+                offset[row, col, 0] = float(x) - col
+                offset[row, col, 1] = float(y) - row
+                mask[row, col] = True
+        return offset, mask
+
+    best_distance = np.full((image_size, image_size), np.inf, dtype=np.float32)
+    reach = int(np.ceil(radius_px))
     for vertex_idx, (x, y) in enumerate(vertices):
         if degrees[vertex_idx] < 1:
             continue
-        col = int(round(float(x)))
-        row = int(round(float(y)))
-        if 0 <= row < image_size and 0 <= col < image_size:
-            offset[row, col, 0] = float(x) - col
-            offset[row, col, 1] = float(y) - row
-            mask[row, col] = True
+        vx = float(x)
+        vy = float(y)
+        col_min = max(0, int(np.floor(vx)) - reach)
+        col_max = min(image_size - 1, int(np.ceil(vx)) + reach)
+        row_min = max(0, int(np.floor(vy)) - reach)
+        row_max = min(image_size - 1, int(np.ceil(vy)) + reach)
+        if col_max < col_min or row_max < row_min:
+            continue
+        cols = np.arange(col_min, col_max + 1)
+        rows = np.arange(row_min, row_max + 1)
+        grid_cols, grid_rows = np.meshgrid(cols, rows)
+        dx = vx - grid_cols.astype(np.float32)
+        dy = vy - grid_rows.astype(np.float32)
+        dist = np.sqrt(dx * dx + dy * dy)
+        window = best_distance[row_min : row_max + 1, col_min : col_max + 1]
+        closer = (dist <= radius_px) & (dist < window)
+        if not np.any(closer):
+            continue
+        window[closer] = dist[closer]
+        offset_window = offset[row_min : row_max + 1, col_min : col_max + 1]
+        offset_window[closer, 0] = dx[closer] / radius_px
+        offset_window[closer, 1] = dy[closer] / radius_px
+        mask[row_min : row_max + 1, col_min : col_max + 1] |= closer
     return offset, mask
 
 

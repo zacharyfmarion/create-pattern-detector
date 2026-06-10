@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 1,
+  "id": "runpod-v3-close-pair-warmstart-4090",
+  "status": "candidate",
+  "phase": "v3-close-pair",
+  "registeredAt": "2026-06-10",
+  "description": "Close-pair junction recovery recipe (docs/v2-close-pair-junction-recovery.md): sigma 1.5 heatmap, penalty-reduced focal loss, CenterNet-style radius-3 nearest-vertex offsets. Warm-started from runpod-v2-replay-correction-full-4000ada with the offset head re-initialized. Best checkpoint of the close-pair round: beats the V2 baseline on every strict-topology metric (edge F1 0.942 -> 0.953 on clean-1024-s15, extras 130 -> 95, junction recall 0.959 -> 0.973) but close-pair resolution plateaus at ~26% (gate was 80%); a from-scratch 5000-step ablation (R3) landed identically, so the ceiling is the recipe/input resolution, not the init.",
+  "checkpoint": {
+    "gitTracked": false,
+    "relativePath": "checkpoints/r1_close_pair_warmstart/latest.pt",
+    "originalRunpodPath": "/workspace/create-pattern-detector/checkpoints/r1_close_pair_warmstart/latest.pt",
+    "sha256": "f4223ac93f90034663cd2c738480f2c1e33fea8d0f274e708deb0ce41e0c2ed6",
+    "sizeBytes": 138747232
+  },
+  "model": {
+    "class": "CPLineNet",
+    "backbone": "hrnet_w18",
+    "hiddenChannels": 128,
+    "imageSize": 1024,
+    "v2Heads": true,
+    "junctionOffsetClamp": 1.0
+  },
+  "training": {
+    "device": "cuda",
+    "gpu": "RTX 4090",
+    "runpodPodId": "2nlvomkuqad9bk",
+    "dataset": "cp_training_mix_v1",
+    "manifest": "data/generated/synthetic/cp_training_mix_v1/raw-manifest.jsonl",
+    "trainSamples": 5202,
+    "valSamples": 638,
+    "maxEdges": 300,
+    "batchSize": 1,
+    "maxSteps": 1500,
+    "seed": 31,
+    "augmentProfile": "v2-replay-corrective",
+    "evalAugmentProfile": "v2-replay-corrective",
+    "initCheckpoint": "checkpoints/runpod_v2_replay_correction_full_4000ada/full/latest.pt",
+    "reinitHeads": "offset_head",
+    "learningRate": 0.0001,
+    "junctionSigmaPx": 1.5,
+    "junctionOffsetRadiusPx": 3.0,
+    "junctionOffsetWeight": 0.5,
+    "junctionFocalAlpha": 2.0,
+    "junctionFocalBeta": 4.0,
+    "trainFamilySampling": "balanced",
+    "batchnormMode": "batch-stats",
+    "elapsedSeconds": 6500.83,
+    "firstTrainLoss": 479.69,
+    "lastTrainLoss": 0.49
+  },
+  "inference": {
+    "batchnormMode": "batch-stats",
+    "vectorizerThreshold": 0.65,
+    "junctionOffsetRadiusPx": 3.0,
+    "notes": "junction_offset is radius-normalized (multiply by 3.0px). Decode with offset-vote clustering (eval_close_pairs.py decode_offset_clusters / tree-maker-rust evidence_extract offset_cluster_primitives). Requires batch-stats BatchNorm: model.eval() running stats collapse junction recall to ~0.35.",
+    "supportedEnvelope": "Readable rectified 1024px square CP inputs, same envelope as the V2 baseline."
+  },
+  "evaluation": {
+    "source": "artifacts/eval_r1.json",
+    "script": "scripts/evals/eval_close_pairs.py",
+    "valCount": 64,
+    "closePairs": 279,
+    "pairResolutionClusters": 0.265,
+    "pairResolutionBaselinePeaks": 0.054,
+    "junctionRecallClusters": 0.974,
+    "junctionPrecisionClusters": 0.987,
+    "strictTopology": {
+      "harness": "tree-maker-rust compare_exact_solve_benchmark --candidate-source junction-first-v1 --skip-exact-solve --strict-vertex-tolerance-px 4",
+      "denseCache": "clean-1024-s15-browser-onnx-v3-close-pair",
+      "edgeF1": 0.953,
+      "exactTopologySamples": "4/15",
+      "missingEdges": 145,
+      "extraEdges": 101,
+      "mergedEdges": 67,
+      "baselineEdgeF1": 0.942
+    }
+  }
+}

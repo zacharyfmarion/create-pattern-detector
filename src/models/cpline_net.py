@@ -58,11 +58,15 @@ class CPLineNet(nn.Module):
         hidden_channels: int = 128,
         output_stride: int = 4,
         v2_heads: bool = False,
+        junction_offset_clamp: float = 0.5,
     ) -> None:
         super().__init__()
         self.backbone_name = backbone
         self.output_stride = output_stride
         self.v2_heads = v2_heads
+        # 0.5 for legacy sub-pixel offsets; 1.0 for radius-normalized
+        # nearest-vertex offsets (see _junction_offsets radius mode).
+        self.junction_offset_clamp = junction_offset_clamp
         if backbone == "tiny":
             self.backbone = TinyHighResolutionBackbone(width=max(16, hidden_channels // 4))
         elif backbone.startswith("hrnet"):
@@ -104,7 +108,11 @@ class CPLineNet(nn.Module):
         line_logits = self._upsample(self.line_head(shared), target_size)
         angle = F.normalize(self._upsample(self.angle_head(shared), target_size), dim=1, eps=1e-6)
         junction_logits = self._upsample(self.junction_head(shared), target_size)
-        junction_offset = torch.clamp(self._upsample(self.offset_head(shared), target_size), -0.5, 0.5)
+        junction_offset = torch.clamp(
+            self._upsample(self.offset_head(shared), target_size),
+            -self.junction_offset_clamp,
+            self.junction_offset_clamp,
+        )
         assignment_logits = self._upsample(self.assignment_head(shared), target_size)
         outputs: dict[str, torch.Tensor] = {
             "line_logits": line_logits,
