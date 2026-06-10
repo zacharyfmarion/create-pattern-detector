@@ -1,0 +1,13 @@
+{
+  "checkpoint": "checkpoints/r3_close_pair_scratch/latest.pt",
+  "offset_radius_px": 3.0,
+  "batchnorm_mode": "batch-stats",
+  "samples": 64,
+  "close_pairs": 279,
+  "pair_resolution_peaks": 0.17562724014336917,
+  "pair_resolution_clusters": 0.21505376344086022,
+  "junction_precision_peaks": 0.998517891170866,
+  "junction_recall_peaks": 0.9642199959108567,
+  "junction_precision_clusters": 0.9941385806991836,
+  "junction_recall_clusters": 0.970967082396238
+}

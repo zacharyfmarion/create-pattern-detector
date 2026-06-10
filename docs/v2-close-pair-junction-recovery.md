@@ -195,3 +195,48 @@ crosses **$18**; never leave a pod running unattended past its stop-after.
 5. ONNX export + new dense cache + decoder change (C) in tree-maker-rust, with
    the strict-harness comparison report archived under
    `artifacts/cp-detect-correctness/reports/`.
+
+## Outcome (2026-06-10)
+
+Executed R0/R1/R3 plus the decoder work. Total GPU spend ~$7.10 of the $25
+budget. Checkpoint registry: `runpod-v3-close-pair-warmstart-4090` (R1).
+
+| config | exact | strict eF1 | miss | extra | merged | pair res. |
+| --- | --- | --- | --- | --- | --- | --- |
+| shipped V2 baseline | 4/15 | 0.942 | 176 | 130 | 74 | 5.4% |
+| R1 warm-start + cluster decode | 4/15 | **0.953** | 145 | 101 | 65–67 | 26.5% |
+| R3 from-scratch (5000 steps) | 4/15 | 0.952 | 144 | 109 | 71 | 21.5% |
+
+What held up:
+
+- The recipe is a real, strict-metric improvement on every axis with no
+  regressions (junction recall 0.959 → 0.973 at precision 0.99; the gain is
+  mostly the sigma-1.5 + focal heatmap).
+- The offset field works as designed where it works: votes land median 0.35px
+  from GT, and 60% of close pairs have bimodal fields on val samples.
+- Seed-anchored offset-vote clustering (eval + the mirrored Rust decoder)
+  converts those into split vertices without hurting overall junction PR.
+
+What did not:
+
+- Pair resolution plateaued at ~21–27% against the 80% gate, and **R3
+  from-scratch landed identically to R1 warm-start**, refuting the
+  "warm-start is the ceiling" hypothesis. Two independent inits converge to
+  the same plateau: the limit is the recipe/representation. The likely root
+  cause is the input itself — at 1024px with ~2px strokes, two junctions 5px
+  apart with several incident creases are nearly a single ink blob; the
+  remaining pairs give one-sided or midpoint-collapsed offset fields.
+- Consequently the strict gates (eF1 ≥ 0.97, exact ≥ 8/15, merged ≤ 15) were
+  not met; merged edges only improved 74 → ~67.
+
+Recommendation: bank R1 (registry entry above), keep the decoder flag-gated,
+and do NOT continue tuning this recipe (radius/weight ablations face two
+identical plateaus). If close pairs are revisited, the levers are different in
+kind: higher input resolution for the dense heads (2048px or tiled crops), a
+dedicated close-pair head, or pipeline-side fused-vertex splitting from
+incident-line geometry in tree-maker-rust.
+
+Operational gotchas recorded for the next round: these checkpoints REQUIRE
+batch-stats BatchNorm at inference (eval-mode running stats collapse junction
+recall to ~0.35), and the fresh-checkout traps for browser dense-cache
+regeneration are documented in tree-maker-rust `scripts/cp-detect/README.md`.

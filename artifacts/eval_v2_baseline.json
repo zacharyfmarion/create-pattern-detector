@@ -1,0 +1,13 @@
+{
+  "checkpoint": "/workspace/init-checkpoint/v2_replay_correction_latest.pt",
+  "offset_radius_px": 0.0,
+  "batchnorm_mode": "batch-stats",
+  "samples": 64,
+  "close_pairs": 279,
+  "pair_resolution_peaks": 0.053763440860215055,
+  "pair_resolution_clusters": 0.8745519713261649,
+  "junction_precision_peaks": 0.9836409395973155,
+  "junction_recall_peaks": 0.958904109589041,
+  "junction_precision_clusters": 0.015437982930155043,
+  "junction_recall_clusters": 1.0
+}

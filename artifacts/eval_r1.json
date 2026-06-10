@@ -1,0 +1,13 @@
+{
+  "checkpoint": "checkpoints/r1_close_pair_warmstart/latest.pt",
+  "offset_radius_px": 3.0,
+  "batchnorm_mode": "batch-stats",
+  "samples": 64,
+  "close_pairs": 279,
+  "pair_resolution_peaks": 0.12186379928315412,
+  "pair_resolution_clusters": 0.26523297491039427,
+  "junction_precision_peaks": 0.9989393296563428,
+  "junction_recall_peaks": 0.9627887957472909,
+  "junction_precision_clusters": 0.9873575129533678,
+  "junction_recall_clusters": 0.9740339398895931
+}
