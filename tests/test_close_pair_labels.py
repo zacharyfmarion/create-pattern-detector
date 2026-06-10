@@ -95,3 +95,46 @@ def test_focal_loss_zero_when_perfect() -> None:
     logits = torch.tensor([[[[20.0, -20.0]]]])
     loss = _penalty_reduced_focal_loss(logits, target, alpha=2.0, beta=4.0)
     assert loss.item() < 1e-4
+
+
+def _load_eval_module():
+    import importlib.util
+    from pathlib import Path
+
+    path = Path(__file__).parent.parent / "scripts" / "evals" / "eval_close_pairs.py"
+    spec = importlib.util.spec_from_file_location("eval_close_pairs", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_offset_cluster_decode_splits_fused_blob() -> None:
+    eval_mod = _load_eval_module()
+    size = 32
+    radius = 3.0
+    a = np.array([13.5, 16.0], dtype=np.float32)
+    b = np.array([18.5, 16.0], dtype=np.float32)
+    # Fused blob the way the model actually emits it: one wide bell centered
+    # between the pair, a single local maximum, no information in the heatmap
+    # about there being two vertices.
+    mid = (a + b) / 2.0
+    grid_y, grid_x = np.mgrid[0:size, 0:size]
+    probs = 0.99 * np.exp(
+        -((grid_x - mid[0]) ** 2 + (grid_y - mid[1]) ** 2) / (2.0 * 3.33**2)
+    ).astype(np.float32)
+    # Radius-normalized offsets pointing to the nearest of a/b.
+    offsets = np.zeros((2, size, size), dtype=np.float32)
+    ys, xs = np.where(probs >= 0.5)
+    for y, x in zip(ys, xs):
+        target = a if np.hypot(x - a[0], y - a[1]) <= np.hypot(x - b[0], y - b[1]) else b
+        offsets[0, y, x] = (target[0] - x) / radius
+        offsets[1, y, x] = (target[1] - y) / radius
+
+    clusters = eval_mod.decode_offset_clusters(probs, offsets, offset_scale=radius)
+    assert len(clusters) == 2, f"expected the blob to split into 2 vertices, got {len(clusters)}"
+    dist_a = min(np.hypot(*(c - a)) for c in clusters)
+    dist_b = min(np.hypot(*(c - b)) for c in clusters)
+    assert dist_a < 0.75 and dist_b < 0.75
+
+    peaks = eval_mod.decode_peaks(probs, offsets, offset_scale=radius)
+    assert len(peaks) <= 1, "legacy peak decode cannot split the plateau (documents the gap)"
