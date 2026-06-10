@@ -31,6 +31,7 @@ import numpy as np
 import torch
 
 from src.data.cpline_dataset import CplineFoldDataset
+from src.models.batchnorm import BATCHNORM_MODES, model_eval_with_batchnorm_mode
 from src.models.cpline_net import CPLineNet
 
 PAIR_DISTANCE_PX = 8.0
@@ -60,6 +61,12 @@ def parse_args() -> argparse.Namespace:
         help="Offset normalization radius the checkpoint was trained with (0 = legacy sub-pixel).",
     )
     parser.add_argument("--device", choices=["auto", "mps", "cuda", "cpu"], default="auto")
+    parser.add_argument(
+        "--batchnorm-mode",
+        choices=BATCHNORM_MODES,
+        default="batch-stats",
+        help="BatchNorm behavior at inference; these checkpoints require batch-stats.",
+    )
     parser.add_argument("--out", type=Path, default=None, help="Optional JSON report path.")
     parser.add_argument("--seed", type=int, default=7)
     return parser.parse_args()
@@ -76,24 +83,31 @@ def pick_device(name: str) -> torch.device:
 
 
 def decode_peaks(probs: np.ndarray, offsets: np.ndarray, *, offset_scale: float) -> np.ndarray:
-    """Legacy decode: local maxima + per-anchor offset refinement."""
+    """Legacy decode: local maxima + per-anchor offset refinement (vectorized)."""
     size = probs.shape[0]
-    points = []
-    for y in range(NMS_RADIUS_PX, size - NMS_RADIUS_PX):
-        for x in range(NMS_RADIUS_PX, size - NMS_RADIUS_PX):
-            value = probs[y, x]
-            if value < JUNCTION_THRESHOLD:
+    window_max = probs.copy()
+    for dy in range(-NMS_RADIUS_PX, NMS_RADIUS_PX + 1):
+        for dx in range(-NMS_RADIUS_PX, NMS_RADIUS_PX + 1):
+            if dy == 0 and dx == 0:
                 continue
-            window = probs[
-                y - NMS_RADIUS_PX : y + NMS_RADIUS_PX + 1,
-                x - NMS_RADIUS_PX : x + NMS_RADIUS_PX + 1,
-            ]
-            if value < window.max():
-                continue
-            dx = float(offsets[0, y, x]) * offset_scale
-            dy = float(offsets[1, y, x]) * offset_scale
-            points.append((x + dx, y + dy))
-    return np.array(points, dtype=np.float32).reshape(-1, 2)
+            shifted = np.full_like(probs, -np.inf)
+            ys = slice(max(0, dy), size + min(0, dy))
+            xs = slice(max(0, dx), size + min(0, dx))
+            ys_src = slice(max(0, -dy), size + min(0, -dy))
+            xs_src = slice(max(0, -dx), size + min(0, -dx))
+            shifted[ys, xs] = probs[ys_src, xs_src]
+            window_max = np.maximum(window_max, shifted)
+    peak_mask = (probs >= JUNCTION_THRESHOLD) & (probs >= window_max)
+    peak_mask[:NMS_RADIUS_PX, :] = False
+    peak_mask[-NMS_RADIUS_PX:, :] = False
+    peak_mask[:, :NMS_RADIUS_PX] = False
+    peak_mask[:, -NMS_RADIUS_PX:] = False
+    ys, xs = np.where(peak_mask)
+    if len(xs) == 0:
+        return np.zeros((0, 2), dtype=np.float32)
+    px = xs + offsets[0, ys, xs] * offset_scale
+    py = ys + offsets[1, ys, xs] * offset_scale
+    return np.stack([px, py], axis=1).astype(np.float32)
 
 
 def decode_offset_clusters(
@@ -190,7 +204,6 @@ def main() -> None:
         junction_offset_clamp=offset_clamp,
     ).to(device)
     model.load_state_dict(checkpoint["model_state_dict"], strict=False)
-    model.eval()
 
     dataset = CplineFoldDataset(
         args.manifest,
@@ -214,7 +227,7 @@ def main() -> None:
         "fp_clusters": 0,
         "fn_clusters": 0,
     }
-    with torch.no_grad():
+    with torch.no_grad(), model_eval_with_batchnorm_mode(model, batchnorm_mode=args.batchnorm_mode):
         for index in range(len(dataset)):
             item = dataset[index]
             image = item["image"].unsqueeze(0).to(device)
@@ -254,6 +267,7 @@ def main() -> None:
     report = {
         "checkpoint": args.checkpoint.as_posix(),
         "offset_radius_px": args.offset_radius_px,
+        "batchnorm_mode": args.batchnorm_mode,
         "samples": totals["samples"],
         "close_pairs": totals["pairs"],
         "pair_resolution_peaks": rate(totals["pairs_resolved_peaks"], totals["pairs"]),
