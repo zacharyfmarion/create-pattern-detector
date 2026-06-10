@@ -122,9 +122,10 @@ def test_offset_cluster_decode_splits_fused_blob() -> None:
     probs = 0.99 * np.exp(
         -((grid_x - mid[0]) ** 2 + (grid_y - mid[1]) ** 2) / (2.0 * 3.33**2)
     ).astype(np.float32)
-    # Radius-normalized offsets pointing to the nearest of a/b.
+    # Radius-normalized offsets pointing to the nearest of a/b, supervised
+    # over the whole vote-collection range.
     offsets = np.zeros((2, size, size), dtype=np.float32)
-    ys, xs = np.where(probs >= 0.5)
+    ys, xs = np.where(probs >= 0.25)
     for y, x in zip(ys, xs):
         target = a if np.hypot(x - a[0], y - a[1]) <= np.hypot(x - b[0], y - b[1]) else b
         offsets[0, y, x] = (target[0] - x) / radius
