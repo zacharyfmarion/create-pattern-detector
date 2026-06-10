@@ -37,8 +37,11 @@ from src.models.cpline_net import CPLineNet
 PAIR_DISTANCE_PX = 8.0
 MATCH_TOLERANCE_PX = 1.5
 JUNCTION_THRESHOLD = 0.5
+# Sharper sigma-1.5 heatmaps leave only ~3 pixels above 0.5 per vertex, so the
+# vote pass collects from a lower threshold and accepts smaller clusters.
+VOTE_THRESHOLD = 0.3
 CLUSTER_BANDWIDTH_PX = 1.5
-MIN_CLUSTER_SUPPORT = 2.0
+MIN_CLUSTER_SUPPORT = 0.8
 NMS_RADIUS_PX = 2
 
 
@@ -117,7 +120,7 @@ def decode_offset_clusters(
     offset_scale: float,
 ) -> np.ndarray:
     """Offset-vote decode: threshold pixels vote at pixel + offset; mean-shift."""
-    ys, xs = np.where(probs >= JUNCTION_THRESHOLD)
+    ys, xs = np.where(probs >= VOTE_THRESHOLD)
     if len(xs) == 0:
         return np.zeros((0, 2), dtype=np.float32)
     votes_x = xs + offsets[0, ys, xs] * offset_scale
