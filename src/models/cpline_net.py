@@ -57,10 +57,12 @@ class CPLineNet(nn.Module):
         pretrained: bool = False,
         hidden_channels: int = 128,
         output_stride: int = 4,
+        v2_heads: bool = False,
     ) -> None:
         super().__init__()
         self.backbone_name = backbone
         self.output_stride = output_stride
+        self.v2_heads = v2_heads
         if backbone == "tiny":
             self.backbone = TinyHighResolutionBackbone(width=max(16, hidden_channels // 4))
         elif backbone.startswith("hrnet"):
@@ -86,6 +88,14 @@ class CPLineNet(nn.Module):
         self.junction_head = nn.Conv2d(hidden_channels, 1, kernel_size=1)
         self.offset_head = nn.Conv2d(hidden_channels, 2, kernel_size=1)
         self.assignment_head = nn.Conv2d(hidden_channels, 4, kernel_size=1)
+        if v2_heads:
+            self.non_crease_head = nn.Conv2d(hidden_channels, 1, kernel_size=1)
+            self.line_style_head = nn.Conv2d(hidden_channels, 4, kernel_size=1)
+            self.boundary_contact_head = nn.Conv2d(hidden_channels, 1, kernel_size=1)
+            self.vertex_type_head = nn.Conv2d(hidden_channels, 4, kernel_size=1)
+            self.boundary_side_head = nn.Conv2d(hidden_channels, 4, kernel_size=1)
+            self.boundary_offset_head = nn.Conv2d(hidden_channels, 2, kernel_size=1)
+            self.boundary_coord_head = nn.Conv2d(hidden_channels, 1, kernel_size=1)
 
     def forward(self, images: torch.Tensor, *, return_features: bool = False) -> dict[str, torch.Tensor]:
         target_size = images.shape[-2:]
@@ -103,6 +113,18 @@ class CPLineNet(nn.Module):
             "junction_offset": junction_offset,
             "assignment_logits": assignment_logits,
         }
+        if self.v2_heads:
+            outputs["non_crease_logits"] = self._upsample(self.non_crease_head(shared), target_size)
+            outputs["line_style_logits"] = self._upsample(self.line_style_head(shared), target_size)
+            outputs["boundary_contact_logits"] = self._upsample(self.boundary_contact_head(shared), target_size)
+            outputs["vertex_type_logits"] = self._upsample(self.vertex_type_head(shared), target_size)
+            outputs["boundary_side_logits"] = self._upsample(self.boundary_side_head(shared), target_size)
+            outputs["boundary_offset"] = torch.clamp(
+                self._upsample(self.boundary_offset_head(shared), target_size),
+                -0.5,
+                0.5,
+            )
+            outputs["boundary_coord"] = torch.sigmoid(self._upsample(self.boundary_coord_head(shared), target_size))
         if return_features:
             outputs["features"] = features
         return outputs
@@ -120,7 +142,14 @@ class CPLineNet(nn.Module):
                 + list(self.angle_head.parameters())
                 + list(self.junction_head.parameters())
                 + list(self.offset_head.parameters())
-                + list(self.assignment_head.parameters()),
+                + list(self.assignment_head.parameters())
+                + (list(self.non_crease_head.parameters()) if self.v2_heads else [])
+                + (list(self.line_style_head.parameters()) if self.v2_heads else [])
+                + (list(self.boundary_contact_head.parameters()) if self.v2_heads else [])
+                + (list(self.vertex_type_head.parameters()) if self.v2_heads else [])
+                + (list(self.boundary_side_head.parameters()) if self.v2_heads else [])
+                + (list(self.boundary_offset_head.parameters()) if self.v2_heads else [])
+                + (list(self.boundary_coord_head.parameters()) if self.v2_heads else []),
                 "lr": base_lr,
                 "name": "heads",
             },

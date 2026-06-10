@@ -22,20 +22,24 @@ from torch.utils.data import DataLoader
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 
-from src.data.cpline_augmentations import BASE_AUGMENT_PROFILES  # noqa: E402
+from src.data.cpline_augmentations import AUGMENT_PROFILES  # noqa: E402
 from src.data.cpline_dataset import CplineFoldDataset, cpline_collate  # noqa: E402
 from src.models import CPLineNet  # noqa: E402
 from src.models.batchnorm import BATCHNORM_MODES, model_eval_with_batchnorm_mode  # noqa: E402
 from src.vectorization import (  # noqa: E402
+    AttributedPlanarGraph,
     EdgeAssignmentConfig,
     PlanarGraphBuilder,
     PlanarGraphBuilderConfig,
     QualityReportConfig,
+    RepairAction,
     RepairConfig,
-    VectorizerEvidence,
+    SquareTopologyDecoder,
+    SquareTopologyDecoderConfig,
     attribute_graph_from_logits,
     build_quality_report,
     conservative_repair,
+    cpline_outputs_to_evidence,
     evaluate_graph,
 )
 from src.vectorization.metrics import GraphMetrics, metrics_from_results  # noqa: E402
@@ -73,7 +77,7 @@ def parse_args() -> argparse.Namespace:
         "--profiles",
         nargs="+",
         default=["clean", "line-style", "print-light", "dark-mode", "photo-light", "photo-dark"],
-        choices=BASE_AUGMENT_PROFILES,
+        choices=AUGMENT_PROFILES,
     )
     parser.add_argument(
         "--family-sampling",
@@ -88,6 +92,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--threshold", type=float, default=0.65)
     parser.add_argument(
+        "--decoder",
+        choices=["planar", "square"],
+        default="square",
+        help="Topology decoder to use. V2 defaults to the square-aware decoder.",
+    )
+    parser.add_argument(
         "--repair-near-endpoint-crossings",
         action=argparse.BooleanOptionalAction,
         default=False,
@@ -95,6 +105,20 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--max-visuals-per-profile", type=int, default=4)
     parser.add_argument("--infer-assignments", action="store_true")
+    parser.add_argument(
+        "--reconstruct-square-border-chain",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Enable deterministic square-frame border-chain reconstruction.",
+    )
+    parser.add_argument(
+        "--oracle-border-chain",
+        action="store_true",
+        help=(
+            "Evaluation-only ablation: replace predicted B edges with the "
+            "ground-truth border chain before metrics/reporting."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -109,13 +133,17 @@ def main() -> None:
 
     device = select_device(args.device)
     model = load_model(checkpoint, device)
-    builder = make_builder(
+    builder = make_decoder(
         args.image_size,
         args.threshold,
+        decoder=args.decoder,
         repair_near_endpoint_crossings=args.repair_near_endpoint_crossings,
     )
     assignment_config = EdgeAssignmentConfig()
-    repair_config = RepairConfig(image_size=args.image_size)
+    repair_config = RepairConfig(
+        image_size=args.image_size,
+        reconstruct_square_border_chain=args.reconstruct_square_border_chain,
+    )
     report_config = QualityReportConfig(image_size=args.image_size)
 
     rows: list[dict[str, Any]] = []
@@ -152,6 +180,7 @@ def main() -> None:
                     repair_config=repair_config,
                     report_config=report_config,
                     infer_assignments=args.infer_assignments,
+                    oracle_border_chain=args.oracle_border_chain,
                     image_size=args.image_size,
                     threshold=args.threshold,
                     profile=profile,
@@ -188,27 +217,25 @@ def evaluate_sample(
     model: torch.nn.Module,
     batch: dict[str, Any],
     device: torch.device,
-    builder: PlanarGraphBuilder,
+    builder: Any,
     assignment_config: EdgeAssignmentConfig,
     repair_config: RepairConfig,
     report_config: QualityReportConfig,
     infer_assignments: bool,
+    oracle_border_chain: bool,
     image_size: int,
     threshold: float,
     profile: str,
     sample_index: int,
 ) -> tuple[dict[str, Any], GraphMetrics, dict[str, Any]]:
     outputs = model(batch["image"].to(device))
-    line_prob = torch.sigmoid(outputs["line_logits"][0, 0]).detach().cpu().numpy()
-    angle = outputs["angle"][0].detach().cpu().permute(1, 2, 0).numpy()
-    junction_heatmap = torch.sigmoid(outputs["junction_logits"][0, 0]).detach().cpu().numpy()
-
-    evidence = VectorizerEvidence(
-        line_prob=line_prob.astype(np.float32),
-        angle=angle.astype(np.float32),
-        junction_heatmap=junction_heatmap.astype(np.float32),
-        assignment_labels=None,
+    evidence = cpline_outputs_to_evidence(
+        outputs,
+        batch_index=0,
+        line_threshold=threshold,
     )
+    line_prob = evidence.line_prob
+    junction_heatmap = evidence.junction_heatmap
     graph_result = builder.build(evidence)
     attributed = attribute_graph_from_logits(
         graph_result,
@@ -222,15 +249,27 @@ def evaluate_sample(
         config=repair_config,
         infer_assignments=infer_assignments,
     )
+    gt_graph = batch["graph"][0]
+    graph_for_report = repair.graph
+    repair_actions = list(repair.actions)
+    if oracle_border_chain:
+        graph_for_report, oracle_action = apply_oracle_border_chain(
+            graph_for_report,
+            gt_vertices=gt_graph["vertices"].numpy(),
+            gt_edges=gt_graph["edges"].numpy(),
+            gt_assignments=gt_graph["assignments"].numpy(),
+            image_size=image_size,
+        )
+        if oracle_action is not None:
+            repair_actions.append(oracle_action)
     report = build_quality_report(
-        repair.graph,
-        repair_actions=repair.actions,
+        graph_for_report,
+        repair_actions=repair_actions,
         config=report_config,
     )
 
-    gt_graph = batch["graph"][0]
     metrics_obj = evaluate_graph(
-        repair.graph.to_planar_result(),
+        graph_for_report.to_planar_result(),
         gt_vertices=gt_graph["vertices"].numpy(),
         gt_edges=gt_graph["edges"].numpy(),
         gt_assignments=gt_graph["assignments"].numpy(),
@@ -240,8 +279,8 @@ def evaluate_sample(
     meta = batch["meta"][0]
     status = report.status
     warning_codes = [warning.code for warning in report.warnings]
-    repair_codes = [action.code for action in repair.actions]
-    source_counts = Counter(repair.graph.assignment_source)
+    repair_codes = [action.code for action in repair_actions]
+    source_counts = Counter(graph_for_report.assignment_source)
     row = {
         "id": meta["id"],
         "sample_index": sample_index,
@@ -266,17 +305,138 @@ def evaluate_sample(
         "image": image,
         "line_prob": line_prob.astype(np.float32),
         "junction_heatmap": junction_heatmap.astype(np.float32),
-        "pred_vertices": repair.graph.pixel_vertices.copy(),
-        "pred_edges": repair.graph.edges_vertices.copy(),
-        "pred_assignments": repair.graph.edges_assignment.copy(),
-        "pred_sources": list(repair.graph.assignment_source),
-        "pred_confidence": repair.graph.assignment_confidence.copy(),
+        "pred_vertices": graph_for_report.pixel_vertices.copy(),
+        "pred_edges": graph_for_report.edges_vertices.copy(),
+        "pred_assignments": graph_for_report.edges_assignment.copy(),
+        "pred_sources": list(graph_for_report.assignment_source),
+        "pred_confidence": graph_for_report.assignment_confidence.copy(),
         "gt_vertices": gt_graph["vertices"].numpy(),
         "gt_edges": gt_graph["edges"].numpy(),
         "gt_assignments": gt_graph["assignments"].numpy(),
         "report": report.to_dict(),
     }
     return row, metrics_obj, payload
+
+
+def apply_oracle_border_chain(
+    graph: AttributedPlanarGraph,
+    *,
+    gt_vertices: np.ndarray,
+    gt_edges: np.ndarray,
+    gt_assignments: np.ndarray,
+    image_size: int,
+) -> tuple[AttributedPlanarGraph, RepairAction | None]:
+    """Evaluation-only upper bound: use GT boundary vertices/edges as the border chain."""
+    gt_vertices = np.asarray(gt_vertices, dtype=np.float32)
+    gt_edges = np.asarray(gt_edges, dtype=np.int64)
+    gt_assignments = np.asarray(gt_assignments, dtype=np.int8)
+    border_edge_indices = np.flatnonzero(gt_assignments == 2)
+    if len(border_edge_indices) == 0:
+        return graph, None
+
+    pixel_vertices = np.asarray(graph.pixel_vertices, dtype=np.float32).copy()
+    vertex_support = np.asarray(graph.vertex_support, dtype=np.float32).copy()
+    gt_to_pred: dict[int, int] = {}
+    added_vertices = 0
+    for gt_idx in sorted(set(int(v) for edge_idx in border_edge_indices for v in gt_edges[edge_idx])):
+        gt_point = gt_vertices[gt_idx]
+        exact_matches = np.flatnonzero(np.linalg.norm(pixel_vertices - gt_point, axis=1) <= 1e-4)
+        if len(exact_matches):
+            gt_to_pred[gt_idx] = int(exact_matches[0])
+            continue
+        gt_to_pred[gt_idx] = int(len(pixel_vertices))
+        pixel_vertices = np.vstack([pixel_vertices, gt_point])
+        vertex_support = np.concatenate([vertex_support, np.array([1.0], dtype=np.float32)])
+        added_vertices += 1
+
+    oracle_edges: list[tuple[int, int]] = []
+    seen_oracle_edges: set[tuple[int, int]] = set()
+    for edge_idx in border_edge_indices:
+        gt_v1, gt_v2 = (int(value) for value in gt_edges[int(edge_idx)])
+        pred_v1 = gt_to_pred[gt_v1]
+        pred_v2 = gt_to_pred[gt_v2]
+        if pred_v1 == pred_v2:
+            continue
+        key = (min(pred_v1, pred_v2), max(pred_v1, pred_v2))
+        if key in seen_oracle_edges:
+            continue
+        oracle_edges.append((pred_v1, pred_v2))
+        seen_oracle_edges.add(key)
+
+    keep_existing = np.flatnonzero(np.asarray(graph.edges_assignment) != 2)
+    kept_edges = np.asarray(graph.edges_vertices, dtype=np.int64)[keep_existing]
+    kept_assignments = np.asarray(graph.edges_assignment, dtype=np.int8)[keep_existing]
+    kept_support = np.asarray(graph.edge_support, dtype=np.float32)[keep_existing]
+    kept_confidence = np.asarray(graph.assignment_confidence, dtype=np.float32)[keep_existing]
+    kept_margin = np.asarray(graph.assignment_margin, dtype=np.float32)[keep_existing]
+    kept_source = [graph.assignment_source[int(idx)] for idx in keep_existing]
+
+    oracle_count = len(oracle_edges)
+    oracle_edge_array = np.asarray(oracle_edges, dtype=np.int64).reshape(oracle_count, 2)
+    edges_vertices = np.concatenate([oracle_edge_array, kept_edges], axis=0)
+    edges_assignment = np.concatenate(
+        [
+            np.full(oracle_count, 2, dtype=np.int8),
+            kept_assignments,
+        ],
+    )
+    edge_support = np.concatenate(
+        [
+            np.ones(oracle_count, dtype=np.float32),
+            kept_support,
+        ],
+    )
+    assignment_confidence = np.concatenate(
+        [
+            np.ones(oracle_count, dtype=np.float32),
+            kept_confidence,
+        ],
+    )
+    assignment_margin = np.concatenate(
+        [
+            np.ones(oracle_count, dtype=np.float32),
+            kept_margin,
+        ],
+    )
+    assignment_source = ["oracle" for _ in range(oracle_count)] + kept_source
+    probabilities = None
+    if graph.assignment_probabilities is not None:
+        oracle_probabilities = np.zeros((oracle_count, 4), dtype=np.float32)
+        oracle_probabilities[:, 2] = 1.0
+        probabilities = np.concatenate(
+            [
+                oracle_probabilities,
+                np.asarray(graph.assignment_probabilities, dtype=np.float32)[keep_existing],
+            ],
+            axis=0,
+        )
+
+    max_coord = max(float(image_size - 1), 1.0)
+    repaired = AttributedPlanarGraph(
+        vertices_coords=np.clip(pixel_vertices / max_coord, 0.0, 1.0).astype(np.float32),
+        edges_vertices=edges_vertices,
+        edges_assignment=edges_assignment,
+        edge_support=edge_support,
+        vertex_support=vertex_support,
+        pixel_vertices=pixel_vertices,
+        assignment_confidence=assignment_confidence,
+        assignment_margin=assignment_margin,
+        assignment_source=assignment_source,
+        assignment_probabilities=probabilities,
+        debug={**graph.debug, "oracle_border_chain": True},
+    )
+    action = RepairAction(
+        code="oracle_border_chain",
+        message="Replaced predicted border edges with the ground-truth border chain for eval-only ablation.",
+        edge_indices=list(range(oracle_count)),
+        vertex_indices=[gt_to_pred[idx] for idx in sorted(gt_to_pred)],
+        details={
+            "added_vertices": added_vertices,
+            "oracle_border_edges": oracle_count,
+            "removed_predicted_border_edges": int(np.sum(np.asarray(graph.edges_assignment) == 2)),
+        },
+    )
+    return repaired, action
 
 
 class ExampleSelector:
@@ -328,6 +488,7 @@ def load_model(checkpoint: Path, device: torch.device) -> CPLineNet:
         backbone=config.get("backbone", "hrnet_w18"),
         pretrained=False,
         hidden_channels=int(config.get("hidden_channels", 128)),
+        v2_heads=bool(config.get("v2_heads", False)),
     ).to(device)
     model.load_state_dict(loaded["model_state_dict"])
     model.eval()
@@ -349,12 +510,28 @@ def select_device(requested: str) -> torch.device:
     return device
 
 
-def make_builder(
+def make_decoder(
     image_size: int,
     threshold: float,
     *,
+    decoder: str = "square",
     repair_near_endpoint_crossings: bool = False,
-) -> PlanarGraphBuilder:
+) -> Any:
+    if decoder == "square":
+        return SquareTopologyDecoder(
+            SquareTopologyDecoderConfig(
+                image_size=image_size,
+                line_threshold=threshold,
+                hough_threshold=10,
+                hough_min_line_length=6,
+                hough_max_line_gap=4,
+                min_edge_support=0.45,
+                junction_threshold=0.20,
+                junction_nms_radius=2,
+                vertex_merge_px=max(1.0, 1.5 * image_size / 768),
+                line_vertex_distance_px=max(2.0, 4.0 * image_size / 768),
+            )
+        )
     return PlanarGraphBuilder(
         PlanarGraphBuilderConfig(
             image_size=image_size,
@@ -447,10 +624,13 @@ def build_summary(
         "threshold": args.threshold,
         "repair_near_endpoint_crossings": bool(args.repair_near_endpoint_crossings),
         "batchnorm_mode": args.batchnorm_mode,
+        "decoder": args.decoder,
         "image_size": args.image_size,
         "max_edges": args.max_edges,
         "seed": args.seed,
         "infer_assignments": bool(args.infer_assignments),
+        "reconstruct_square_border_chain": bool(args.reconstruct_square_border_chain),
+        "oracle_border_chain": bool(args.oracle_border_chain),
         "aggregate": aggregate,
         "by_profile": by_profile,
         "by_family": by_family,

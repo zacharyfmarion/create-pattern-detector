@@ -2,18 +2,18 @@ import { create } from "zustand";
 import type { EntitySelection, LayerKey, Layers } from "./types";
 
 export const DEFAULT_LAYERS: Layers = {
-  gtGraph: true,
+  gtGraph: false,
   predGraph: true,
-  missingEdges: true,
-  extraEdges: true,
-  ambiguousEdges: true,
-  weakEdges: true,
-  shortEdges: true,
-  crowdedVertices: true,
-  evenDegree: true,
-  kawasaki: true,
-  maekawa: true,
-  repairs: true,
+  missingEdges: false,
+  extraEdges: false,
+  ambiguousEdges: false,
+  weakEdges: false,
+  shortEdges: false,
+  crowdedVertices: false,
+  evenDegree: false,
+  kawasaki: false,
+  maekawa: false,
+  repairs: false,
   labels: false,
 };
 
@@ -31,7 +31,7 @@ interface InspectorState {
 }
 
 export const useInspectorStore = create<InspectorState>((set) => ({
-  activeStage: "stage5",
+  activeStage: "stage4",
   selectedExampleKey: null,
   selectedWarningCode: null,
   selectedEntity: null,

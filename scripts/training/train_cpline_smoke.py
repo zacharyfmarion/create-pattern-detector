@@ -14,8 +14,8 @@ import argparse
 import json
 import os
 import random
+import resource
 import sys
-from itertools import cycle
 from pathlib import Path
 from time import perf_counter
 from typing import Any
@@ -68,6 +68,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--batch-size", type=int, default=2)
     parser.add_argument("--num-workers", type=int, default=0)
     parser.add_argument(
+        "--no-pin-memory",
+        action="store_true",
+        help="Disable CUDA DataLoader pinned-memory staging. Useful for memory-capped pods.",
+    )
+    parser.add_argument(
+        "--log-memory",
+        action="store_true",
+        help="Include process and CUDA memory stats in logged train_step rows.",
+    )
+    parser.add_argument(
         "--graph-eval-count",
         type=int,
         default=None,
@@ -77,6 +87,14 @@ def parse_args() -> argparse.Namespace:
         "--skip-graph-eval",
         action="store_true",
         help="Skip PlanarGraphBuilder eval and write pixel-loss summaries only.",
+    )
+    parser.add_argument(
+        "--skip-final-eval",
+        action="store_true",
+        help=(
+            "Skip post-training pixel/vector validation. Useful for chunked "
+            "continuation runs where only a resumable checkpoint is needed."
+        ),
     )
     parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument(
@@ -103,8 +121,47 @@ def parse_args() -> argparse.Namespace:
         default=50,
         help="Write a JSONL training row every N steps. Set to 0 to disable.",
     )
+    parser.add_argument(
+        "--checkpoint-every",
+        type=int,
+        default=0,
+        help=(
+            "Write latest_train.pt every N steps during training. Set to 0 to "
+            "only save after the training loop finishes."
+        ),
+    )
     parser.add_argument("--backbone", type=str, default="tiny")
     parser.add_argument("--hidden-channels", type=int, default=128)
+    parser.add_argument(
+        "--v2-heads",
+        action="store_true",
+        help="Enable V2 auxiliary non-crease and line-style heads.",
+    )
+    parser.add_argument("--non-crease-weight", type=float, default=0.0)
+    parser.add_argument("--line-style-weight", type=float, default=0.0)
+    parser.add_argument("--boundary-contact-weight", type=float, default=0.0)
+    parser.add_argument("--boundary-contact-pos-weight", type=float, default=50.0)
+    parser.add_argument("--boundary-contact-corner-negative-weight", type=float, default=4.0)
+    parser.add_argument("--boundary-contact-hard-negative-weight", type=float, default=0.0)
+    parser.add_argument("--boundary-contact-hard-negative-ratio", type=float, default=0.02)
+    parser.add_argument("--boundary-contact-hard-negative-multiplier", type=float, default=8.0)
+    parser.add_argument("--boundary-contact-hard-negative-min-pixels", type=int, default=256)
+    parser.add_argument("--vertex-type-weight", type=float, default=0.0)
+    parser.add_argument(
+        "--vertex-type-class-weights",
+        type=str,
+        default="0.05,4.0,8.0,1.5",
+        help="Comma-separated class weights for V2 vertex background, corner, contact, interior.",
+    )
+    parser.add_argument("--vertex-type-focal-gamma", type=float, default=1.5)
+    parser.add_argument("--boundary-side-weight", type=float, default=0.0)
+    parser.add_argument("--boundary-offset-weight", type=float, default=0.0)
+    parser.add_argument("--boundary-coord-weight", type=float, default=0.0)
+    parser.add_argument(
+        "--use-v2-observed-assignment",
+        action="store_true",
+        help="Train assignment logits against observed labels, marking ambiguous M/V as U.",
+    )
     parser.add_argument(
         "--batchnorm-mode",
         choices=BATCHNORM_MODES,
@@ -119,6 +176,15 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=None,
         help="Optional checkpoint whose model weights initialize this run; optimizer starts fresh.",
+    )
+    parser.add_argument(
+        "--resume-checkpoint",
+        type=Path,
+        default=None,
+        help=(
+            "Optional checkpoint whose model and optimizer state resume this run. "
+            "The dataloader still starts a fresh local stream."
+        ),
     )
     parser.add_argument("--augment-profile", choices=AUGMENT_PROFILES, default="clean")
     parser.add_argument(
@@ -144,6 +210,13 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def parse_float_tuple(value: str, *, expected: int) -> tuple[float, ...]:
+    result = tuple(float(item.strip()) for item in value.split(",") if item.strip())
+    if len(result) != expected:
+        raise SystemExit(f"Expected {expected} comma-separated floats, got {len(result)}: {value}")
+    return result
+
+
 def select_device(requested: str) -> torch.device:
     if requested == "auto":
         if torch.backends.mps.is_available():
@@ -166,7 +239,7 @@ def seed_everything(seed: int) -> None:
 
 
 def move_targets(batch: dict[str, Any], device: torch.device) -> dict[str, torch.Tensor]:
-    return {
+    targets = {
         "line_prob": batch["line_prob"].to(device),
         "angle": batch["angle"].to(device),
         "junction_heatmap": batch["junction_heatmap"].to(device),
@@ -174,10 +247,100 @@ def move_targets(batch: dict[str, Any], device: torch.device) -> dict[str, torch
         "junction_mask": batch["junction_mask"].to(device),
         "assignment": batch["assignment"].to(device),
     }
+    for key in [
+        "v2_non_crease_mask",
+        "v2_target_line_mask",
+        "v2_line_style",
+        "v2_observed_assignment",
+        "v2_boundary_contact_heatmap",
+        "v2_vertex_type",
+        "v2_boundary_side",
+        "v2_boundary_offset",
+        "v2_boundary_mask",
+        "v2_boundary_coord",
+    ]:
+        if key in batch:
+            targets[key] = batch[key].to(device)
+    return targets
 
 
 def scalar_losses(losses: dict[str, torch.Tensor]) -> dict[str, float]:
     return {key: float(value.detach().cpu()) for key, value in losses.items()}
+
+
+def process_rss_mb() -> float:
+    status_path = Path("/proc/self/status")
+    if status_path.exists():
+        for line in status_path.read_text(encoding="utf-8").splitlines():
+            if line.startswith("VmRSS:"):
+                parts = line.split()
+                if len(parts) >= 2:
+                    return float(parts[1]) / 1024.0
+    value = float(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
+    if sys.platform == "darwin":
+        return value / (1024.0 * 1024.0)
+    return value / 1024.0
+
+
+def process_max_rss_mb() -> float:
+    value = float(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
+    if sys.platform == "darwin":
+        return value / (1024.0 * 1024.0)
+    return value / 1024.0
+
+
+def memory_stats(device: torch.device) -> dict[str, float]:
+    stats = {
+        "process_rss_mb": process_rss_mb(),
+        "process_max_rss_mb": process_max_rss_mb(),
+    }
+    if device.type == "cuda":
+        stats.update(
+            {
+                "cuda_allocated_mb": float(torch.cuda.memory_allocated(device)) / (1024.0 * 1024.0),
+                "cuda_reserved_mb": float(torch.cuda.memory_reserved(device)) / (1024.0 * 1024.0),
+                "cuda_max_allocated_mb": float(torch.cuda.max_memory_allocated(device))
+                / (1024.0 * 1024.0),
+                "cuda_max_reserved_mb": float(torch.cuda.max_memory_reserved(device))
+                / (1024.0 * 1024.0),
+            }
+        )
+    return stats
+
+
+def next_training_batch(loader: DataLoader, iterator: Any) -> tuple[dict[str, Any], Any]:
+    try:
+        return next(iterator), iterator
+    except StopIteration:
+        iterator = iter(loader)
+        return next(iterator), iterator
+
+
+def save_training_checkpoint(
+    output_dir: Path,
+    *,
+    model: CPLineNet,
+    optimizer: torch.optim.Optimizer,
+    run_config: dict[str, Any],
+    history: list[dict[str, float]],
+    step: int,
+    elapsed_seconds: float,
+    filename: str = "latest_train.pt",
+) -> None:
+    tmp_path = output_dir / f".{filename}.tmp"
+    final_path = output_dir / filename
+    torch.save(
+        {
+            "model_state_dict": model.state_dict(),
+            "optimizer_state_dict": optimizer.state_dict(),
+            "config": {**run_config, "checkpoint_step": step},
+            "history": history,
+            "checkpoint_step": step,
+            "elapsed_seconds": elapsed_seconds,
+        },
+        tmp_path,
+    )
+    tmp_path.replace(final_path)
 
 
 def train(args: argparse.Namespace) -> dict[str, Any]:
@@ -223,7 +386,7 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
             augment_profile=args.eval_augment_profile,
             seed=args.seed + 2,
         )
-    pin_memory = device.type == "cuda"
+    pin_memory = device.type == "cuda" and not args.no_pin_memory
     train_loader = DataLoader(
         train_dataset,
         batch_size=args.batch_size,
@@ -263,22 +426,51 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         backbone=args.backbone,
         pretrained=False,
         hidden_channels=args.hidden_channels,
+        v2_heads=args.v2_heads,
     ).to(device)
+    if args.init_checkpoint is not None and args.resume_checkpoint is not None:
+        raise ValueError("Use only one of --init-checkpoint or --resume-checkpoint.")
+
     init_checkpoint = args.init_checkpoint
-    if init_checkpoint is not None:
-        init_checkpoint = (
-            init_checkpoint if init_checkpoint.is_absolute() else REPO_ROOT / init_checkpoint
+    resume_checkpoint = args.resume_checkpoint
+    checkpoint_path = init_checkpoint or resume_checkpoint
+    loaded_checkpoint = None
+    if checkpoint_path is not None:
+        checkpoint_path = (
+            checkpoint_path if checkpoint_path.is_absolute() else REPO_ROOT / checkpoint_path
         )
-        loaded = torch.load(init_checkpoint, map_location=device, weights_only=False)
-        model.load_state_dict(loaded["model_state_dict"])
+        loaded_checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+        loaded = loaded_checkpoint
+        model.load_state_dict(loaded["model_state_dict"], strict=not args.v2_heads)
     criterion = CPLineLoss(
         CPLineLossConfig(
             line_hard_negative_weight=args.line_hard_negative_weight,
             line_hard_negative_ratio=args.line_hard_negative_ratio,
             line_hard_negative_multiplier=args.line_hard_negative_multiplier,
+            non_crease_weight=args.non_crease_weight,
+            line_style_weight=args.line_style_weight,
+            use_observed_assignment_target=args.use_v2_observed_assignment,
+            boundary_contact_weight=args.boundary_contact_weight,
+            boundary_contact_pos_weight=args.boundary_contact_pos_weight,
+            boundary_contact_corner_negative_weight=args.boundary_contact_corner_negative_weight,
+            boundary_contact_hard_negative_weight=args.boundary_contact_hard_negative_weight,
+            boundary_contact_hard_negative_ratio=args.boundary_contact_hard_negative_ratio,
+            boundary_contact_hard_negative_multiplier=args.boundary_contact_hard_negative_multiplier,
+            boundary_contact_hard_negative_min_pixels=args.boundary_contact_hard_negative_min_pixels,
+            vertex_type_weight=args.vertex_type_weight,
+            vertex_type_class_weights=parse_float_tuple(args.vertex_type_class_weights, expected=4),
+            vertex_type_focal_gamma=args.vertex_type_focal_gamma,
+            boundary_side_weight=args.boundary_side_weight,
+            boundary_offset_weight=args.boundary_offset_weight,
+            boundary_coord_weight=args.boundary_coord_weight,
         )
     )
     optimizer = torch.optim.AdamW(model.get_param_groups(args.lr), lr=args.lr, weight_decay=1e-4)
+    if resume_checkpoint is not None and loaded_checkpoint is not None:
+        optimizer_state = loaded_checkpoint.get("optimizer_state_dict")
+        if optimizer_state is None:
+            raise ValueError(f"Checkpoint has no optimizer_state_dict: {checkpoint_path}")
+        optimizer.load_state_dict(optimizer_state)
 
     run_config = {
         "device": str(device),
@@ -287,14 +479,24 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         "val_samples": len(val_dataset),
         "image_size": args.image_size,
         "batch_size": args.batch_size,
+        "num_workers": args.num_workers,
+        "pin_memory": pin_memory,
         "max_steps": args.max_steps,
         "log_every": args.log_every,
+        "log_memory": args.log_memory,
+        "checkpoint_every": args.checkpoint_every,
         "graph_eval_count": args.graph_eval_count,
         "skip_graph_eval": args.skip_graph_eval,
+        "skip_final_eval": args.skip_final_eval,
         "backbone": args.backbone,
         "hidden_channels": args.hidden_channels,
+        "v2_heads": args.v2_heads,
         "batchnorm_mode": args.batchnorm_mode,
         "init_checkpoint": init_checkpoint.as_posix() if init_checkpoint is not None else None,
+        "resume_checkpoint": (
+            resume_checkpoint.as_posix() if resume_checkpoint is not None else None
+        ),
+        "loaded_checkpoint": checkpoint_path.as_posix() if checkpoint_path is not None else None,
         "augment_profile": augment_profile,
         "eval_augment_profile": args.eval_augment_profile,
         "render_noise": args.render_noise,
@@ -304,6 +506,22 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         "line_hard_negative_weight": args.line_hard_negative_weight,
         "line_hard_negative_ratio": args.line_hard_negative_ratio,
         "line_hard_negative_multiplier": args.line_hard_negative_multiplier,
+        "non_crease_weight": args.non_crease_weight,
+        "line_style_weight": args.line_style_weight,
+        "boundary_contact_weight": args.boundary_contact_weight,
+        "boundary_contact_pos_weight": args.boundary_contact_pos_weight,
+        "boundary_contact_corner_negative_weight": args.boundary_contact_corner_negative_weight,
+        "boundary_contact_hard_negative_weight": args.boundary_contact_hard_negative_weight,
+        "boundary_contact_hard_negative_ratio": args.boundary_contact_hard_negative_ratio,
+        "boundary_contact_hard_negative_multiplier": args.boundary_contact_hard_negative_multiplier,
+        "boundary_contact_hard_negative_min_pixels": args.boundary_contact_hard_negative_min_pixels,
+        "vertex_type_weight": args.vertex_type_weight,
+        "vertex_type_class_weights": parse_float_tuple(args.vertex_type_class_weights, expected=4),
+        "vertex_type_focal_gamma": args.vertex_type_focal_gamma,
+        "boundary_side_weight": args.boundary_side_weight,
+        "boundary_offset_weight": args.boundary_offset_weight,
+        "boundary_coord_weight": args.boundary_coord_weight,
+        "use_v2_observed_assignment": args.use_v2_observed_assignment,
         "seed": args.seed,
     }
     (output_dir / "run_config.json").write_text(
@@ -316,10 +534,10 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
     model.train()
     history: list[dict[str, float]] = []
     start = perf_counter()
-    iterator = cycle(train_loader)
+    iterator = iter(train_loader)
     progress = tqdm(range(1, args.max_steps + 1), desc="CPLineNet local smoke")
     for step in progress:
-        batch = next(iterator)
+        batch, iterator = next_training_batch(train_loader, iterator)
         images = batch["image"].to(device)
         targets = move_targets(batch, device)
         optimizer.zero_grad(set_to_none=True)
@@ -335,9 +553,35 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
             step == 1 or step % args.log_every == 0 or step == args.max_steps
         ):
             log_row = {**row, "elapsed_seconds": perf_counter() - start}
+            if args.log_memory:
+                log_row.update(memory_stats(device))
             with history_path.open("a", encoding="utf-8") as handle:
                 handle.write(json.dumps(log_row) + "\n")
             print(json.dumps({"event": "train_step", **log_row}), flush=True)
+        if args.checkpoint_every > 0 and (
+            step % args.checkpoint_every == 0 or step == args.max_steps
+        ):
+            elapsed_seconds = perf_counter() - start
+            save_training_checkpoint(
+                output_dir,
+                model=model,
+                optimizer=optimizer,
+                run_config=run_config,
+                history=history,
+                step=step,
+                elapsed_seconds=elapsed_seconds,
+            )
+            print(
+                json.dumps(
+                    {
+                        "event": "training_checkpoint",
+                        "step": step,
+                        "path": (output_dir / "latest_train.pt").as_posix(),
+                        "elapsed_seconds": elapsed_seconds,
+                    }
+                ),
+                flush=True,
+            )
 
     torch.save(
         {
@@ -348,6 +592,37 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         },
         output_dir / "post_train.pt",
     )
+    if args.skip_final_eval:
+        checkpoint = {
+            "model_state_dict": model.state_dict(),
+            "optimizer_state_dict": optimizer.state_dict(),
+            "config": run_config,
+            "history": history,
+            "val_loss": None,
+            "aug_val_loss": None,
+            "train_graph_sweep": None,
+            "val_graph_sweep": None,
+            "aug_val_graph_sweep": None,
+        }
+        torch.save(checkpoint, output_dir / "latest.pt")
+        summary = {
+            **run_config,
+            "elapsed_seconds": perf_counter() - start,
+            "first_train_loss": history[0]["total"] if history else None,
+            "last_train_loss": history[-1]["total"] if history else None,
+            "val_loss": None,
+            "aug_val_loss": None,
+            "train_graph_sweep": None,
+            "val_graph_sweep": None,
+            "aug_val_graph_sweep": None,
+            "checkpoint": (output_dir / "latest.pt").as_posix(),
+            "training_checkpoint": (output_dir / "latest_train.pt").as_posix(),
+        }
+        (output_dir / "summary.json").write_text(
+            json.dumps(summary, indent=2) + "\n", encoding="utf-8"
+        )
+        print(json.dumps(summary, indent=2), flush=True)
+        return summary
 
     val_loss = evaluate_pixel_loss(
         model,

@@ -18,9 +18,17 @@ STATUS_VALUES = ("valid", "repaired", "ambiguous", "outside_v1_envelope", "faile
 @dataclass(frozen=True)
 class QualityReportConfig:
     image_size: int | None = None
+    square_compile_gates: bool = True
+    square_corner_tolerance_px: float = 3.0
+    square_boundary_tolerance_px: float = 3.0
+    square_aspect_tolerance: float = 0.03
     weak_edge_support_threshold: float = 0.40
     short_edge_warning_px: float = 8.0
     crowded_junction_px: float = 8.0
+    dense_edge_count_warning: int = 450
+    dense_vertex_count_warning: int = 350
+    dense_short_edge_fraction: float = 0.18
+    dense_crowded_vertex_fraction: float = 0.18
     low_assignment_confidence: float = 0.60
     low_assignment_margin: float = 0.12
     kawasaki_tolerance_radians: float = 0.12
@@ -70,6 +78,7 @@ def build_quality_report(
     warnings: list[QualityWarning] = []
 
     warnings.extend(_structural_warnings(graph, structural))
+    warnings.extend(_square_compile_gate_warnings(graph, cfg))
     warnings.extend(_support_and_envelope_warnings(graph, cfg))
     warnings.extend(_assignment_warnings(graph, cfg))
     warnings.extend(_origami_constraint_warnings(graph, cfg))
@@ -196,7 +205,55 @@ def _support_and_envelope_warnings(
                 details={"threshold_px": cfg.crowded_junction_px},
             )
         )
+    warnings.extend(_density_warnings(graph, cfg, lengths=lengths, crowded=crowded))
     return warnings
+
+
+def _density_warnings(
+    graph: AttributedPlanarGraph,
+    cfg: QualityReportConfig,
+    *,
+    lengths: np.ndarray,
+    crowded: set[int],
+) -> list[QualityWarning]:
+    if graph.num_edges == 0:
+        return []
+
+    short_count = int(np.count_nonzero(lengths < cfg.short_edge_warning_px))
+    crowded_count = int(len(crowded))
+    short_fraction = short_count / float(max(1, graph.num_edges))
+    crowded_fraction = crowded_count / float(max(1, graph.num_vertices))
+    dense = (
+        graph.num_edges >= cfg.dense_edge_count_warning
+        or graph.num_vertices >= cfg.dense_vertex_count_warning
+        or short_fraction >= cfg.dense_short_edge_fraction
+        or crowded_fraction >= cfg.dense_crowded_vertex_fraction
+    )
+    if not dense:
+        return []
+
+    return [
+        QualityWarning(
+            code="dense_geometry",
+            message=(
+                "The predicted graph is dense enough that it may be outside the "
+                "Phase 3 V1 1024px readable-geometry envelope."
+            ),
+            severity="warning",
+            details={
+                "edge_count": int(graph.num_edges),
+                "vertex_count": int(graph.num_vertices),
+                "edge_count_threshold": int(cfg.dense_edge_count_warning),
+                "vertex_count_threshold": int(cfg.dense_vertex_count_warning),
+                "short_edge_count": short_count,
+                "short_edge_fraction": short_fraction,
+                "short_edge_fraction_threshold": cfg.dense_short_edge_fraction,
+                "crowded_vertex_count": crowded_count,
+                "crowded_vertex_fraction": crowded_fraction,
+                "crowded_vertex_fraction_threshold": cfg.dense_crowded_vertex_fraction,
+            },
+        )
+    ]
 
 
 def _assignment_warnings(
@@ -311,7 +368,19 @@ def _status_from_warnings(
         "zero_length_edges",
         "illegal_crossings",
     }
-    outside_codes = {"incomplete_border", "very_short_edges", "crowded_junctions", "weak_edges"}
+    outside_codes = {
+        "incomplete_border",
+        "missing_square_border",
+        "missing_square_corners",
+        "non_square_border_frame",
+        "non_square_border_edges",
+        "invalid_border_cycle",
+        "boundary_contact_not_split",
+        "very_short_edges",
+        "crowded_junctions",
+        "weak_edges",
+        "dense_geometry",
+    }
     ambiguous_codes = {
         "low_confidence_assignments",
         "unknown_assignments",
@@ -333,6 +402,252 @@ def _status_from_warnings(
 def _assignment_counts(assignments: np.ndarray) -> dict[str, int]:
     names = {0: "M", 1: "V", 2: "B", 3: "U"}
     return {name: int(np.sum(assignments == idx)) for idx, name in names.items()}
+
+
+def _square_compile_gate_warnings(
+    graph: AttributedPlanarGraph,
+    cfg: QualityReportConfig,
+) -> list[QualityWarning]:
+    """Warn when a parseable graph is not yet a clean square-CP topology."""
+    if not cfg.square_compile_gates or cfg.image_size is None or graph.num_vertices == 0:
+        return []
+
+    vertices = np.asarray(graph.pixel_vertices, dtype=np.float32)
+    edges = np.asarray(graph.edges_vertices, dtype=np.int64)
+    assignments = np.asarray(graph.edges_assignment, dtype=np.int8)
+    boundary_tol = float(max(0.5, cfg.square_boundary_tolerance_px))
+    corner_tol = float(max(boundary_tol, cfg.square_corner_tolerance_px))
+    warnings: list[QualityWarning] = []
+
+    border_indices = np.where(assignments == 2)[0]
+    if len(border_indices) == 0:
+        warnings.append(
+            QualityWarning(
+                code="missing_square_border",
+                message="No deterministic square border cycle is present.",
+                severity="warning",
+            )
+        )
+        return warnings
+
+    frame = _square_gate_frame(vertices, edges, border_indices)
+    if frame is None:
+        return warnings
+    left, top, right, bottom = frame
+    width = right - left
+    height = bottom - top
+    side_length = max(1.0, width, height)
+    boundary_tol = max(boundary_tol, 0.01 * side_length)
+    corner_tol = max(corner_tol, boundary_tol)
+    aspect_error = abs(width - height) / side_length
+    if aspect_error > cfg.square_aspect_tolerance:
+        warnings.append(
+            QualityWarning(
+                code="non_square_border_frame",
+                message="The inferred border frame is rectangular rather than square.",
+                severity="warning",
+                details={
+                    "width_px": width,
+                    "height_px": height,
+                    "aspect_error": aspect_error,
+                    "tolerance": cfg.square_aspect_tolerance,
+                },
+            )
+        )
+
+    missing_corners: list[str] = []
+    for name, corner in _square_corner_points(frame).items():
+        if not _has_vertex_near(vertices, corner, corner_tol):
+            missing_corners.append(name)
+    if missing_corners:
+        warnings.append(
+            QualityWarning(
+                code="missing_square_corners",
+                message="One or more square frame corners are not represented as graph vertices.",
+                severity="warning",
+                details={"corners": missing_corners, "tolerance_px": corner_tol},
+            )
+        )
+
+    border_degrees = [0 for _ in range(graph.num_vertices)]
+    non_border_incident = [False for _ in range(graph.num_vertices)]
+    border_vertices: set[int] = set()
+    border_adjacency: dict[int, set[int]] = {}
+    non_square_edges: list[int] = []
+    for edge_idx, edge in enumerate(edges):
+        v1, v2 = int(edge[0]), int(edge[1])
+        if not (0 <= v1 < graph.num_vertices and 0 <= v2 < graph.num_vertices):
+            continue
+        if int(assignments[edge_idx]) == 2:
+            border_degrees[v1] += 1
+            border_degrees[v2] += 1
+            border_vertices.update((v1, v2))
+            border_adjacency.setdefault(v1, set()).add(v2)
+            border_adjacency.setdefault(v2, set()).add(v1)
+            if _common_frame_side(vertices[v1], vertices[v2], frame, boundary_tol) is None:
+                non_square_edges.append(int(edge_idx))
+        else:
+            non_border_incident[v1] = True
+            non_border_incident[v2] = True
+
+    if non_square_edges:
+        warnings.append(
+            QualityWarning(
+                code="non_square_border_edges",
+                message="Some border-labeled edges are not axis-aligned frame-side segments.",
+                severity="warning",
+                edge_indices=non_square_edges,
+                details={"tolerance_px": boundary_tol},
+            )
+        )
+
+    if border_vertices:
+        bad_degree_vertices = [
+            idx for idx in sorted(border_vertices) if border_degrees[idx] != 2
+        ]
+        disconnected = not _border_vertices_are_connected(border_vertices, border_adjacency)
+        if bad_degree_vertices or disconnected:
+            warnings.append(
+                QualityWarning(
+                    code="invalid_border_cycle",
+                    message="Border edges do not form one closed square boundary cycle.",
+                    severity="warning",
+                    vertex_indices=bad_degree_vertices,
+                    details={
+                        "disconnected": disconnected,
+                        "bad_degree_vertices": bad_degree_vertices,
+                    },
+                )
+            )
+
+    unsplit_contacts = [
+        idx
+        for idx, point in enumerate(vertices)
+        if non_border_incident[idx]
+        and _point_on_frame(point, frame, boundary_tol)
+        and border_degrees[idx] < 2
+    ]
+    if unsplit_contacts:
+        warnings.append(
+            QualityWarning(
+                code="boundary_contact_not_split",
+                message="A crease reaches the square boundary without splitting the border cycle at that contact.",
+                severity="warning",
+                vertex_indices=unsplit_contacts,
+                details={"tolerance_px": boundary_tol},
+            )
+        )
+
+    return warnings
+
+
+def _square_gate_frame(
+    vertices: np.ndarray,
+    edges: np.ndarray,
+    border_indices: np.ndarray,
+) -> tuple[float, float, float, float] | None:
+    border_vertices = sorted(
+        {
+            int(vertex_idx)
+            for edge_idx in border_indices
+            for vertex_idx in edges[int(edge_idx)]
+            if 0 <= int(vertex_idx) < len(vertices)
+        }
+    )
+    if not border_vertices:
+        return None
+    points = vertices[np.asarray(border_vertices, dtype=np.int64)]
+    left = float(np.min(points[:, 0]))
+    right = float(np.max(points[:, 0]))
+    top = float(np.min(points[:, 1]))
+    bottom = float(np.max(points[:, 1]))
+    if right - left <= 1e-6 or bottom - top <= 1e-6:
+        return None
+    return (left, top, right, bottom)
+
+
+def _square_corner_points(frame: tuple[float, float, float, float]) -> dict[str, np.ndarray]:
+    left, top, right, bottom = frame
+    return {
+        "top_left": np.asarray([left, top], dtype=np.float32),
+        "top_right": np.asarray([right, top], dtype=np.float32),
+        "bottom_right": np.asarray([right, bottom], dtype=np.float32),
+        "bottom_left": np.asarray([left, bottom], dtype=np.float32),
+    }
+
+
+def _has_vertex_near(vertices: np.ndarray, point: np.ndarray, tolerance: float) -> bool:
+    if len(vertices) == 0:
+        return False
+    distances = np.linalg.norm(vertices - point[None, :], axis=1)
+    return bool(float(np.min(distances)) <= tolerance)
+
+
+def _point_on_frame(
+    point: np.ndarray,
+    frame: tuple[float, float, float, float],
+    tolerance: float,
+) -> bool:
+    left, top, right, bottom = frame
+    x, y = float(point[0]), float(point[1])
+    return bool(
+        abs(x - left) <= tolerance
+        or abs(y - top) <= tolerance
+        or abs(x - right) <= tolerance
+        or abs(y - bottom) <= tolerance
+    )
+
+
+def _point_on_side(
+    point: np.ndarray,
+    side: str,
+    frame: tuple[float, float, float, float],
+    tolerance: float,
+) -> bool:
+    left, top, right, bottom = frame
+    x, y = float(point[0]), float(point[1])
+    if side == "top":
+        return abs(y - top) <= tolerance and left - tolerance <= x <= right + tolerance
+    if side == "right":
+        return abs(x - right) <= tolerance and top - tolerance <= y <= bottom + tolerance
+    if side == "bottom":
+        return abs(y - bottom) <= tolerance and left - tolerance <= x <= right + tolerance
+    if side == "left":
+        return abs(x - left) <= tolerance and top - tolerance <= y <= bottom + tolerance
+    return False
+
+
+def _common_frame_side(
+    p0: np.ndarray,
+    p1: np.ndarray,
+    frame: tuple[float, float, float, float],
+    tolerance: float,
+) -> str | None:
+    for side in ("top", "right", "bottom", "left"):
+        if _point_on_side(p0, side, frame, tolerance) and _point_on_side(
+            p1, side, frame, tolerance
+        ):
+            return side
+    return None
+
+
+def _border_vertices_are_connected(
+    border_vertices: set[int],
+    adjacency: dict[int, set[int]],
+) -> bool:
+    if not border_vertices:
+        return False
+    start = next(iter(border_vertices))
+    seen = {start}
+    stack = [start]
+    while stack:
+        current = stack.pop()
+        for neighbor in adjacency.get(current, set()):
+            if neighbor in seen:
+                continue
+            seen.add(neighbor)
+            stack.append(neighbor)
+    return seen == border_vertices
 
 
 def _edge_lengths(graph: AttributedPlanarGraph) -> np.ndarray:

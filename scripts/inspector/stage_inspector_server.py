@@ -35,17 +35,19 @@ from src.vectorization import (  # noqa: E402
     PlanarGraphBuilderConfig,
     QualityReportConfig,
     RepairConfig,
-    VectorizerEvidence,
+    SquareTopologyDecoder,
+    SquareTopologyDecoderConfig,
     attribute_graph_from_logits,
     build_quality_report,
     build_stage4_diagnostic_payload,
     conservative_repair,
+    cpline_outputs_to_evidence,
     evaluate_graph,
 )
 
-DEFAULT_EVAL_DIR = Path("visualizations/stage4_checkpoint_eval/phase3_stage4_1024_n24x6")
+DEFAULT_EVAL_DIR = Path("visualizations/v2_square_topology_inspector/eval")
 DEFAULT_STAGE5_EVAL_DIR = Path("visualizations/stage5_scraped_inspector/eval")
-DEFAULT_CHECKPOINT = Path("checkpoints/runpod_phase3_curriculum/stage-balanced/latest.pt")
+DEFAULT_CHECKPOINT = Path("checkpoints/runpod_v2_replay_correction_full_4000ada/full/latest.pt")
 DEFAULT_MANIFEST = Path("data/generated/synthetic/cp_training_mix_v1/raw-manifest.jsonl")
 DEFAULT_DIST = Path("web/stage-inspector/dist")
 DEFAULT_CACHE = Path("visualizations/stage4_inspector/cache")
@@ -246,9 +248,10 @@ class StageInspectorService:
             **_known_config_overrides(params.get("report") or {}, QualityReportConfig),
         )
         assignment_config = EdgeAssignmentConfig()
-        builder = make_builder(
+        builder = make_decoder(
             int(summary.get("image_size", 1024)),
             threshold,
+            decoder=str(summary.get("decoder", "square")),
             repair_near_endpoint_crossings=repair_near_endpoint_crossings,
         )
         batch = self._batch_for_row(row)
@@ -258,15 +261,12 @@ class StageInspectorService:
             batchnorm_mode=str(summary.get("batchnorm_mode", "batch-stats")),
         ):
             outputs = model(batch["image"].to(device))
-            line_prob = torch.sigmoid(outputs["line_logits"][0, 0]).detach().cpu().numpy()
-            angle = outputs["angle"][0].detach().cpu().permute(1, 2, 0).numpy()
-            junction_heatmap = torch.sigmoid(outputs["junction_logits"][0, 0]).detach().cpu().numpy()
-            evidence = VectorizerEvidence(
-                line_prob=line_prob.astype(np.float32),
-                angle=angle.astype(np.float32),
-                junction_heatmap=junction_heatmap.astype(np.float32),
-                assignment_labels=None,
+            evidence = cpline_outputs_to_evidence(
+                outputs,
+                batch_index=0,
+                line_threshold=threshold,
             )
+            line_prob = evidence.line_prob
             graph_result = builder.build(evidence)
             attributed = attribute_graph_from_logits(
                 graph_result,
@@ -325,6 +325,12 @@ class StageInspectorService:
             report=report_dict,
             metrics=metrics,
             vertex_tolerance_px=vertex_tolerance_px,
+            line_prob=evidence.line_prob,
+            junction_heatmap=evidence.junction_heatmap,
+            boundary_contact_heatmap=evidence.boundary_contact_heatmap,
+            non_crease_prob=evidence.non_crease_prob,
+            line_style_prob=evidence.line_style_prob,
+            assignment_labels=evidence.assignment_labels,
         )
         diagnostic["recomputeParams"] = {
             "threshold": threshold,
@@ -377,6 +383,7 @@ class StageInspectorService:
             backbone=config.get("backbone", "hrnet_w18"),
             pretrained=False,
             hidden_channels=int(config.get("hidden_channels", 128)),
+            v2_heads=bool(config.get("v2_heads", False)),
         ).to(device)
         model.load_state_dict(loaded["model_state_dict"])
         model.eval()
@@ -629,12 +636,28 @@ class HttpError(Exception):
         self.message = message
 
 
-def make_builder(
+def make_decoder(
     image_size: int,
     threshold: float,
     *,
+    decoder: str = "square",
     repair_near_endpoint_crossings: bool = False,
-) -> PlanarGraphBuilder:
+) -> Any:
+    if decoder == "square":
+        return SquareTopologyDecoder(
+            SquareTopologyDecoderConfig(
+                image_size=image_size,
+                line_threshold=threshold,
+                hough_threshold=10,
+                hough_min_line_length=6,
+                hough_max_line_gap=4,
+                min_edge_support=0.45,
+                junction_threshold=0.20,
+                junction_nms_radius=2,
+                vertex_merge_px=max(1.0, 1.5 * image_size / 768),
+                line_vertex_distance_px=max(2.0, 4.0 * image_size / 768),
+            )
+        )
     return PlanarGraphBuilder(
         PlanarGraphBuilderConfig(
             image_size=image_size,
@@ -694,7 +717,7 @@ def stage_payload(*, stage5_available: bool) -> dict[str, Any]:
             {
                 "id": "stage4",
                 "label": "Stage 4",
-                "title": "Assignments, Repair, Reports",
+                "title": "Square Topology, Assignments, Reports",
                 "status": "implemented",
             },
             {
@@ -719,7 +742,7 @@ def _example_key(row: dict[str, Any]) -> str:
 
 def _cache_key(row: dict[str, Any], params: dict[str, Any]) -> str:
     base = _example_key(row)
-    normalized = json.dumps({"version": 2, "params": params}, sort_keys=True, default=str)
+    normalized = json.dumps({"version": 5, "params": params}, sort_keys=True, default=str)
     suffix = hashlib.sha1(normalized.encode("utf-8")).hexdigest()[:12]
     return f"{base}__{suffix}"
 

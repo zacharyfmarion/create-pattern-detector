@@ -19,6 +19,13 @@ class VectorizerEvidence:
     angle: np.ndarray | None = None
     junction_heatmap: np.ndarray | None = None
     assignment_labels: np.ndarray | None = None
+    non_crease_prob: np.ndarray | None = None
+    line_style_prob: np.ndarray | None = None
+    boundary_contact_heatmap: np.ndarray | None = None
+    vertex_type_prob: np.ndarray | None = None
+    boundary_side_prob: np.ndarray | None = None
+    boundary_offset: np.ndarray | None = None
+    boundary_coord: np.ndarray | None = None
 
 
 @dataclass(frozen=True)
@@ -48,6 +55,11 @@ class PlanarGraphBuilderConfig:
     edge_sample_step_px: float = 1.0
     edge_sample_width_px: int = 3
     min_edge_support: float = 0.58
+    non_crease_suppression_threshold: float = 0.65
+    non_crease_strong_line_threshold: float = 0.85
+    non_crease_suppression_scale: float = 0.15
+    boundary_contact_threshold: float = 0.20
+    boundary_contact_junction_scale: float = 1.0
     direct_edge_fallback: bool = True
     direct_edge_max_length_px: float = 1024.0
     direct_edge_min_support: float = 0.9
@@ -111,18 +123,20 @@ class PlanarGraphBuilder:
         line_prob = np.asarray(evidence.line_prob, dtype=np.float32)
         if line_prob.ndim != 2:
             raise ValueError("line_prob must be a 2D array")
+        effective_line_prob, suppression_stats = self._effective_line_prob(line_prob, evidence)
+        junction_heatmap = self._combined_junction_heatmap(evidence)
 
-        mask = self._line_mask(line_prob)
+        mask = self._line_mask(effective_line_prob)
         raw_segments = self._hough_segments(mask)
         lines = self._merge_segments(raw_segments)
-        peaks = self._junction_peaks(evidence.junction_heatmap, mask)
+        peaks = self._junction_peaks(junction_heatmap, mask)
         vertices = self._snap_vertices_to_intersections(peaks, lines, mask)
         vertices = self._merge_vertices(vertices)
 
         edges, edge_support, edge_assignments = self._build_edges(
             vertices,
             lines,
-            line_prob,
+            effective_line_prob,
             evidence.assignment_labels,
         )
         if self.config.direct_edge_fallback:
@@ -131,7 +145,7 @@ class PlanarGraphBuilder:
                 edges,
                 edge_support,
                 edge_assignments,
-                line_prob,
+                effective_line_prob,
                 evidence.assignment_labels,
             )
 
@@ -142,7 +156,7 @@ class PlanarGraphBuilder:
                 edges,
                 edge_support,
                 edge_assignments,
-                line_prob=line_prob,
+                line_prob=effective_line_prob,
             )
 
         contraction_stats: dict[str, int | bool] = {}
@@ -153,7 +167,7 @@ class PlanarGraphBuilder:
                     edges,
                     edge_support,
                     edge_assignments,
-                    line_prob,
+                    effective_line_prob,
                 )
             )
 
@@ -172,10 +186,69 @@ class PlanarGraphBuilder:
                 "raw_segments": raw_segments,
                 "lines": lines,
                 "junction_peaks": peaks,
+                "effective_line_prob": effective_line_prob,
+                "v2_evidence": suppression_stats,
                 "planar_cleanup": cleanup_stats,
                 "collinear_contraction": contraction_stats,
             },
         )
+
+    def _effective_line_prob(
+        self,
+        line_prob: np.ndarray,
+        evidence: VectorizerEvidence,
+    ) -> tuple[np.ndarray, dict[str, Any]]:
+        effective = np.asarray(line_prob, dtype=np.float32).copy()
+        stats: dict[str, Any] = {
+            "non_crease_available": evidence.non_crease_prob is not None,
+            "non_crease_suppressed_pixels": 0,
+            "boundary_contact_available": evidence.boundary_contact_heatmap is not None,
+        }
+        if evidence.non_crease_prob is None:
+            return effective, stats
+
+        non_crease = np.asarray(evidence.non_crease_prob, dtype=np.float32)
+        if non_crease.shape != effective.shape:
+            raise ValueError("non_crease_prob must have the same height/width as line_prob")
+        suppress = (non_crease >= self.config.non_crease_suppression_threshold) & (
+            effective < self.config.non_crease_strong_line_threshold
+        )
+        if not np.any(suppress):
+            return effective, stats
+        effective[suppress] *= self.config.non_crease_suppression_scale
+        stats["non_crease_suppressed_pixels"] = int(np.count_nonzero(suppress))
+        stats["non_crease_threshold"] = float(self.config.non_crease_suppression_threshold)
+        stats["non_crease_strong_line_threshold"] = float(
+            self.config.non_crease_strong_line_threshold
+        )
+        return effective, stats
+
+    def _combined_junction_heatmap(self, evidence: VectorizerEvidence) -> np.ndarray | None:
+        heatmaps: list[np.ndarray] = []
+        expected_shape = np.asarray(evidence.line_prob).shape
+        if evidence.junction_heatmap is not None:
+            junction = np.asarray(evidence.junction_heatmap, dtype=np.float32)
+            if junction.shape != expected_shape:
+                raise ValueError("junction_heatmap must have the same height/width as line_prob")
+            heatmaps.append(junction)
+        if evidence.boundary_contact_heatmap is not None:
+            contact = np.asarray(evidence.boundary_contact_heatmap, dtype=np.float32)
+            if contact.shape != expected_shape:
+                raise ValueError(
+                    "boundary_contact_heatmap must have the same height/width as line_prob"
+                )
+            contact = np.where(
+                contact >= self.config.boundary_contact_threshold,
+                contact * self.config.boundary_contact_junction_scale,
+                0.0,
+            )
+            heatmaps.append(contact.astype(np.float32))
+        if not heatmaps:
+            return None
+        combined = heatmaps[0].copy()
+        for heatmap in heatmaps[1:]:
+            combined = np.maximum(combined, heatmap)
+        return np.clip(combined, 0.0, 1.0).astype(np.float32)
 
     def _line_mask(self, line_prob: np.ndarray) -> np.ndarray:
         mask = (line_prob >= self.config.line_threshold).astype(np.uint8) * 255

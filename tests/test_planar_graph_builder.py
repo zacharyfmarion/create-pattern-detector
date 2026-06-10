@@ -5,6 +5,8 @@ from src.vectorization import (
     PlanarGraphBuilder,
     PlanarGraphBuilderConfig,
     PlanarGraphResult,
+    SquareTopologyDecoder,
+    SquareTopologyDecoderConfig,
     VectorizerEvidence,
     render_vectorizer_evidence,
 )
@@ -116,6 +118,207 @@ def test_rendered_evidence_canonicalizes_metric_edges():
 
     assert {tuple(edge) for edge in rendered.edges.tolist()} == {(0, 1), (1, 2)}
     assert rendered.assignments.tolist() == [3, 3]
+
+
+def test_v2_non_crease_evidence_suppresses_artifact_lines():
+    line_prob = np.zeros((64, 64), dtype=np.float32)
+    line_prob[32, 4:60] = 0.8
+    builder = PlanarGraphBuilder(
+        PlanarGraphBuilderConfig(
+            image_size=64,
+            line_threshold=0.5,
+            hough_threshold=4,
+            hough_min_line_length=8,
+            hough_max_line_gap=2,
+            min_edge_support=0.5,
+        )
+    )
+
+    baseline = builder.build(VectorizerEvidence(line_prob=line_prob))
+    suppressed = builder.build(
+        VectorizerEvidence(
+            line_prob=line_prob,
+            non_crease_prob=np.ones_like(line_prob, dtype=np.float32),
+        )
+    )
+
+    assert baseline.num_edges >= 1
+    assert suppressed.num_edges == 0
+    assert suppressed.debug["v2_evidence"]["non_crease_suppressed_pixels"] > 0
+
+
+def test_v2_boundary_contact_heatmap_adds_boundary_vertex_candidate():
+    line_prob = np.zeros((64, 64), dtype=np.float32)
+    line_prob[:53, 32] = 1.0
+    junction_heatmap = np.zeros_like(line_prob)
+    junction_heatmap[52, 32] = 1.0
+    contact_heatmap = np.zeros_like(line_prob)
+    contact_heatmap[0, 32] = 1.0
+    builder = PlanarGraphBuilder(
+        PlanarGraphBuilderConfig(
+            image_size=64,
+            line_threshold=0.5,
+            hough_threshold=4,
+            hough_min_line_length=8,
+            hough_max_line_gap=2,
+            junction_threshold=0.2,
+            min_edge_support=0.5,
+            direct_edge_fallback=False,
+        )
+    )
+
+    result = builder.build(
+        VectorizerEvidence(
+            line_prob=line_prob,
+            junction_heatmap=junction_heatmap,
+            boundary_contact_heatmap=contact_heatmap,
+        )
+    )
+
+    assert result.num_edges >= 1
+    assert np.min(result.pixel_vertices[:, 1]) <= 1.0
+    assert result.debug["v2_evidence"]["boundary_contact_available"] is True
+
+
+def test_square_topology_decoder_builds_deterministic_border_chain():
+    rendered = render_vectorizer_evidence(
+        simple_square_with_diagonals(),
+        image_size=128,
+        padding=0,
+        line_width=2,
+        junction_sigma=1.5,
+    )
+    decoder = SquareTopologyDecoder(
+        SquareTopologyDecoderConfig(
+            image_size=128,
+            line_threshold=0.45,
+            hough_threshold=6,
+            hough_min_line_length=6,
+            hough_max_line_gap=3,
+            min_edge_support=0.40,
+            vertex_merge_px=2.0,
+            line_vertex_distance_px=3.0,
+        )
+    )
+
+    result = decoder.build(rendered.evidence)
+    metrics = evaluate_graph(
+        result,
+        gt_vertices=rendered.pixel_vertices,
+        gt_edges=rendered.edges,
+        gt_assignments=rendered.assignments,
+        vertex_tolerance_px=4.0,
+    )
+
+    assert result.debug["decoder"] == "square_topology"
+    assert result.edges_assignment.tolist().count(2) >= 4
+    assert metrics.border_recall >= 1.0
+    assert metrics.structural_validity.parseable_fold
+
+
+def test_square_topology_decoder_ignores_border_fragments_as_carriers():
+    line_prob = np.zeros((64, 64), dtype=np.float32)
+    line_prob[0, :] = 1.0
+    line_prob[-1, :] = 1.0
+    line_prob[:, 0] = 1.0
+    line_prob[:, -1] = 1.0
+    line_prob[0:64, 32] = 1.0
+    junction_heatmap = np.zeros_like(line_prob)
+    junction_heatmap[0, 32] = 1.0
+    junction_heatmap[-1, 32] = 1.0
+    decoder = SquareTopologyDecoder(
+        SquareTopologyDecoderConfig(
+            image_size=64,
+            line_threshold=0.5,
+            hough_threshold=4,
+            hough_min_line_length=5,
+            hough_max_line_gap=2,
+            min_edge_support=0.5,
+            vertex_merge_px=1.5,
+            line_vertex_distance_px=2.5,
+        )
+    )
+
+    result = decoder.build(
+        VectorizerEvidence(
+            line_prob=line_prob,
+            junction_heatmap=junction_heatmap,
+        )
+    )
+
+    assert result.debug["square_topology"]["carrier_count"] <= 2
+    assert result.edges_assignment.tolist().count(2) == 6
+    assert not any(
+        int(assignment) != 2 and np.allclose(result.pixel_vertices[edge[0], 1], 0.0) and np.allclose(result.pixel_vertices[edge[1], 1], 0.0)
+        for edge, assignment in zip(result.edges_vertices, result.edges_assignment)
+    )
+
+
+def test_square_topology_decoder_accepts_boundary_contact_heatmap():
+    line_prob = np.zeros((64, 64), dtype=np.float32)
+    line_prob[:53, 32] = 1.0
+    junction_heatmap = np.zeros_like(line_prob)
+    junction_heatmap[52, 32] = 1.0
+    contact_heatmap = np.zeros_like(line_prob)
+    contact_heatmap[0, 32] = 1.0
+    decoder = SquareTopologyDecoder(
+        SquareTopologyDecoderConfig(
+            image_size=64,
+            line_threshold=0.5,
+            hough_threshold=4,
+            hough_min_line_length=8,
+            hough_max_line_gap=2,
+            junction_threshold=0.2,
+            min_edge_support=0.5,
+            vertex_merge_px=1.5,
+            line_vertex_distance_px=2.5,
+        )
+    )
+
+    result = decoder.build(
+        VectorizerEvidence(
+            line_prob=line_prob,
+            junction_heatmap=junction_heatmap,
+            boundary_contact_heatmap=contact_heatmap,
+        )
+    )
+
+    assert result.num_edges >= 1
+    assert np.min(result.pixel_vertices[:, 1]) <= 1.0
+    assert result.debug["square_topology"]["border_edge_count"] >= 4
+
+
+def test_square_topology_decoder_uses_gapped_style_support_for_dashed_segments():
+    line_prob = np.zeros((64, 64), dtype=np.float32)
+    for x in range(8, 57, 8):
+        line_prob[32, x : x + 2] = 0.8
+    line_style_prob = np.zeros((64, 64, 4), dtype=np.float32)
+    line_style_prob[..., 0] = 1.0
+    line_style_prob[32, 8:57, 0] = 0.05
+    line_style_prob[32, 8:57, 1] = 0.95
+    decoder = SquareTopologyDecoder(
+        SquareTopologyDecoderConfig(
+            image_size=64,
+            line_threshold=0.5,
+            min_edge_support=0.45,
+            edge_sample_width_px=1,
+        )
+    )
+
+    plain = decoder._segment_support(
+        np.asarray([8.0, 32.0], dtype=np.float32),
+        np.asarray([56.0, 32.0], dtype=np.float32),
+        line_prob,
+    )
+    styled = decoder._segment_support(
+        np.asarray([8.0, 32.0], dtype=np.float32),
+        np.asarray([56.0, 32.0], dtype=np.float32),
+        line_prob,
+        line_style_prob=line_style_prob,
+    )
+
+    assert plain < decoder.config.min_edge_support
+    assert styled >= decoder.config.min_edge_support
 
 
 def test_planar_cleanup_splits_edges_at_intermediate_vertices():

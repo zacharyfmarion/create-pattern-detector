@@ -27,10 +27,12 @@ from src.vectorization import (
     QualityReportConfig,
     RepairConfig,
     RepairResult,
-    VectorizerEvidence,
+    SquareTopologyDecoder,
+    SquareTopologyDecoderConfig,
     attribute_graph_from_logits,
     build_quality_report,
     conservative_repair,
+    cpline_outputs_to_evidence,
     save_fold,
 )
 
@@ -124,15 +126,13 @@ class CPDetectPipeline:
         ):
             outputs = self.model(image_tensor)
 
-        line_prob = torch.sigmoid(outputs["line_logits"][0, 0]).detach().cpu().numpy()
-        angle = outputs["angle"][0].detach().cpu().permute(1, 2, 0).numpy()
-        junction_heatmap = torch.sigmoid(outputs["junction_logits"][0, 0]).detach().cpu().numpy()
-        evidence = VectorizerEvidence(
-            line_prob=line_prob.astype(np.float32),
-            angle=angle.astype(np.float32),
-            junction_heatmap=junction_heatmap.astype(np.float32),
-            assignment_labels=None,
+        evidence = cpline_outputs_to_evidence(
+            outputs,
+            batch_index=0,
+            line_threshold=self.threshold,
         )
+        line_prob = evidence.line_prob
+        junction_heatmap = evidence.junction_heatmap
         graph_result = self.builder.build(evidence)
         attributed = attribute_graph_from_logits(
             graph_result,
@@ -151,6 +151,7 @@ class CPDetectPipeline:
             repair_actions=repair.actions,
             config=self.report_config,
         )
+        apply_rectification_warnings_to_report(quality_report, rectification)
 
         result = InferenceResult(
             input_path=path,
@@ -182,6 +183,28 @@ class CPDetectPipeline:
 
 
 def build_stage4_builder(
+    image_size: int,
+    threshold: float,
+    *,
+    repair_near_endpoint_crossings: bool = False,
+) -> SquareTopologyDecoder:
+    return SquareTopologyDecoder(
+        SquareTopologyDecoderConfig(
+            image_size=image_size,
+            line_threshold=threshold,
+            hough_threshold=10,
+            hough_min_line_length=6,
+            hough_max_line_gap=4,
+            min_edge_support=0.45,
+            junction_threshold=0.20,
+            junction_nms_radius=2,
+            vertex_merge_px=max(1.0, 1.5 * image_size / 768),
+            line_vertex_distance_px=max(2.0, 4.0 * image_size / 768),
+        )
+    )
+
+
+def build_legacy_stage4_builder(
     image_size: int,
     threshold: float,
     *,
@@ -240,6 +263,7 @@ def load_cpline_model(checkpoint: str | Path, device: torch.device) -> CPLineNet
         backbone=config.get("backbone", "hrnet_w18"),
         pretrained=False,
         hidden_channels=int(config.get("hidden_channels", 128)),
+        v2_heads=bool(config.get("v2_heads", False)),
     ).to(device)
     model.load_state_dict(loaded["model_state_dict"])
     model.eval()
@@ -363,6 +387,18 @@ def graph_metadata(graph: AttributedPlanarGraph) -> dict[str, Any]:
             "inferred": int(sum(source == "inferred" for source in graph.assignment_source)),
         },
     }
+
+
+def apply_rectification_warnings_to_report(
+    report: QualityReport,
+    rectification: RectificationResult,
+) -> None:
+    """Promote input-level envelope warnings into the overall Phase 5 status."""
+    codes = {str(warning.get("code", "")) for warning in rectification.warnings}
+    if "dense_input_evidence" not in codes:
+        return
+    if STATUS_ORDER.index(report.status) < STATUS_ORDER.index("outside_v1_envelope"):
+        report.status = "outside_v1_envelope"
 
 
 def write_debug_artifacts(result: InferenceResult, debug_dir: str | Path) -> None:

@@ -34,6 +34,7 @@ export function recomputeStage4Diagnostic(input: {
   exampleKey: string;
   threshold?: number;
   inferAssignments?: boolean;
+  repair?: Record<string, unknown>;
 }): Promise<Stage4Diagnostic> {
   return requestJson("/api/stage4/recompute", {
     method: "POST",

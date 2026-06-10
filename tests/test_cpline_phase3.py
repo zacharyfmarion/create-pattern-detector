@@ -11,6 +11,7 @@ from src.data.cpline_augmentations import (
     AUGMENT_MIXES,
     DARK_MODE_STYLE_VARIANTS,
     NON_IDENTITY_SQUARE_SYMMETRIES,
+    _sample_mix_entry,
 )
 from src.data.cpline_dataset import (
     CplineFoldDataset,
@@ -20,6 +21,8 @@ from src.data.cpline_dataset import (
     select_records,
 )
 from src.data.fold_parser import CreasePattern, FOLDParser
+from src.data.v2_augmentations import V2_LINE_STYLE_IDS
+from src.data.v2_boundary_targets import V2_BOUNDARY_SIDE_IDS, V2_VERTEX_TYPE_IDS
 from src.models import CPLineNet
 from src.models.batchnorm import model_eval_with_batchnorm_mode
 from src.models.losses import CPLineLoss, CPLineLossConfig
@@ -52,6 +55,27 @@ def simple_mv_cp() -> CreasePattern:
         vertices=cp.vertices.copy(),
         edges=cp.edges.copy(),
         assignments=np.array([2, 2, 2, 2, 0, 1, 0, 1], dtype=np.int8),
+    )
+
+
+def boundary_contact_cp() -> CreasePattern:
+    return CreasePattern(
+        vertices=np.array(
+            [
+                [0.0, 0.0],
+                [1.0, 0.0],
+                [1.0, 1.0],
+                [0.0, 1.0],
+                [0.5, 0.0],
+                [0.5, 0.5],
+            ],
+            dtype=np.float32,
+        ),
+        edges=np.array(
+            [[0, 4], [4, 1], [1, 2], [2, 3], [3, 0], [4, 5], [5, 2]],
+            dtype=np.int64,
+        ),
+        assignments=np.array([2, 2, 2, 2, 2, 0, 1], dtype=np.int8),
     )
 
 
@@ -329,6 +353,50 @@ def test_cpline_stage_balanced_samples_dark_and_photo_dark_without_grid():
     assert photo_dark_sample.metadata["geometry_applied"] is True
 
 
+def test_v2_replay_corrective_mix_preserves_old_profiles_and_v2_stress_cases():
+    entries = AUGMENT_MIXES["v2-replay-corrective"]
+    profile_weights: dict[str, float] = {}
+    for profile, weight, _ in entries:
+        profile_weights[profile] = profile_weights.get(profile, 0.0) + weight
+
+    old_profiles = {
+        "clean",
+        "square-symmetry",
+        "line-style",
+        "print-light",
+        "print-medium",
+        "photo-light",
+        "dark-mode",
+        "photo-dark",
+    }
+    v2_profiles = {
+        "v2-text",
+        "v2-watermark",
+        "v2-guide-grid",
+        "v2-dashed",
+        "v2-faint",
+        "v2-ambiguous-mv",
+        "v2-combined",
+        "v2-dark-text",
+        "v2-dark-combined",
+    }
+
+    assert old_profiles <= set(profile_weights)
+    assert v2_profiles <= set(profile_weights)
+    assert abs(sum(weight for _, weight, _ in entries) - 1.0) < 1e-6
+    assert profile_weights["line-style"] > profile_weights["clean"]
+    assert profile_weights["v2-combined"] > profile_weights["v2-text"]
+    assert profile_weights["v2-dark-combined"] > profile_weights["v2-dark-text"]
+
+
+def test_augment_mix_sampler_handles_all_registered_mixes_repeatedly():
+    rng = np.random.default_rng(123)
+    for entries in AUGMENT_MIXES.values():
+        seen = {_sample_mix_entry(entries, rng)[0] for _ in range(200)}
+        assert seen <= {profile for profile, _, _ in entries}
+        assert seen
+
+
 def test_cpline_style_profiles_do_not_apply_square_symmetry_by_default():
     cp = asymmetric_mv_cp()
     clean = render_cpline_sample(
@@ -360,6 +428,165 @@ def test_cpline_monochrome_style_does_not_hallucinate_mv_targets():
     assert 0 not in sample.assignment
     assert 1 not in sample.assignment
     assert 3 in sample.assignment
+
+
+def test_v2_text_augmentation_emits_non_crease_targets():
+    sample = render_cpline_sample(
+        simple_mv_cp(),
+        image_size=128,
+        padding=8,
+        line_width=2,
+        augment_profile="v2-text",
+        seed=4,
+    )
+
+    assert sample.metadata["selected_profile"] == "v2-text"
+    assert sample.metadata["v2_augmentation"]["modes"] == ["text"]
+    assert np.count_nonzero(sample.v2_non_crease_mask) > 0
+    assert np.count_nonzero(sample.v2_target_line_mask) > 0
+    assert sample.v2_line_style[sample.v2_target_line_mask > 0].max() == V2_LINE_STYLE_IDS["solid"]
+
+
+def test_v2_dashed_augmentation_preserves_solid_carrier_target():
+    sample = render_cpline_sample(
+        simple_mv_cp(),
+        image_size=128,
+        padding=8,
+        line_width=2,
+        augment_profile="v2-dashed",
+        seed=5,
+    )
+
+    assert "dashed" in sample.metadata["v2_augmentation"]["modes"]
+    assert np.count_nonzero(sample.v2_line_style == V2_LINE_STYLE_IDS["dashed"]) > 0
+    assert sample.line_prob.max() > 0.9
+    assert np.count_nonzero(sample.v2_target_line_mask) == np.count_nonzero(sample.line_prob > 0.05)
+
+
+def test_v2_ambiguous_mv_marks_observed_assignment_unknown():
+    sample = render_cpline_sample(
+        simple_mv_cp(),
+        image_size=128,
+        padding=8,
+        line_width=2,
+        augment_profile="v2-ambiguous-mv",
+        seed=6,
+    )
+
+    assert "ambiguous_mv" in sample.metadata["v2_augmentation"]["modes"]
+    assert "dashed" not in sample.metadata["v2_augmentation"]["modes"]
+    assert np.count_nonzero(sample.v2_line_style == V2_LINE_STYLE_IDS["dashed"]) == 0
+    assert np.count_nonzero(sample.v2_line_style == V2_LINE_STYLE_IDS["monochrome"]) > 0
+    assert 0 not in sample.v2_observed_assignment
+    assert 1 not in sample.v2_observed_assignment
+    assert 3 in sample.v2_observed_assignment
+
+
+def test_v2_dark_profile_combines_dark_mode_with_issue_targets():
+    sample = render_cpline_sample(
+        simple_mv_cp(),
+        image_size=128,
+        padding=8,
+        line_width=2,
+        augment_profile="v2-dark-text",
+        seed=8,
+    )
+
+    assert sample.metadata["selected_profile"] == "v2-dark-text"
+    assert sample.metadata["style_variant"] in DARK_MODE_STYLE_VARIANTS
+    assert sample.metadata["v2_augmentation"]["dark_mode"] is True
+    assert sample.image.mean() < 120
+    assert np.count_nonzero(sample.v2_non_crease_mask) > 0
+
+
+def test_v2_dark_ambiguous_keeps_readable_monochrome_contrast():
+    sample = render_cpline_sample(
+        simple_mv_cp(),
+        image_size=128,
+        padding=8,
+        line_width=2,
+        augment_profile="v2-dark-ambiguous-mv",
+        seed=29,
+    )
+    grayscale = sample.image.astype(np.float32).mean(axis=2)
+    target = sample.v2_target_line_mask > 0
+    background = np.array(sample.metadata["params"]["background"], dtype=np.float32).mean()
+
+    assert float(grayscale[target].mean()) - float(background) > 35.0
+
+
+def test_v2_dark_faint_keeps_minimum_readable_contrast():
+    sample = render_cpline_sample(
+        simple_mv_cp(),
+        image_size=128,
+        padding=8,
+        line_width=2,
+        augment_profile="v2-dark-faint",
+        seed=31,
+    )
+    grayscale = sample.image.astype(np.float32).mean(axis=2)
+    target = sample.v2_target_line_mask > 0
+    background = np.array(sample.metadata["params"]["background"], dtype=np.float32).mean()
+
+    assert float(grayscale[target].mean()) - float(background) > 20.0
+
+
+def test_v2_issue_mix_samples_combined_profile():
+    cp = simple_mv_cp()
+    seen = {
+        render_cpline_sample(
+            cp,
+            image_size=96,
+            padding=8,
+            line_width=2,
+            augment_profile="v2-issue-mix",
+            seed=seed,
+        ).metadata["selected_profile"]
+        for seed in range(80)
+    }
+
+    assert "v2-combined" in seen
+    assert "v2-text" in seen
+
+
+def test_v2_dark_issue_mix_samples_dark_profiles():
+    cp = simple_mv_cp()
+    seen = {
+        render_cpline_sample(
+            cp,
+            image_size=96,
+            padding=8,
+            line_width=2,
+            augment_profile="v2-dark-issue-mix",
+            seed=seed,
+        ).metadata["selected_profile"]
+        for seed in range(80)
+    }
+
+    assert "v2-dark-combined" in seen
+    assert "v2-dark-text" in seen
+
+
+def test_v2_boundary_targets_mark_boundary_contact_side_and_coord():
+    sample = render_cpline_sample(
+        boundary_contact_cp(),
+        image_size=128,
+        padding=8,
+        line_width=2,
+        augment_profile="clean",
+    )
+
+    assert sample.v2_boundary_contact_heatmap.max() > 0.9
+    assert np.count_nonzero(sample.v2_boundary_mask) == 1
+    assert V2_VERTEX_TYPE_IDS["corner"] in np.unique(sample.v2_vertex_type)
+    assert V2_VERTEX_TYPE_IDS["boundary_contact"] in np.unique(sample.v2_vertex_type)
+    assert V2_VERTEX_TYPE_IDS["interior_intersection"] in np.unique(sample.v2_vertex_type)
+
+    side_labels = sample.v2_boundary_side[sample.v2_boundary_mask]
+    side_coords = sample.v2_boundary_coord[sample.v2_boundary_mask]
+    assert side_labels.tolist() == [V2_BOUNDARY_SIDE_IDS["top"]]
+    assert np.isclose(float(side_coords[0]), 0.5, atol=0.02)
+    assert sample.metadata["v2_boundary"]["side_counts"] == {"top": 1}
 
 
 def test_cpline_dataset_does_not_cache_random_augmented_tensors(tmp_path):
@@ -396,6 +623,32 @@ def test_cpline_dataset_workers_use_independent_augmentation_rngs(tmp_path):
     first, second = [batch["image"][0] for batch in loader]
 
     assert not torch.equal(first, second)
+
+
+def test_cpline_dataset_collates_v2_targets(tmp_path):
+    manifest = _write_manifest(tmp_path, count=2)
+    dataset = CplineFoldDataset(
+        manifest,
+        split="train",
+        limit=1,
+        max_edges=20,
+        image_size=96,
+        augment_profile="v2-watermark",
+        seed=5,
+    )
+    loader = DataLoader(dataset, batch_size=1, num_workers=0, collate_fn=cpline_collate)
+    batch = next(iter(loader))
+
+    assert batch["v2_non_crease_mask"].shape == (1, 1, 96, 96)
+    assert batch["v2_target_line_mask"].shape == (1, 1, 96, 96)
+    assert batch["v2_line_style"].shape == (1, 96, 96)
+    assert batch["v2_observed_assignment"].shape == (1, 96, 96)
+    assert batch["v2_boundary_contact_heatmap"].shape == (1, 1, 96, 96)
+    assert batch["v2_vertex_type"].shape == (1, 96, 96)
+    assert batch["v2_boundary_side"].shape == (1, 96, 96)
+    assert batch["v2_boundary_offset"].shape == (1, 2, 96, 96)
+    assert batch["v2_boundary_mask"].shape == (1, 96, 96)
+    assert batch["v2_boundary_coord"].shape == (1, 1, 96, 96)
 
 
 def test_cpline_dataset_limit_samples_across_ordered_mixed_manifest():
@@ -631,6 +884,69 @@ def test_cpline_net_outputs_roadmap_fields():
     assert outputs["assignment_logits"].shape == (2, 4, 64, 64)
 
 
+def test_cpline_net_optional_v2_heads_and_losses():
+    model = CPLineNet(backbone="tiny", hidden_channels=32, v2_heads=True)
+    outputs = model(torch.zeros(2, 3, 64, 64))
+
+    assert outputs["non_crease_logits"].shape == (2, 1, 64, 64)
+    assert outputs["line_style_logits"].shape == (2, 4, 64, 64)
+    assert outputs["boundary_contact_logits"].shape == (2, 1, 64, 64)
+    assert outputs["vertex_type_logits"].shape == (2, 4, 64, 64)
+    assert outputs["boundary_side_logits"].shape == (2, 4, 64, 64)
+    assert outputs["boundary_offset"].shape == (2, 2, 64, 64)
+    assert outputs["boundary_coord"].shape == (2, 1, 64, 64)
+
+    targets = {
+        "line_prob": torch.zeros((2, 1, 64, 64), dtype=torch.float32),
+        "angle": torch.zeros((2, 2, 64, 64), dtype=torch.float32),
+        "junction_heatmap": torch.zeros((2, 1, 64, 64), dtype=torch.float32),
+        "junction_offset": torch.zeros((2, 2, 64, 64), dtype=torch.float32),
+        "junction_mask": torch.zeros((2, 64, 64), dtype=torch.bool),
+        "assignment": torch.full((2, 64, 64), -100, dtype=torch.long),
+        "v2_non_crease_mask": torch.zeros((2, 1, 64, 64), dtype=torch.float32),
+        "v2_line_style": torch.full((2, 64, 64), -100, dtype=torch.long),
+        "v2_observed_assignment": torch.full((2, 64, 64), -100, dtype=torch.long),
+        "v2_boundary_contact_heatmap": torch.zeros((2, 1, 64, 64), dtype=torch.float32),
+        "v2_vertex_type": torch.zeros((2, 64, 64), dtype=torch.long),
+        "v2_boundary_side": torch.full((2, 64, 64), -100, dtype=torch.long),
+        "v2_boundary_offset": torch.zeros((2, 2, 64, 64), dtype=torch.float32),
+        "v2_boundary_mask": torch.zeros((2, 64, 64), dtype=torch.bool),
+        "v2_boundary_coord": torch.zeros((2, 1, 64, 64), dtype=torch.float32),
+    }
+    targets["line_prob"][:, :, 10:14, 10:14] = 1.0
+    targets["angle"][:, 0, 10:14, 10:14] = 1.0
+    targets["assignment"][:, 10:14, 10:14] = 3
+    targets["v2_observed_assignment"][:, 10:14, 10:14] = 3
+    targets["v2_non_crease_mask"][:, :, 30:34, 30:34] = 1.0
+    targets["v2_line_style"][:, 10:14, 10:14] = V2_LINE_STYLE_IDS["dashed"]
+    targets["v2_boundary_contact_heatmap"][:, :, 5, 5] = 1.0
+    targets["v2_vertex_type"][:, 5, 5] = V2_VERTEX_TYPE_IDS["boundary_contact"]
+    targets["v2_boundary_side"][:, 5, 5] = V2_BOUNDARY_SIDE_IDS["top"]
+    targets["v2_boundary_mask"][:, 5, 5] = True
+    targets["v2_boundary_coord"][:, :, 5, 5] = 0.5
+    criterion = CPLineLoss(
+        CPLineLossConfig(
+            non_crease_weight=1.0,
+            line_style_weight=1.0,
+            use_observed_assignment_target=True,
+            boundary_contact_weight=1.0,
+            vertex_type_weight=1.0,
+            boundary_side_weight=1.0,
+            boundary_offset_weight=1.0,
+            boundary_coord_weight=1.0,
+        )
+    )
+    losses = criterion(outputs, targets)
+
+    assert losses["non_crease"] > 0
+    assert losses["line_style"] > 0
+    assert losses["boundary_contact"] > 0
+    assert losses["vertex_type"] > 0
+    assert losses["boundary_side"] > 0
+    assert torch.isfinite(losses["boundary_offset"])
+    assert torch.isfinite(losses["boundary_coord"])
+
+
 def test_cpline_outputs_convert_to_vectorizer_evidence():
     model = CPLineNet(backbone="tiny", hidden_channels=32)
     outputs = model(torch.zeros(1, 3, 64, 64))
@@ -640,6 +956,20 @@ def test_cpline_outputs_convert_to_vectorizer_evidence():
     assert evidence.angle.shape == (64, 64, 2)
     assert evidence.junction_heatmap.shape == (64, 64)
     assert evidence.assignment_labels.shape == (64, 64)
+
+
+def test_cpline_outputs_convert_v2_heads_to_vectorizer_evidence():
+    model = CPLineNet(backbone="tiny", hidden_channels=32, v2_heads=True)
+    outputs = model(torch.zeros(1, 3, 64, 64))
+    evidence = cpline_outputs_to_evidence(outputs, line_threshold=0.0)
+
+    assert evidence.non_crease_prob.shape == (64, 64)
+    assert evidence.line_style_prob.shape == (64, 64, 4)
+    assert evidence.boundary_contact_heatmap.shape == (64, 64)
+    assert evidence.vertex_type_prob.shape == (64, 64, 4)
+    assert evidence.boundary_side_prob.shape == (64, 64, 4)
+    assert evidence.boundary_offset.shape == (64, 64, 2)
+    assert evidence.boundary_coord.shape == (64, 64)
 
 
 def _write_manifest(tmp_path, *, count: int) -> str:
