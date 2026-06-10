@@ -15,6 +15,12 @@ class CPLineLossConfig:
     angle_weight: float = 0.25
     junction_weight: float = 1.0
     junction_offset_weight: float = 0.25
+    # Penalty-reduced (CornerNet-style) focal loss for the junction heatmap.
+    # alpha <= 0 keeps the legacy BCE + pos_weight objective. The focal form
+    # specifically penalizes confident over-prediction in the dip between two
+    # close vertex peaks, which BCE + pos_weight=50 actively rewards.
+    junction_focal_alpha: float = 0.0
+    junction_focal_beta: float = 4.0
     assignment_weight: float = 0.2
     line_pos_weight: float = 20.0
     junction_pos_weight: float = 50.0
@@ -77,11 +83,19 @@ class CPLineLoss(nn.Module):
         )
         line_mask = targets["line_prob"][:, 0] > 0.1
         angle_loss = _masked_angle_loss(outputs["angle"], targets["angle"], line_mask)
-        junction_loss = F.binary_cross_entropy_with_logits(
-            outputs["junction_logits"],
-            targets["junction_heatmap"],
-            pos_weight=self.junction_pos_weight.to(outputs["junction_logits"].device),
-        )
+        if self.config.junction_focal_alpha > 0.0:
+            junction_loss = _penalty_reduced_focal_loss(
+                outputs["junction_logits"],
+                targets["junction_heatmap"],
+                alpha=self.config.junction_focal_alpha,
+                beta=self.config.junction_focal_beta,
+            )
+        else:
+            junction_loss = F.binary_cross_entropy_with_logits(
+                outputs["junction_logits"],
+                targets["junction_heatmap"],
+                pos_weight=self.junction_pos_weight.to(outputs["junction_logits"].device),
+            )
         offset_loss = _masked_l1(
             outputs["junction_offset"],
             targets["junction_offset"],
@@ -160,6 +174,30 @@ class CPLineLoss(nn.Module):
             "boundary_offset": boundary_offset_loss,
             "boundary_coord": boundary_coord_loss,
         }
+
+
+def _penalty_reduced_focal_loss(
+    logits: torch.Tensor,
+    target: torch.Tensor,
+    *,
+    alpha: float,
+    beta: float,
+) -> torch.Tensor:
+    """CornerNet/CenterNet penalty-reduced focal loss for Gaussian heatmaps.
+
+    Pixels with target == 1 (the per-vertex impulse anchors) are positives;
+    everywhere else is a negative whose penalty is reduced by (1 - y)^beta so
+    near-peak pixels are tolerated but confident prediction inside the dip
+    between two close peaks still costs. Normalized by the positive count.
+    """
+    probs = torch.sigmoid(logits).clamp(1e-6, 1.0 - 1e-6)
+    pos_mask = target >= 0.999
+    neg_weights = torch.pow((1.0 - target).clamp(0.0, 1.0), beta)
+    pos_loss = -torch.pow(1.0 - probs, alpha) * torch.log(probs)
+    neg_loss = -neg_weights * torch.pow(probs, alpha) * torch.log(1.0 - probs)
+    loss = torch.where(pos_mask, pos_loss, neg_loss)
+    num_pos = pos_mask.sum().clamp(min=1)
+    return loss.sum() / num_pos
 
 
 def _masked_angle_loss(

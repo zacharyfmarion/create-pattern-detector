@@ -128,9 +128,13 @@ class CplineFoldDataset(Dataset):
         render_noise: str | None = None,
         seed: int | None = None,
         family_sampling: str = "natural",
+        junction_sigma_px: float | None = None,
+        junction_offset_radius_px: float = 0.0,
     ) -> None:
         self.manifest_path = Path(manifest_path)
         self.image_size = image_size
+        self.junction_sigma_px = junction_sigma_px
+        self.junction_offset_radius_px = junction_offset_radius_px
         self.padding = padding if padding is not None else max(8, int(32 * image_size / 1024))
         self.line_width = line_width if line_width is not None else max(1, int(2 * image_size / 768))
         self.augment_profile = normalize_augment_profile(augment_profile, render_noise=render_noise)
@@ -165,6 +169,8 @@ class CplineFoldDataset(Dataset):
             augment_profile=self.augment_profile,
             rng=self._next_rng(),
             base_pixel_vertices=base_pixel_vertices,
+            junction_sigma_px=self.junction_sigma_px,
+            junction_offset_radius_px=self.junction_offset_radius_px,
         )
         item = {
             "image": torch.from_numpy(sample.image).permute(2, 0, 1).float() / 255.0,
@@ -234,6 +240,8 @@ def render_cpline_sample(
     style_variant: str | None = None,
     square_symmetry: str | None = None,
     base_pixel_vertices: np.ndarray | None = None,
+    junction_sigma_px: float | None = None,
+    junction_offset_radius_px: float = 0.0,
 ) -> CplineSample:
     sample = render_augmented_cpline_sample(
         cp,
@@ -247,6 +255,8 @@ def render_cpline_sample(
         style_variant=style_variant,
         square_symmetry=square_symmetry,
         base_pixel_vertices=base_pixel_vertices,
+        junction_sigma_px=junction_sigma_px,
+        junction_offset_radius_px=junction_offset_radius_px,
     )
 
     return CplineSample(

@@ -158,6 +158,55 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--boundary-offset-weight", type=float, default=0.0)
     parser.add_argument("--boundary-coord-weight", type=float, default=0.0)
     parser.add_argument(
+        "--junction-sigma-px",
+        type=float,
+        default=None,
+        help=(
+            "Junction heatmap Gaussian sigma in pixels. Default keeps the "
+            "legacy formula max(1.0, 2.5*image_size/768) (~3.33px at 1024), "
+            "which fuses vertex pairs closer than ~8px. Use 1.5 for the "
+            "close-pair recovery recipe."
+        ),
+    )
+    parser.add_argument(
+        "--junction-offset-radius-px",
+        type=float,
+        default=0.0,
+        help=(
+            "Radius for CenterNet-style nearest-vertex offset targets. 0 keeps "
+            "legacy single-anchor sub-pixel offsets. >0 supervises every pixel "
+            "within the radius with the (radius-normalized) vector toward its "
+            "nearest vertex, making fused close-pair blobs separable."
+        ),
+    )
+    parser.add_argument(
+        "--junction-offset-weight",
+        type=float,
+        default=0.25,
+        help="Loss weight for the junction offset head (use 0.5 with radius offsets).",
+    )
+    parser.add_argument(
+        "--junction-focal-alpha",
+        type=float,
+        default=0.0,
+        help=(
+            "Enable penalty-reduced focal loss for the junction heatmap with "
+            "this alpha (2.0 standard). 0 keeps legacy BCE with pos_weight."
+        ),
+    )
+    parser.add_argument("--junction-focal-beta", type=float, default=4.0)
+    parser.add_argument(
+        "--reinit-heads",
+        type=str,
+        default="",
+        help=(
+            "Comma-separated CPLineNet head attribute names (e.g. offset_head) "
+            "to re-initialize after loading --init-checkpoint. Use when a "
+            "head's target semantics change, like offset_head switching from "
+            "sub-pixel to radius-normalized offsets."
+        ),
+    )
+    parser.add_argument(
         "--use-v2-observed-assignment",
         action="store_true",
         help="Train assignment logits against observed labels, marking ambiguous M/V as U.",
@@ -356,6 +405,10 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         args.augment_profile, render_noise=args.render_noise
     )
 
+    junction_label_kwargs = {
+        "junction_sigma_px": args.junction_sigma_px,
+        "junction_offset_radius_px": args.junction_offset_radius_px,
+    }
     train_dataset = CplineFoldDataset(
         manifest,
         split="train",
@@ -365,6 +418,7 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         augment_profile=augment_profile,
         seed=args.seed,
         family_sampling=args.train_family_sampling,
+        **junction_label_kwargs,
     )
     val_dataset = CplineFoldDataset(
         manifest,
@@ -374,6 +428,7 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         image_size=args.image_size,
         augment_profile="clean",
         seed=args.seed + 1,
+        **junction_label_kwargs,
     )
     aug_val_dataset = None
     if args.eval_augment_profile:
@@ -385,6 +440,7 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
             image_size=args.image_size,
             augment_profile=args.eval_augment_profile,
             seed=args.seed + 2,
+            **junction_label_kwargs,
         )
     pin_memory = device.type == "cuda" and not args.no_pin_memory
     train_loader = DataLoader(
@@ -427,6 +483,7 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         pretrained=False,
         hidden_channels=args.hidden_channels,
         v2_heads=args.v2_heads,
+        junction_offset_clamp=1.0 if args.junction_offset_radius_px > 0.0 else 0.5,
     ).to(device)
     if args.init_checkpoint is not None and args.resume_checkpoint is not None:
         raise ValueError("Use only one of --init-checkpoint or --resume-checkpoint.")
@@ -442,11 +499,25 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         loaded_checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
         loaded = loaded_checkpoint
         model.load_state_dict(loaded["model_state_dict"], strict=not args.v2_heads)
+        reinit_heads = [name.strip() for name in args.reinit_heads.split(",") if name.strip()]
+        for head_name in reinit_heads:
+            head = getattr(model, head_name, None)
+            if head is None or not isinstance(head, torch.nn.Module):
+                raise ValueError(f"Unknown CPLineNet head for --reinit-heads: {head_name!r}")
+            head.apply(
+                lambda module: module.reset_parameters()
+                if hasattr(module, "reset_parameters")
+                else None
+            )
+            print(f"Re-initialized head after checkpoint load: {head_name}")
     criterion = CPLineLoss(
         CPLineLossConfig(
             line_hard_negative_weight=args.line_hard_negative_weight,
             line_hard_negative_ratio=args.line_hard_negative_ratio,
             line_hard_negative_multiplier=args.line_hard_negative_multiplier,
+            junction_offset_weight=args.junction_offset_weight,
+            junction_focal_alpha=args.junction_focal_alpha,
+            junction_focal_beta=args.junction_focal_beta,
             non_crease_weight=args.non_crease_weight,
             line_style_weight=args.line_style_weight,
             use_observed_assignment_target=args.use_v2_observed_assignment,
@@ -492,6 +563,12 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         "hidden_channels": args.hidden_channels,
         "v2_heads": args.v2_heads,
         "batchnorm_mode": args.batchnorm_mode,
+        "junction_sigma_px": args.junction_sigma_px,
+        "junction_offset_radius_px": args.junction_offset_radius_px,
+        "junction_offset_weight": args.junction_offset_weight,
+        "junction_focal_alpha": args.junction_focal_alpha,
+        "junction_focal_beta": args.junction_focal_beta,
+        "reinit_heads": args.reinit_heads,
         "init_checkpoint": init_checkpoint.as_posix() if init_checkpoint is not None else None,
         "resume_checkpoint": (
             resume_checkpoint.as_posix() if resume_checkpoint is not None else None
