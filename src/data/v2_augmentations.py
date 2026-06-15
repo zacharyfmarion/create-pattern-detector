@@ -8,7 +8,7 @@ from typing import Any
 import cv2
 import numpy as np
 
-V2_LIGHT_AUGMENT_PROFILES = (
+V2_HISTORICAL_LIGHT_AUGMENT_PROFILES = (
     "v2-text",
     "v2-watermark",
     "v2-guide-grid",
@@ -17,8 +17,15 @@ V2_LIGHT_AUGMENT_PROFILES = (
     "v2-ambiguous-mv",
     "v2-combined",
 )
-V2_DARK_AUGMENT_PROFILES = tuple(f"v2-dark-{profile.removeprefix('v2-')}" for profile in V2_LIGHT_AUGMENT_PROFILES)
+V2_LIGHT_AUGMENT_PROFILES = (
+    *V2_HISTORICAL_LIGHT_AUGMENT_PROFILES,
+    "v2-combined-no-grid",
+)
+V2_DARK_AUGMENT_PROFILES = tuple(
+    f"v2-dark-{profile.removeprefix('v2-')}" for profile in V2_LIGHT_AUGMENT_PROFILES
+)
 V2_AUGMENT_PROFILES = (*V2_LIGHT_AUGMENT_PROFILES, *V2_DARK_AUGMENT_PROFILES)
+V2_COMBINED_ISSUE_PROFILES = {"v2-combined", "v2-combined-no-grid"}
 V2_LINE_STYLE_IDS = {
     "solid": 0,
     "dashed": 1,
@@ -48,7 +55,12 @@ def default_v2_targets(
     non_crease_mask = np.zeros_like(target_line_mask, dtype=np.float32)
     line_style = np.full(target_line_mask.shape, -100, dtype=np.int64)
     line_style[target_line_mask > 0.0] = V2_LINE_STYLE_IDS["solid"]
-    return non_crease_mask, target_line_mask, line_style, np.asarray(assignment, dtype=np.int64).copy()
+    return (
+        non_crease_mask,
+        target_line_mask,
+        line_style,
+        np.asarray(assignment, dtype=np.int64).copy(),
+    )
 
 
 def apply_v2_augmentation(
@@ -71,6 +83,13 @@ def apply_v2_augmentation(
         raise ValueError(f"Unsupported V2 augmentation profile: {profile}")
 
     issue_profile = v2_issue_profile(profile)
+    combined_style = issue_profile in V2_COMBINED_ISSUE_PROFILES
+    include_dashed = issue_profile == "v2-dashed" or combined_style
+    include_ambiguous = issue_profile == "v2-ambiguous-mv" or combined_style
+    include_faint = issue_profile == "v2-faint" or combined_style
+    include_guide_grid = issue_profile in {"v2-guide-grid", "v2-combined"}
+    include_watermark = issue_profile == "v2-watermark" or combined_style
+    include_text = issue_profile == "v2-text" or combined_style
     dark_mode = is_v2_dark_profile(profile) or _is_dark_background(background)
     result = np.asarray(image, dtype=np.uint8).copy()
     non_crease_mask, target_line_mask, line_style, observed_assignment = default_v2_targets(
@@ -79,7 +98,7 @@ def apply_v2_augmentation(
     )
     modes: list[str] = []
 
-    if issue_profile in {"v2-dashed", "v2-combined"}:
+    if include_dashed:
         result = _render_cp_lines(
             vertices,
             edges,
@@ -90,7 +109,7 @@ def apply_v2_augmentation(
             palette=palette,
             rng=rng,
             dashed_non_border=True,
-            monochrome=issue_profile == "v2-combined",
+            monochrome=combined_style,
             dark_mode=dark_mode,
         )
         non_border = _line_mask(
@@ -104,8 +123,8 @@ def apply_v2_augmentation(
         line_style[(non_border > 0) & (target_line_mask > 0)] = V2_LINE_STYLE_IDS["dashed"]
         modes.append("dashed")
 
-    if issue_profile in {"v2-ambiguous-mv", "v2-combined"}:
-        if issue_profile != "v2-combined":
+    if include_ambiguous:
+        if not combined_style:
             result = _render_cp_lines(
                 vertices,
                 edges,
@@ -128,18 +147,18 @@ def apply_v2_augmentation(
             non_border_only=True,
         )
         active = (non_border > 0) & (target_line_mask > 0)
-        if issue_profile == "v2-combined":
+        if combined_style:
             active &= line_style != V2_LINE_STYLE_IDS["dashed"]
         line_style[active] = V2_LINE_STYLE_IDS["monochrome"]
         observed_assignment[(observed_assignment == 0) | (observed_assignment == 1)] = 3
         modes.append("ambiguous_mv")
 
-    if issue_profile in {"v2-faint", "v2-combined"}:
+    if include_faint:
         result = _fade_lines(
             result,
             background=background,
             rng=rng,
-            combined=issue_profile == "v2-combined",
+            combined=combined_style,
             dark_mode=dark_mode,
         )
         non_border = _line_mask(
@@ -155,23 +174,28 @@ def apply_v2_augmentation(
             line_style[(non_border > 0) & (target_line_mask > 0)] = faint_style
         modes.append("faint")
 
-    if issue_profile in {"v2-guide-grid", "v2-combined"}:
+    if include_guide_grid:
         result, mask = _add_guide_grid(
             result,
             rng=rng,
             dark_mode=dark_mode,
-            combined=issue_profile == "v2-combined",
+            combined=combined_style,
         )
         non_crease_mask = np.maximum(non_crease_mask, mask.astype(np.float32))
         modes.append("guide_grid")
 
-    if issue_profile in {"v2-watermark", "v2-combined"}:
+    if include_watermark:
         result, mask = _add_watermark(result, rng=rng, dark_mode=dark_mode)
         non_crease_mask = np.maximum(non_crease_mask, mask.astype(np.float32))
         modes.append("watermark")
 
-    if issue_profile in {"v2-text", "v2-combined"}:
-        result, mask = _add_text_labels(result, rng=rng, combined=issue_profile == "v2-combined", dark_mode=dark_mode)
+    if include_text:
+        result, mask = _add_text_labels(
+            result,
+            rng=rng,
+            combined=combined_style,
+            dark_mode=dark_mode,
+        )
         non_crease_mask = np.maximum(non_crease_mask, mask.astype(np.float32))
         modes.append("text")
 
@@ -313,8 +337,12 @@ def _add_text_labels(
             color = tuple(int(v) for v in rng.integers(170, 235, size=3))
         else:
             color = tuple(int(v) for v in rng.integers(35, 100, size=3))
-        cv2.putText(result, text, (x, y), cv2.FONT_HERSHEY_SIMPLEX, scale, color, thickness, cv2.LINE_AA)
-        cv2.putText(mask, text, (x, y), cv2.FONT_HERSHEY_SIMPLEX, scale, 255, thickness + 2, cv2.LINE_AA)
+        cv2.putText(
+            result, text, (x, y), cv2.FONT_HERSHEY_SIMPLEX, scale, color, thickness, cv2.LINE_AA
+        )
+        cv2.putText(
+            mask, text, (x, y), cv2.FONT_HERSHEY_SIMPLEX, scale, 255, thickness + 2, cv2.LINE_AA
+        )
     return result, (mask > 0).astype(np.float32)
 
 
@@ -331,7 +359,9 @@ def _add_watermark(
     mask_layer = np.zeros((h, w), dtype=np.uint8)
     size, _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, scale, thickness)
     org = ((w - size[0]) // 2, (h + size[1]) // 2)
-    cv2.putText(mask_layer, text, org, cv2.FONT_HERSHEY_SIMPLEX, scale, 255, thickness + 3, cv2.LINE_AA)
+    cv2.putText(
+        mask_layer, text, org, cv2.FONT_HERSHEY_SIMPLEX, scale, 255, thickness + 3, cv2.LINE_AA
+    )
     angle = float(rng.uniform(-36.0, -18.0) if rng.random() < 0.5 else rng.uniform(18.0, 36.0))
     matrix = cv2.getRotationMatrix2D((w / 2.0, h / 2.0), angle, 1.0)
     mask_layer = cv2.warpAffine(mask_layer, matrix, (w, h))
@@ -396,7 +426,14 @@ def _line_mask(
     for edge_idx, edge in enumerate(edges):
         if non_border_only and int(assignments[edge_idx]) == 2:
             continue
-        cv2.line(mask, _point(vertices[int(edge[0])]), _point(vertices[int(edge[1])]), 255, line_width, cv2.LINE_AA)
+        cv2.line(
+            mask,
+            _point(vertices[int(edge[0])]),
+            _point(vertices[int(edge[1])]),
+            255,
+            line_width,
+            cv2.LINE_AA,
+        )
     return (mask > 0).astype(np.float32)
 
 

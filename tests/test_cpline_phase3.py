@@ -79,6 +79,33 @@ def boundary_contact_cp() -> CreasePattern:
     )
 
 
+def orthogonal_grid_cp() -> CreasePattern:
+    return CreasePattern(
+        vertices=np.array(
+            [
+                [0.0, 0.0],
+                [1.0, 0.0],
+                [1.0, 1.0],
+                [0.0, 1.0],
+                [0.25, 0.0],
+                [0.25, 1.0],
+                [0.50, 0.0],
+                [0.50, 1.0],
+                [0.0, 0.25],
+                [1.0, 0.25],
+                [0.0, 0.50],
+                [1.0, 0.50],
+            ],
+            dtype=np.float32,
+        ),
+        edges=np.array(
+            [[0, 1], [1, 2], [2, 3], [3, 0], [4, 5], [6, 7], [8, 9], [10, 11]],
+            dtype=np.int64,
+        ),
+        assignments=np.array([2, 2, 2, 2, 0, 1, 0, 1], dtype=np.int8),
+    )
+
+
 def asymmetric_mv_cp() -> CreasePattern:
     return CreasePattern(
         vertices=np.array(
@@ -389,6 +416,26 @@ def test_v2_replay_corrective_mix_preserves_old_profiles_and_v2_stress_cases():
     assert profile_weights["v2-dark-combined"] > profile_weights["v2-dark-text"]
 
 
+def test_v3_no_guide_grid_replay_mix_excludes_guide_grid_profiles():
+    entries = AUGMENT_MIXES["v3-no-guide-grid-replay"]
+    profiles = [profile for profile, _, _ in entries]
+    profile_weights: dict[str, float] = {}
+    for profile, weight, _ in entries:
+        profile_weights[profile] = profile_weights.get(profile, 0.0) + weight
+
+    assert abs(sum(weight for _, weight, _ in entries) - 1.0) < 1e-6
+    assert all("guide-grid" not in profile for profile in profiles)
+    assert "v2-combined" not in profile_weights
+    assert "v2-dark-combined" not in profile_weights
+    assert "v2-combined-no-grid" in profile_weights
+    assert "v2-dark-combined-no-grid" in profile_weights
+    assert "v2-text" in profile_weights
+    assert "v2-watermark" in profile_weights
+    assert "v2-dashed" in profile_weights
+    assert "v2-faint" in profile_weights
+    assert "v2-ambiguous-mv" in profile_weights
+
+
 def test_augment_mix_sampler_handles_all_registered_mixes_repeatedly():
     rng = np.random.default_rng(123)
     for entries in AUGMENT_MIXES.values():
@@ -529,6 +576,50 @@ def test_v2_dark_faint_keeps_minimum_readable_contrast():
     background = np.array(sample.metadata["params"]["background"], dtype=np.float32).mean()
 
     assert float(grayscale[target].mean()) - float(background) > 20.0
+
+
+def test_v2_combined_no_grid_keeps_combined_artifacts_without_guide_grid():
+    sample = render_cpline_sample(
+        simple_mv_cp(),
+        image_size=160,
+        padding=10,
+        line_width=2,
+        augment_profile="v2-combined-no-grid",
+        seed=19,
+    )
+    metadata = sample.metadata["v2_augmentation"]
+
+    assert metadata["issue_profile"] == "v2-combined-no-grid"
+    assert "guide_grid" not in metadata["modes"]
+    assert {"dashed", "ambiguous_mv", "faint", "watermark", "text"} <= set(metadata["modes"])
+    assert np.count_nonzero(sample.v2_non_crease_mask) > 0
+    assert np.count_nonzero(sample.v2_line_style == V2_LINE_STYLE_IDS["dashed"]) > 0
+    assert 0 not in sample.v2_observed_assignment
+    assert 1 not in sample.v2_observed_assignment
+
+
+def test_v2_combined_no_grid_keeps_orthogonal_real_creases_positive():
+    clean = render_cpline_sample(
+        orthogonal_grid_cp(),
+        image_size=160,
+        padding=10,
+        line_width=2,
+        augment_profile="clean",
+    )
+    no_grid = render_cpline_sample(
+        orthogonal_grid_cp(),
+        image_size=160,
+        padding=10,
+        line_width=2,
+        augment_profile="v2-combined-no-grid",
+        seed=23,
+    )
+    real_crease_pixels = clean.line_prob > 0.5
+
+    assert np.count_nonzero(real_crease_pixels) > 0
+    assert np.all(no_grid.v2_target_line_mask[real_crease_pixels] > 0.0)
+    assert np.count_nonzero(no_grid.v2_non_crease_mask[real_crease_pixels]) == 0
+    assert "guide_grid" not in no_grid.metadata["v2_augmentation"]["modes"]
 
 
 def test_v2_issue_mix_samples_combined_profile():

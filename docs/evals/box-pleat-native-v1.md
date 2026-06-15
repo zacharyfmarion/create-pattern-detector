@@ -65,6 +65,27 @@ That split keeps the open-source source of truth path-independent: this repo
 commits the recipe and fingerprints, while generated product packs, dense
 caches, and reports stay ignored under the product repo's `artifacts/` tree.
 
+## Shipped V3 Dense Baseline
+
+The shipped V3 browser model was evaluated on the full `179` candidate BP set on
+2026-06-15. The generated product artifacts are ignored in `tree-maker-rust`:
+
+- Pack: `artifacts/cp-detect-correctness/packs/box-pleat-native-v1-baseline-v3-20260615/`
+- Dense cache: `artifacts/cp-detect-correctness/dense-cache/box-pleat-native-v1-baseline-v3-20260615-browser-onnx-v3/`
+- Dense report: `artifacts/cp-detect-correctness/reports/box-pleat-native-v1-baseline-v3-20260615-dense-heads/`
+
+Dense-head summary:
+
+| Slice | Raw line recall | Effective recall | Recall drop | Non-crease conflict | Mean line prob | Mean non-crease prob |
+|---|---:|---:|---:|---:|---:|---:|
+| Orthogonal BP creases | `0.5130` | `0.4744` | `0.0386` | `0.5422` | `0.5323` | `0.5887` |
+| Diagonal/other creases | `0.8752` | `0.8587` | `0.0166` | `0.0902` | `0.8802` | `0.1334` |
+| All creases | `0.5964` | `0.5631` | `0.0333` | `0.4345` | `0.6125` | `0.4798` |
+
+Use these numbers as the pre-training baseline for no-guide-grid training
+probes. The key gate is improving orthogonal BP raw/effective recall and
+reducing non-crease conflict without collapsing the diagonal/control slice.
+
 ## Selection Recipe
 
 The scorer ignores boundary edges, then fits the best rotated orthogonal frame

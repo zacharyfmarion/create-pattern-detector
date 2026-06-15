@@ -49,9 +49,53 @@ Status as of 2026-06-15:
   - orthogonal BP crease non-crease conflict fraction: `0.6822`
   - diagonal/other crease raw line recall control: `0.8591`
   - strict topology F1 on the same smoke pack: `0.1103`
-- This is sufficient evidence to plan a controlled training run, but promotion
-  evidence still requires a full 179-sample shipped-model BP baseline before the
-  training result is interpreted.
+- The full 179-sample shipped-model BP dense baseline is complete. Generated
+  product artifacts are ignored under `tree-maker-rust/artifacts/`:
+  - pack:
+    `cp-detect-correctness/packs/box-pleat-native-v1-baseline-v3-20260615/`
+  - dense cache:
+    `cp-detect-correctness/dense-cache/box-pleat-native-v1-baseline-v3-20260615-browser-onnx-v3/`
+  - dense report:
+    `cp-detect-correctness/reports/box-pleat-native-v1-baseline-v3-20260615-dense-heads/`
+- Full baseline metrics:
+
+  | Slice | Raw line recall | Effective recall | Recall drop | Non-crease conflict | Mean line prob | Mean non-crease prob |
+  |---|---:|---:|---:|---:|---:|---:|
+  | Orthogonal BP creases | `0.5130` | `0.4744` | `0.0386` | `0.5422` | `0.5323` | `0.5887` |
+  | Diagonal/other creases | `0.8752` | `0.8587` | `0.0166` | `0.0902` | `0.8802` | `0.1334` |
+  | All creases | `0.5964` | `0.5631` | `0.0333` | `0.4345` | `0.6125` | `0.4798` |
+
+- The Rust strict-topology full pass was intentionally not used as the
+  pre-training gate because degenerate topology can make post-processing slow.
+  A partial run scored 24 samples and confirmed the pass is useful later, but
+  the dense-head baseline above is the required pre-training comparison.
+- A controlled 800-step RunPod probe using `v3-no-guide-grid-replay`,
+  warm-starting from R1 and reinitializing `non_crease_head`, completed
+  successfully. It was exported to ONNX and evaluated through the product
+  browser dense-cache path on the full 179-sample BP pack. Probe artifacts:
+  - checkpoint:
+    `checkpoints/runpod_v3_no_guide_grid_probe/full/latest.pt`
+  - product ONNX:
+    `tree-maker-rust/apps/web/public/models/cp-detector-v3-no-grid-probe/`
+  - dense cache:
+    `tree-maker-rust/artifacts/cp-detect-correctness/dense-cache/box-pleat-native-v1-no-grid-probe-20260615-browser-onnx/`
+  - dense report:
+    `tree-maker-rust/artifacts/cp-detect-correctness/reports/box-pleat-native-v1-no-grid-probe-20260615-dense-heads/`
+- Full BP dense probe metrics:
+
+  | Slice | Raw line recall | Effective recall | Recall drop | Non-crease conflict | Mean line prob | Mean non-crease prob |
+  |---|---:|---:|---:|---:|---:|---:|
+  | Orthogonal BP creases | `0.5528` | `0.5525` | `0.0003` | `0.0049` | `0.5687` | `0.2699` |
+  | Diagonal/other creases | `0.8756` | `0.8744` | `0.0012` | `0.0103` | `0.8811` | `0.2921` |
+  | All creases | `0.6272` | `0.6267` | `0.0005` | `0.0061` | `0.6408` | `0.2737` |
+
+- Compared with the shipped-model baseline, orthogonal BP effective recall
+  improved by `+0.0781`, orthogonal non-crease conflict dropped by `-0.5373`,
+  and orthogonal suppression recall drop fell from `0.0386` to `0.0003`. This
+  strongly supports the guide-grid suppression hypothesis.
+- The remaining BP tail is now mostly raw line-head weakness on very dense
+  designs, not inference-time non-crease suppression. The next approved step is
+  a full RunPod training candidate using the same recipe.
 
 ## Non-Goals
 
@@ -89,11 +133,14 @@ Status as of 2026-06-15:
 ## Implementation Steps
 
 1. Preserve the old V2 profiles.
+   - Status: implemented in this branch.
    - Leave `v2-guide-grid`, `v2-dark-guide-grid`, `v2-combined`, and
      `v2-dark-combined` behavior unchanged.
    - This keeps R1/R3 and older V2 metrics reproducible.
 
 2. Add guide-grid-free combined profiles.
+   - Status: implemented in this branch as `v2-combined-no-grid` and
+     `v2-dark-combined-no-grid`.
    - Add light/dark profiles such as:
 
      ```text
@@ -112,6 +159,7 @@ Status as of 2026-06-15:
      text effects; skip `_add_guide_grid` entirely.
 
 3. Add a guide-grid-free training mix.
+   - Status: implemented in this branch as `v3-no-guide-grid-replay`.
    - Add a new mix name, for example:
 
      ```text
@@ -129,6 +177,7 @@ Status as of 2026-06-15:
      `v2-dark-combined` in this mix.
 
 4. Add target-safety tests.
+   - Status: implemented and locally validated in this branch.
    - Assert `AUGMENT_MIXES["v3-no-guide-grid-replay"]` contains no profile with
      `"guide-grid"` and no original `v2-combined`/`v2-dark-combined`.
    - Assert `render_cpline_sample(..., augment_profile="v2-combined-no-grid")`
@@ -152,14 +201,19 @@ Status as of 2026-06-15:
      - line recall with and without inference-time non-crease suppression.
    - Optional improvement: add p10/p50 line-prob and p50/p90 non-crease-prob
      summaries if the full-run report needs more distribution detail.
-   - Before training, run the full 179-sample BP baseline on the shipped V3 ONNX
-     model and save the ignored product-side report.
+   - Done: the full 179-sample BP baseline on the shipped V3 ONNX model is
+     generated and summarized in Current Status.
    - Still add or identify a control slice of non-box-pleat readable CPs.
    - Keep a guide-grid artifact slice as a known tradeoff measurement, not a hard
      blocker.
 
 6. Run a short training ablation.
-   - Only start after the full shipped-model BP baseline is generated.
+   - Status: complete. The 800-step probe validated the recipe direction.
+   - Run on RunPod; local training is only for smoke tests.
+   - Budget note: keep this probe within the user's approximately `$15` RunPod
+     budget. Locate credentials from existing worktree setup rather than adding
+     secrets to git.
+   - Used `scripts/training/run_cpline_runpod_v3_no_guide_grid_probe.sh`.
    - Start from the promoted R1 checkpoint:
 
      ```text
@@ -172,10 +226,37 @@ Status as of 2026-06-15:
      - reinitialize `non_crease_head` to remove the legacy guide-grid detector;
      - train with the existing text/watermark non-crease loss;
      - keep the line head warm-started so it preserves existing crease recall.
-   - If raw `line_prob` stays weak on box-pleat creases, run a second ablation
-     with explicit box-pleat/grid-positive synthetic examples or oversampling.
+   - Raw `line_prob` improved on aggregate but stays weak on the densest
+     box-pleat samples. Do not change the recipe yet; first run a full-length
+     candidate to separate undertraining from representation limits.
 
-7. Evaluate promotion.
+7. Run a full training candidate.
+   - Status: approved for launch on 2026-06-15.
+   - Use `scripts/training/run_cpline_runpod_v3_no_guide_grid_full.sh`.
+   - Start clean from the promoted R1 checkpoint, not from the 800-step probe:
+
+     ```text
+     checkpoints/r1_close_pair_warmstart/latest.pt
+     ```
+
+   - Default run configuration:
+     - `PROFILE=v3-no-guide-grid-replay`
+     - `EVAL_PROFILE=v3-no-guide-grid-replay`
+     - `REINIT_HEADS=non_crease_head`
+     - `CHECKPOINT_LOAD_MODE=init`
+     - `STEPS_FULL=5000`
+     - `TRAIN_COUNT_FULL=2048`
+     - `VAL_COUNT_FULL=256`
+     - `LR=0.00005`
+     - `SEED=31`
+     - `CHECKPOINT_EVERY=500`
+     - `SKIP_GRAPH_EVAL=1`
+     - `SKIP_FINAL_EVAL=1`
+   - Use an RTX 4090-class pod when available. The 800-step probe took about
+     `1003s`, so 5000 steps should be roughly `1.75h` of training on the same
+     GPU class before setup/copy overhead.
+
+8. Evaluate promotion.
    - Compare against the full shipped-model BP baseline, not only the top-3
      smoke run.
    - Required improvement:
@@ -192,7 +273,7 @@ Status as of 2026-06-15:
        acceptable if box-pleat positives improve and no real target requires
        guide-grid suppression as a primary production feature.
 
-8. Export and document only after promotion.
+9. Export and document only after promotion.
    - If the no-grid model wins, add a checkpoint manifest under
      `artifacts/checkpoints/`.
    - Update `docs/model-training-history.md`.
