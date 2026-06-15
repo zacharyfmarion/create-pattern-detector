@@ -11,6 +11,13 @@ scripts/setup_python_env.sh
 The setup script reuses a shared dependency virtualenv across git worktrees and
 links it into the current worktree as `.venv`.
 
+## Model Source Of Truth
+
+Before using, exporting, or retraining CPLineNet, read
+`docs/model-training-history.md`. It records the current downstream/browser model,
+the checkpoint registry entry, ONNX export provenance, and why the later R3
+from-scratch close-pair run was not promoted.
+
 ## Usage
 
 ### Detect A CP Image
@@ -32,6 +39,14 @@ unless the matte is truly ambiguous.
 
 See `docs/phase-5-inference-cli.md` for checkpoint recovery, output layout, and
 debug artifacts.
+
+### Box-Pleat Native Eval
+
+Use `docs/evals/box-pleat-native-v1.md` and
+`eval_specs/box_pleat_native_v1.json` to regenerate the deterministic
+box-pleat candidate set from the native converted-FOLD corpus. The eval is
+verified by path-independent FOLD content fingerprints instead of tracked local
+paths.
 
 ### Validate Pipeline
 

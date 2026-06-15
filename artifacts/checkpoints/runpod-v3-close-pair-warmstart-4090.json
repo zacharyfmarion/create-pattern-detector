@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "runpod-v3-close-pair-warmstart-4090",
-  "status": "candidate",
+  "status": "promoted",
   "phase": "v3-close-pair",
   "registeredAt": "2026-06-10",
   "description": "Close-pair junction recovery recipe (docs/v2-close-pair-junction-recovery.md): sigma 1.5 heatmap, penalty-reduced focal loss, CenterNet-style radius-3 nearest-vertex offsets. Warm-started from runpod-v2-replay-correction-full-4000ada with the offset head re-initialized. Best checkpoint of the close-pair round: beats the V2 baseline on every strict-topology metric (edge F1 0.942 -> 0.953 on clean-1024-s15, extras 130 -> 95, junction recall 0.959 -> 0.973) but close-pair resolution plateaus at ~26% (gate was 80%); a from-scratch 5000-step ablation (R3) landed identically, so the ceiling is the recipe/input resolution, not the init.",
@@ -53,7 +53,9 @@
     "vectorizerThreshold": 0.65,
     "junctionOffsetRadiusPx": 3.0,
     "notes": "junction_offset is radius-normalized (multiply by 3.0px). Decode with offset-vote clustering (eval_close_pairs.py decode_offset_clusters / tree-maker-rust evidence_extract offset_cluster_primitives). Requires batch-stats BatchNorm: model.eval() running stats collapse junction recall to ~0.35.",
-    "supportedEnvelope": "Readable rectified 1024px square CP inputs, same envelope as the V2 baseline."
+    "supportedEnvelope": "Readable rectified 1024px square CP inputs, same envelope as the V2 baseline.",
+    "downstreamOnnxManifest": "tree-maker-rust/apps/web/public/models/cp-detector-v3/manifest.json",
+    "downstreamOnnxSha256": "39705fb5b17b1e58255f0721d7185a11348187f8ac2a56adaf8226949eafb4ee"
   },
   "evaluation": {
     "source": "artifacts/eval_r1.json",
@@ -74,5 +76,10 @@
       "mergedEdges": 67,
       "baselineEdgeF1": 0.942
     }
-  }
+  },
+  "relatedDocs": [
+    "docs/model-training-history.md",
+    "docs/v2-close-pair-junction-recovery.md",
+    "docs/checkpoint-management.md"
+  ]
 }

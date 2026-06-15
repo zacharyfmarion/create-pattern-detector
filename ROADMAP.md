@@ -338,7 +338,7 @@ Goal: replace ground-truth labels with model-predicted fields.
 
 Status: V1 complete for the supported readable-input envelope. See
 `docs/phase-3-v1-status.md` for the completion decision, eval numbers, and the
-dense/tiny geometry V2 caveat. The current blessed checkpoint is registered in
+dense/tiny geometry V2 caveat. The Phase 3 V1 checkpoint is registered in
 `artifacts/checkpoints/phase3-v1-cpline.json`; use
 `docs/checkpoint-management.md` for checkpoint organization, checksums, and
 replacement rules.
@@ -389,7 +389,7 @@ Current local finding:
   full-size path and memory shape, not model quality.
 - A first 1024px RunPod `hrnet_w18` curriculum checkpoint was followed by a
   focused hard-negative line-loss continuation after grid-like dark backgrounds
-  exposed false positives. This produced the current best Phase 3 V1 checkpoint
+  exposed false positives. This produced the best Phase 3 V1 checkpoint
   artifact for readable crease patterns.
 - Deterministic single-worker dark eval before removing grid augmentation showed
   that background guide grids create a distracting line-detection problem that is

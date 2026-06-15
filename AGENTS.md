@@ -76,6 +76,15 @@ The script refuses to replace a non-empty `data/output/scraped` directory unless
 
 Keep raw dataset files, crops, manifests, and generated reports out of git. Commit small code, docs, config examples, tests, and deterministic fixture manifests instead.
 
+## Box-Pleat Native Eval
+
+For the box-pleat/grid-line-suppression diagnostic, use
+`docs/evals/box-pleat-native-v1.md` and
+`eval_specs/box_pleat_native_v1.json`. The eval set is intentionally
+re-derived from the native converted-FOLD corpus and verified with
+path-independent canonical FOLD fingerprints; do not commit local path lists or
+generated contact sheets as the source of truth.
+
 ## Shared Synthetic Datasets
 
 The maintained synthetic generator lives under `tools/synthetic-generator/`.
@@ -108,9 +117,19 @@ Do not commit model weights. Keep `.pt` and related checkpoint files under the
 ignored `checkpoints/` tree, and register blessed or important runs with small
 JSON manifests under `artifacts/checkpoints/`.
 
-Before replacing or using the Phase 3 checkpoint, read
-`docs/checkpoint-management.md`. The current blessed Phase 3 V1 CPLineNet
-manifest is `artifacts/checkpoints/phase3-v1-cpline.json`.
+Before replacing, exporting, or using a checkpoint, read
+`docs/model-training-history.md` first, then `docs/checkpoint-management.md`.
+The current downstream/browser model is the V3 close-pair R1 warm-start
+checkpoint registered at
+`artifacts/checkpoints/runpod-v3-close-pair-warmstart-4090.json`.
+
+Do not confuse the later R3 from-scratch run with the promoted model. R3 is
+registered as an ablation at
+`artifacts/checkpoints/runpod-v3-close-pair-scratch-r3-4090.json` because it
+landed statistically identical to R1 and was not promoted.
+
+The older blessed Phase 3 V1 Python/CLI baseline remains registered at
+`artifacts/checkpoints/phase3-v1-cpline.json`.
 
 ## RunPod Phase 3
 
