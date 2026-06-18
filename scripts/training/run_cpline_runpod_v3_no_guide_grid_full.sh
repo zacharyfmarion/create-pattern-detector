@@ -1,28 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-cd "$ROOT_DIR"
+if [[ "${CP_ARE_YOU_SURE_LEGACY_NO_GUIDE_GRID_SCRIPT:-}" != "are-you-sure" ]]; then
+  cat >&2 <<'EOF'
+fatal: run_cpline_runpod_v3_no_guide_grid_full.sh is retired.
 
-export OUTPUT_ROOT="${OUTPUT_ROOT:-checkpoints/runpod_v3_no_guide_grid_full_r1}"
-export PROFILE="${PROFILE:-v3-no-guide-grid-replay}"
-export EVAL_PROFILE="${EVAL_PROFILE:-v3-no-guide-grid-replay}"
-export INIT_CHECKPOINT="${INIT_CHECKPOINT:-checkpoints/r1_close_pair_warmstart/latest.pt}"
-export FULL_INIT_CHECKPOINT="${FULL_INIT_CHECKPOINT:-$INIT_CHECKPOINT}"
-export CHECKPOINT_LOAD_MODE="${CHECKPOINT_LOAD_MODE:-init}"
-export REINIT_HEADS="${REINIT_HEADS:-non_crease_head}"
+This old name previously launched without the radius-3 close-pair offset
+settings, producing a checkpoint with junction_offset_radius_px=0.0.
 
-export RUN_WARMUP="${RUN_WARMUP:-0}"
-export RUN_FULL="${RUN_FULL:-1}"
-export STEPS_FULL="${STEPS_FULL:-5000}"
-export TRAIN_COUNT_FULL="${TRAIN_COUNT_FULL:-2048}"
-export VAL_COUNT_FULL="${VAL_COUNT_FULL:-256}"
-export LR="${LR:-0.00005}"
-export SEED="${SEED:-31}"
-export NO_PIN_MEMORY="${NO_PIN_MEMORY:-1}"
-export LOG_MEMORY="${LOG_MEMORY:-1}"
-export CHECKPOINT_EVERY="${CHECKPOINT_EVERY:-500}"
-export SKIP_GRAPH_EVAL="${SKIP_GRAPH_EVAL:-1}"
-export SKIP_FINAL_EVAL="${SKIP_FINAL_EVAL:-1}"
+Are you sure? Use the canonical close-pair-compatible launcher instead:
 
-exec scripts/training/run_cpline_runpod_v2_continuation.sh
+  scripts/training/run_cpline_runpod_v3_no_guide_grid_close_pair_full.sh
+
+To deliberately route this old name to the canonical launcher, set:
+
+  CP_ARE_YOU_SURE_LEGACY_NO_GUIDE_GRID_SCRIPT=are-you-sure
+EOF
+  exit 2
+fi
+
+exec scripts/training/run_cpline_runpod_v3_no_guide_grid_close_pair_full.sh

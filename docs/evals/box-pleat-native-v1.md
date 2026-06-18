@@ -86,6 +86,49 @@ Use these numbers as the pre-training baseline for no-guide-grid training
 probes. The key gate is improving orthogonal BP raw/effective recall and
 reducing non-crease conflict without collapsing the diagonal/control slice.
 
+## No-Guide-Grid Dense Diagnostic
+
+Two R1 warm-start no-guide-grid experiments were evaluated on the same full
+179-sample BP pack in `tree-maker-rust` on 2026-06-16:
+
+- Probe: 800 steps, no guide-grid training profiles, reinitialized
+  `non_crease_head`.
+- Full diagnostic: 5000 steps with the same no-guide-grid profile.
+
+Dense-head comparison:
+
+| Model | Slice | Raw line recall | Effective recall | Recall drop | Non-crease conflict | Mean line prob | Mean non-crease prob |
+|---|---|---:|---:|---:|---:|---:|---:|
+| Shipped V3 R1 | Orthogonal BP creases | `0.5130` | `0.4744` | `0.0386` | `0.5422` | `0.5323` | `0.5887` |
+| No-grid probe, 800 steps | Orthogonal BP creases | `0.5528` | `0.5525` | `0.0003` | `0.0049` | `0.5687` | `0.2699` |
+| No-grid full, 5000 steps | Orthogonal BP creases | `0.6012` | `0.6001` | `0.0011` | `0.0154` | `0.6159` | `0.1062` |
+| Shipped V3 R1 | Diagonal/other creases | `0.8752` | `0.8587` | `0.0166` | `0.0902` | `0.8802` | `0.1334` |
+| No-grid probe, 800 steps | Diagonal/other creases | `0.8756` | `0.8744` | `0.0012` | `0.0103` | `0.8811` | `0.2921` |
+| No-grid full, 5000 steps | Diagonal/other creases | `0.8810` | `0.8788` | `0.0023` | `0.0160` | `0.8833` | `0.0826` |
+
+This confirms the original grid-suppression hypothesis for the non-crease head:
+orthogonal BP crease pixels stopped being classified as non-crease guide-grid
+evidence, and effective recall now tracks raw recall.
+
+The remaining orthogonal-vs-diagonal recall gap is not fixed:
+`0.6012` raw recall for orthogonal BP creases versus `0.8810` for
+diagonal/other creases in the full diagnostic. Since non-crease conflict is now
+low, the residual gap is more likely due to data distribution and missing
+synthetic BP-style crease families than to non-crease suppression still being
+baked into the warm-start. A warm-start-only line-head bias is still possible,
+but the 800-step to 5000-step improvement argues against a hard inability to
+unlearn the old behavior.
+
+Important caveat: the 5000-step full diagnostic accidentally trained with
+`junction_offset_radius_px=0.0` because the old no-grid launcher did not forward
+the R1 close-pair offset parameters. Its dense-head BP metrics are valid, but it
+must not be promoted or exported as the product default. Future compatible
+training runs must use:
+
+```bash
+scripts/training/run_cpline_runpod_v3_no_guide_grid_close_pair_full.sh
+```
+
 ## Selection Recipe
 
 The scorer ignores boundary edges, then fits the best rotated orthogonal frame

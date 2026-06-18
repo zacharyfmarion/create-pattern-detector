@@ -76,6 +76,51 @@ many 5px-apart junction pairs are nearly one ink blob. Future attempts should be
 new projects, such as higher-resolution dense heads, tiled crops, a dedicated
 pair head, or pipeline-side fused-vertex splitting from incident-line geometry.
 
+## Box-Pleat No-Guide-Grid Diagnostic
+
+The 2026-06-16 no-guide-grid warm-start experiment tested whether BP
+horizontal/vertical crease families were being learned as non-crease guide-grid
+artifacts. Dense-head eval on the full 179-sample
+`box-pleat-native-v1` set strongly supports that hypothesis for the
+non-crease head:
+
+| Model | Orthogonal raw recall | Orthogonal effective recall | Orthogonal non-crease conflict | Diagonal raw recall |
+| --- | ---: | ---: | ---: | ---: |
+| Shipped V3 R1 | 0.5130 | 0.4744 | 0.5422 | 0.8752 |
+| No-grid probe, 800 steps | 0.5528 | 0.5525 | 0.0049 | 0.8756 |
+| No-grid full, 5000 steps | 0.6012 | 0.6001 | 0.0154 | 0.8810 |
+
+Interpretation:
+
+- The non-crease suppression failure is essentially fixed: effective recall now
+  matches raw recall, and non-crease conflict fell from 54.2% to 1.5%.
+- Orthogonal BP creases are still not equal to diagonal/other creases
+  (`0.6012` raw recall vs `0.8810`). Since non-crease conflict is low and the
+  warm-start continued improving from the 800-step probe, the remaining gap is
+  more likely a data-distribution/BP-coverage problem than an inability to
+  unlearn the old non-crease behavior. The current synthetic mix is mostly
+  TreeMaker/Rabbit-Ear/22.5-style data and does not explicitly generate
+  box-pleat crease patterns.
+- The 5000-step no-grid checkpoint is not promotion-ready because the launcher
+  forgot to forward the close-pair offset recipe. It trained and exported with
+  `junction_offset_radius_px=0.0` instead of the R1-required `3.0`, so its dense
+  BP numbers are valid but its junction-offset semantics are incompatible with
+  the current radius-3 product decoder.
+
+Future no-guide-grid runs that should remain close-pair-compatible must use the
+canonical launcher:
+
+```bash
+scripts/training/run_cpline_runpod_v3_no_guide_grid_close_pair_full.sh
+```
+
+That script sets and verifies the R1 close-pair parameters
+(`junction_sigma_px=1.5`, `junction_offset_radius_px=3.0`,
+`junction_offset_weight=0.5`, `junction_focal_alpha=2.0`,
+`junction_focal_beta=4.0`) before launching the full run. The retired
+`run_cpline_runpod_v3_no_guide_grid_{probe,full}.sh` names intentionally fail
+with an "Are you sure?" message unless explicitly acknowledged.
+
 ## Timeline
 
 | Date | Run | Checkpoint | Init | Outcome |
@@ -84,6 +129,7 @@ pair head, or pipeline-side fused-vertex splitting from incident-line geometry.
 | 2026-05-22 | V2 replay correction full | `artifacts/checkpoints/runpod-v2-replay-correction-full-4000ada.json` | V2 continuation/replay | Best balanced V2 candidate before close-pair work; added V2 heads and artifact robustness, but not the current browser model. |
 | 2026-06-10 | V3 close-pair R1 warm-start | `artifacts/checkpoints/runpod-v3-close-pair-warmstart-4090.json` | V2 replay checkpoint, reinitialized `offset_head` | Current banked/product-exported model. Improved strict topology and close-pair proxy with radius-3 offset clustering. |
 | 2026-06-10 | V3 close-pair R3 scratch | `artifacts/checkpoints/runpod-v3-close-pair-scratch-r3-4090.json` | None | From-scratch ablation. Similar metrics to R1, so not promoted. |
+| 2026-06-16 | V3 no-guide-grid full R1 diagnostic | Not registered; local ignored checkpoint `checkpoints/runpod_v3_no_guide_grid_full_r1_20260615/full/latest.pt` | R1 close-pair checkpoint, reinitialized `non_crease_head` | Dense BP evidence improved substantially, but the launcher omitted radius-3 close-pair offset args and produced `junction_offset_radius_px=0.0`. Treat as a dense-head diagnostic only, not a promotable model. |
 
 ## Update Rules
 

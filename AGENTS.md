@@ -141,3 +141,26 @@ checks, curriculum launch, monitoring, and teardown commands. Use
 Before launching more Phase 3 GPU work, read `docs/phase-3-v1-status.md`.
 Phase 3 V1 is complete for readable 1024px crease patterns; the remaining dense
 Rabbit Ear/tiny-fold tail is tracked as V2 and should not block Phase 4 work.
+
+## No-Guide-Grid Training Safety
+
+For any no-guide-grid training intended to stay compatible with the current V3
+close-pair product decoder, use only:
+
+```bash
+scripts/training/run_cpline_runpod_v3_no_guide_grid_close_pair_full.sh
+```
+
+or the short probe variant:
+
+```bash
+scripts/training/run_cpline_runpod_v3_no_guide_grid_close_pair_probe.sh
+```
+
+These canonical launchers set and verify the required R1 close-pair recipe:
+`junction_sigma_px=1.5`, `junction_offset_radius_px=3.0`,
+`junction_offset_weight=0.5`, `junction_focal_alpha=2.0`, and
+`junction_focal_beta=4.0`. The older
+`run_cpline_runpod_v3_no_guide_grid_{probe,full}.sh` names are intentionally
+retired and fail with an "Are you sure?" message because they previously
+launched a dense-head diagnostic with `junction_offset_radius_px=0.0`.

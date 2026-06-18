@@ -26,6 +26,14 @@ CHECKPOINT_EVERY="${CHECKPOINT_EVERY:-400}"
 SKIP_GRAPH_EVAL="${SKIP_GRAPH_EVAL:-1}"
 SKIP_FINAL_EVAL="${SKIP_FINAL_EVAL:-0}"
 EVAL_THRESHOLDS="${EVAL_THRESHOLDS:-0.35,0.45,0.55,0.65,0.75,0.85}"
+JUNCTION_SIGMA_PX="${JUNCTION_SIGMA_PX:-}"
+JUNCTION_OFFSET_RADIUS_PX="${JUNCTION_OFFSET_RADIUS_PX:-0.0}"
+JUNCTION_OFFSET_WEIGHT="${JUNCTION_OFFSET_WEIGHT:-0.25}"
+JUNCTION_FOCAL_ALPHA="${JUNCTION_FOCAL_ALPHA:-0.0}"
+JUNCTION_FOCAL_BETA="${JUNCTION_FOCAL_BETA:-4.0}"
+REQUIRE_CLOSE_PAIR_OFFSETS="${REQUIRE_CLOSE_PAIR_OFFSETS:-0}"
+REQUIRE_NO_GUIDE_GRID_PROFILE="${REQUIRE_NO_GUIDE_GRID_PROFILE:-0}"
+REQUIRE_R1_INIT="${REQUIRE_R1_INIT:-0}"
 
 PROFILE="${PROFILE:-v2-all-issue-mix}"
 EVAL_PROFILE="${EVAL_PROFILE:-$PROFILE}"
@@ -60,6 +68,65 @@ BOUNDARY_SIDE_WEIGHT="${BOUNDARY_SIDE_WEIGHT:-0.0}"
 BOUNDARY_OFFSET_WEIGHT="${BOUNDARY_OFFSET_WEIGHT:-0.0}"
 BOUNDARY_COORD_WEIGHT="${BOUNDARY_COORD_WEIGHT:-0.2}"
 
+if [[ "$REQUIRE_CLOSE_PAIR_OFFSETS" == "1" || "$REQUIRE_NO_GUIDE_GRID_PROFILE" == "1" || "$REQUIRE_R1_INIT" == "1" ]]; then
+  "$PYTHON" - <<'PY'
+import os
+import sys
+
+
+def fail(message: str) -> None:
+    print(f"fatal: {message}", file=sys.stderr)
+    sys.exit(2)
+
+
+def require_float(name: str, expected: float, tolerance: float = 1e-9) -> None:
+    raw = os.environ.get(name, "")
+    try:
+        value = float(raw)
+    except ValueError:
+        fail(f"{name} must be numeric, got {raw!r}")
+    if abs(value - expected) > tolerance:
+        fail(f"{name} must be {expected:g}, got {raw!r}")
+
+
+if os.environ.get("REQUIRE_CLOSE_PAIR_OFFSETS") == "1":
+    require_float("JUNCTION_SIGMA_PX", 1.5)
+    require_float("JUNCTION_OFFSET_RADIUS_PX", 3.0)
+    require_float("JUNCTION_OFFSET_WEIGHT", 0.5)
+    require_float("JUNCTION_FOCAL_ALPHA", 2.0)
+    require_float("JUNCTION_FOCAL_BETA", 4.0)
+    reinit_heads = {
+        item.strip()
+        for item in os.environ.get("REINIT_HEADS", "").replace(",", " ").split()
+        if item.strip()
+    }
+    if "non_crease_head" not in reinit_heads:
+        fail("REINIT_HEADS must include non_crease_head for no-guide-grid warm-starts")
+    forbidden = {"offset_head", "junction_offset_head", "junction_offset"}
+    found = sorted(reinit_heads & forbidden)
+    if found:
+        fail(
+            "REINIT_HEADS must not include offset heads when preserving R1 "
+            f"close-pair offsets; found {', '.join(found)}"
+        )
+
+if os.environ.get("REQUIRE_NO_GUIDE_GRID_PROFILE") == "1":
+    for name in ("PROFILE", "EVAL_PROFILE"):
+        value = os.environ.get(name, "")
+        if value != "v3-no-guide-grid-replay":
+            fail(f"{name} must be v3-no-guide-grid-replay, got {value!r}")
+
+if os.environ.get("REQUIRE_R1_INIT") == "1":
+    init_checkpoint = os.environ.get("FULL_INIT_CHECKPOINT") or os.environ.get("INIT_CHECKPOINT", "")
+    if not init_checkpoint.endswith("checkpoints/r1_close_pair_warmstart/latest.pt"):
+        fail(
+            "FULL_INIT_CHECKPOINT/INIT_CHECKPOINT must point to "
+            "checkpoints/r1_close_pair_warmstart/latest.pt for the current "
+            f"no-guide-grid close-pair warm-start, got {init_checkpoint!r}"
+        )
+PY
+fi
+
 mkdir -p "$OUTPUT_ROOT"
 
 run_stage() {
@@ -93,6 +160,10 @@ run_stage() {
     --eval-augment-profile "$EVAL_PROFILE"
     --eval-thresholds "$EVAL_THRESHOLDS"
     --reinit-heads "$REINIT_HEADS"
+    --junction-offset-radius-px "$JUNCTION_OFFSET_RADIUS_PX"
+    --junction-offset-weight "$JUNCTION_OFFSET_WEIGHT"
+    --junction-focal-alpha "$JUNCTION_FOCAL_ALPHA"
+    --junction-focal-beta "$JUNCTION_FOCAL_BETA"
     --line-hard-negative-weight "$LINE_HARD_NEGATIVE_WEIGHT"
     --line-hard-negative-ratio "$LINE_HARD_NEGATIVE_RATIO"
     --line-hard-negative-multiplier "$LINE_HARD_NEGATIVE_MULTIPLIER"
@@ -114,6 +185,9 @@ run_stage() {
     --boundary-coord-weight "$BOUNDARY_COORD_WEIGHT"
     --use-v2-observed-assignment
   )
+  if [[ -n "$JUNCTION_SIGMA_PX" ]]; then
+    args+=(--junction-sigma-px "$JUNCTION_SIGMA_PX")
+  fi
   if [[ "$NO_PIN_MEMORY" == "1" ]]; then
     args+=(--no-pin-memory)
   fi

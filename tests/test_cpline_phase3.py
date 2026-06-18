@@ -622,6 +622,110 @@ def test_v2_combined_no_grid_keeps_orthogonal_real_creases_positive():
     assert "guide_grid" not in no_grid.metadata["v2_augmentation"]["modes"]
 
 
+def test_runpod_v2_launcher_forwards_close_pair_knobs():
+    script = open(
+        "scripts/training/run_cpline_runpod_v2_continuation.sh",
+        encoding="utf-8",
+    ).read()
+
+    assert '--junction-sigma-px "$JUNCTION_SIGMA_PX"' in script
+    assert '--junction-offset-radius-px "$JUNCTION_OFFSET_RADIUS_PX"' in script
+    assert '--junction-offset-weight "$JUNCTION_OFFSET_WEIGHT"' in script
+    assert '--junction-focal-alpha "$JUNCTION_FOCAL_ALPHA"' in script
+    assert '--junction-focal-beta "$JUNCTION_FOCAL_BETA"' in script
+
+
+def test_runpod_v2_launcher_rejects_bad_close_pair_offset_config(tmp_path):
+    env = {
+        **os.environ,
+        "PYTHON": sys.executable,
+        "OUTPUT_ROOT": str(tmp_path / "bad"),
+        "RUN_WARMUP": "0",
+        "RUN_FULL": "0",
+        "REQUIRE_CLOSE_PAIR_OFFSETS": "1",
+        "JUNCTION_SIGMA_PX": "1.5",
+        "JUNCTION_OFFSET_RADIUS_PX": "0.0",
+        "JUNCTION_OFFSET_WEIGHT": "0.5",
+        "JUNCTION_FOCAL_ALPHA": "2.0",
+        "JUNCTION_FOCAL_BETA": "4.0",
+        "REINIT_HEADS": "non_crease_head",
+    }
+
+    result = subprocess.run(
+        ["bash", "scripts/training/run_cpline_runpod_v2_continuation.sh"],
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 2
+    assert "JUNCTION_OFFSET_RADIUS_PX must be 3" in result.stderr
+
+
+def test_no_guide_grid_close_pair_launcher_accepts_guarded_dry_run(tmp_path):
+    env = {
+        **os.environ,
+        "PYTHON": sys.executable,
+        "OUTPUT_ROOT": str(tmp_path / "dry"),
+        "RUN_PREFLIGHT": "0",
+        "RUN_WARMUP": "0",
+        "RUN_FULL": "0",
+    }
+
+    subprocess.run(
+        [
+            "bash",
+            "scripts/training/run_cpline_runpod_v3_no_guide_grid_close_pair_full.sh",
+        ],
+        env=env,
+        check=True,
+    )
+
+
+def test_retired_no_guide_grid_script_requires_are_you_sure():
+    result = subprocess.run(
+        ["bash", "scripts/training/run_cpline_runpod_v3_no_guide_grid_full.sh"],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 2
+    assert "Are you sure?" in result.stderr
+    assert "run_cpline_runpod_v3_no_guide_grid_close_pair_full.sh" in result.stderr
+
+
+def test_verify_cpline_run_config_script_checks_expected_values(tmp_path):
+    run_config = tmp_path / "run_config.json"
+    run_config.write_text(
+        json.dumps(
+            {
+                "augment_profile": "v3-no-guide-grid-replay",
+                "junction_offset_radius_px": 3.0,
+                "loaded_checkpoint": "/workspace/checkpoints/r1_close_pair_warmstart/latest.pt",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    subprocess.run(
+        [
+            sys.executable,
+            "scripts/training/verify_cpline_run_config.py",
+            "--run-config",
+            str(run_config),
+            "--expect-str",
+            "augment_profile=v3-no-guide-grid-replay",
+            "--expect-float",
+            "junction_offset_radius_px=3.0",
+            "--expect-suffix",
+            "loaded_checkpoint=checkpoints/r1_close_pair_warmstart/latest.pt",
+        ],
+        check=True,
+    )
+
+
 def test_v2_issue_mix_samples_combined_profile():
     cp = simple_mv_cp()
     seen = {
