@@ -136,24 +136,24 @@ function segAt(s: OriSegment, t0: number, t1: number): OriSegment {
 }
 
 /**
- * EXPERIMENTAL Stage B: axial+k pleat contours (the universal-molecule pleats).
- * For each flap center we detect which axis directions actually carry a level-0
- * axial, then launch parallel contours offset k grid units PERPENDICULAR to that
- * axis (k = 1..maxLevel), running in the axis direction and reflecting off ridges
- * like the axials. Offsetting only parallel to real axis directions avoids the
- * perpendicular creases the naive both-directions version produced. The exact
- * rule is still being verified visually, so this is not yet wired into the
- * canonical pipeline.
+ * Stage B: axial+1 pleat contours.
+ *
+ * Rule (from the manual construction): take every point that is exactly 1 unit
+ * perpendicular-offset from an axial crease and is not already a crease, then
+ * march a contour through it in both directions following the SAME rules as
+ * axial generation (reflect across ridges, terminate at a multi-ridge junction
+ * or the paper edge). Both the interior axials and the paper-edge axials are
+ * valid sources to offset from.
+ *
+ * `axials` should be the interior axials; `edgeAxials` the paper-edge runs.
  */
 export function propagateAxialOffsets(
   ridges: OriSegment[],
-  packing: OriSegment[],
-  boundary: OriSegment[],
   sheet: { width: number; height: number },
-  centers: GridPoint[],
-  maxLevel = 16,
+  axials: OriSegment[],
+  edgeAxials: OriSegment[],
 ): OriSegment[] {
-  const all: OriSegment[] = [];
+  const out: OriSegment[] = [];
   const seen = new Set<string>();
   const march = (start: GridPoint, dir: GridPoint): void => {
     let from = start;
@@ -161,105 +161,42 @@ export function propagateAxialOffsets(
     for (let bounce = 0; bounce < MAX_BOUNCES; bounce++) {
       const hit = marchRay(from, d, ridges, sheet);
       if (!hit) break;
-      addSegment(all, seen, from, hit.point);
+      addSegment(out, seen, from, hit.point);
       if (hit.type !== "ridge") break;
       d = reflect(d, hit.ridgeDir!);
       from = hit.point;
     }
   };
-  const hasAxis = (c: GridPoint, dir: GridPoint): boolean => {
-    const hit = marchRay(c, dir, ridges, sheet);
-    if (!hit) return false;
-    return !onPaperEdge({ a: c, b: hit.point }, sheet);
-  };
-  // Flap region labels (cells bounded by hinges + paper edge). A pleat at level
-  // k only exists while the offset start stays in the flap, capping the depth.
-  const labels = cellRegionLabels(packing, boundary, sheet);
-  const regionsAround = (p: GridPoint): Set<number> => {
-    const out = new Set<number>();
-    for (const [cx, cy] of cellsAround(p)) {
-      const id = labels(cx, cy);
-      if (id >= 0) out.add(id);
-    }
-    return out;
-  };
-  const shareRegion = (a: Set<number>, b: Set<number>): boolean => {
-    for (const id of a) if (b.has(id)) return true;
-    return false;
-  };
 
-  for (const c of centers) {
-    const horizontal = hasAxis(c, { x: 1, y: 0 }) || hasAxis(c, { x: -1, y: 0 });
-    const vertical = hasAxis(c, { x: 0, y: 1 }) || hasAxis(c, { x: 0, y: -1 });
-    const home = regionsAround(c);
-    for (let k = 1; k <= maxLevel; k++) {
-      if (horizontal) {
-        for (const start of [{ x: c.x, y: c.y + k }, { x: c.x, y: c.y - k }]) {
-          if (!shareRegion(regionsAround(start), home)) continue;
-          march(start, { x: 1, y: 0 });
-          march(start, { x: -1, y: 0 });
-        }
-      }
-      if (vertical) {
-        for (const start of [{ x: c.x + k, y: c.y }, { x: c.x - k, y: c.y }]) {
-          if (!shareRegion(regionsAround(start), home)) continue;
-          march(start, { x: 0, y: 1 });
-          march(start, { x: 0, y: -1 });
-        }
+  // Existing creases. A candidate seed point that already lies on any of these
+  // is skipped - we only seed in still-empty paper, then let the ridge
+  // reflection rules trace the contour.
+  const creases = [...axials, ...edgeAxials, ...ridges];
+  const onCrease = (p: GridPoint): boolean => creases.some((c) => pointOnSegment(p, c));
+
+  // Seeds: every interior integer point one unit perpendicular off an axial
+  // line, paired with the axial's direction. Offsetting from interior axials and
+  // edge-axials alike. Dedupe identical (point, dir) seeds.
+  const seedKeys = new Set<string>();
+  for (const a of [...axials, ...edgeAxials]) {
+    const dir = unit({ x: a.b.x - a.a.x, y: a.b.y - a.a.y });
+    const perp = { x: -dir.y, y: dir.x };
+    const steps = Math.round(Math.hypot(a.b.x - a.a.x, a.b.y - a.a.y));
+    for (let i = 0; i <= steps; i++) {
+      const base = { x: a.a.x + dir.x * i, y: a.a.y + dir.y * i };
+      for (const sign of [1, -1]) {
+        const p = { x: base.x + perp.x * sign, y: base.y + perp.y * sign };
+        if (p.x < 0 || p.y < 0 || p.x > sheet.width || p.y > sheet.height) continue;
+        if (onCrease(p)) continue; // only seed in empty paper
+        const k = `${p.x},${p.y}:${dir.x},${dir.y}`;
+        if (seedKeys.has(k)) continue;
+        seedKeys.add(k);
+        march(p, dir);
+        march(p, { x: -dir.x, y: -dir.y });
       }
     }
   }
-  return subtractRidgeOverlaps(all.filter((s) => !onPaperEdge(s, sheet)), ridges);
-}
-
-function cellsAround(p: GridPoint): Array<[number, number]> {
-  const out: Array<[number, number]> = [];
-  for (const dx of [-1, 0]) {
-    for (const dy of [-1, 0]) {
-      if (Number.isInteger(p.x) && Number.isInteger(p.y)) out.push([p.x + dx, p.y + dy]);
-    }
-  }
-  return out;
-}
-
-/** Label each unit cell by the flap/river region it belongs to (hinges+edge = walls). */
-function cellRegionLabels(
-  packing: OriSegment[],
-  boundary: OriSegment[],
-  sheet: { width: number; height: number },
-): (cx: number, cy: number) => number {
-  const W = Math.round(sheet.width);
-  const H = Math.round(sheet.height);
-  const vWalls = new Set<string>();
-  const hWalls = new Set<string>();
-  for (const s of [...packing, ...boundary]) {
-    if (Math.abs(s.a.x - s.b.x) < EPS) {
-      const x = Math.round(s.a.x);
-      for (let y = Math.round(Math.min(s.a.y, s.b.y)); y < Math.round(Math.max(s.a.y, s.b.y)); y++) vWalls.add(`${x},${y}`);
-    } else if (Math.abs(s.a.y - s.b.y) < EPS) {
-      const y = Math.round(s.a.y);
-      for (let x = Math.round(Math.min(s.a.x, s.b.x)); x < Math.round(Math.max(s.a.x, s.b.x)); x++) hWalls.add(`${x},${y}`);
-    }
-  }
-  const label = new Int32Array(W * H).fill(-1);
-  const idx = (x: number, y: number): number => y * W + x;
-  let next = 0;
-  for (let sy = 0; sy < H; sy++) {
-    for (let sx = 0; sx < W; sx++) {
-      if (label[idx(sx, sy)] !== -1) continue;
-      const id = next++;
-      const stack: Array<[number, number]> = [[sx, sy]];
-      label[idx(sx, sy)] = id;
-      while (stack.length) {
-        const [x, y] = stack.pop()!;
-        if (x > 0 && !vWalls.has(`${x},${y}`) && label[idx(x - 1, y)] === -1) { label[idx(x - 1, y)] = id; stack.push([x - 1, y]); }
-        if (x < W - 1 && !vWalls.has(`${x + 1},${y}`) && label[idx(x + 1, y)] === -1) { label[idx(x + 1, y)] = id; stack.push([x + 1, y]); }
-        if (y > 0 && !hWalls.has(`${x},${y}`) && label[idx(x, y - 1)] === -1) { label[idx(x, y - 1)] = id; stack.push([x, y - 1]); }
-        if (y < H - 1 && !hWalls.has(`${x},${y + 1}`) && label[idx(x, y + 1)] === -1) { label[idx(x, y + 1)] = id; stack.push([x, y + 1]); }
-      }
-    }
-  }
-  return (cx: number, cy: number): number => (cx < 0 || cy < 0 || cx >= W || cy >= H ? -1 : label[idx(cx, cy)]);
+  return subtractRidgeOverlaps(out.filter((s) => !onPaperEdge(s, sheet)), ridges);
 }
 
 function onPaperEdge(s: OriSegment, sheet: { width: number; height: number }): boolean {
