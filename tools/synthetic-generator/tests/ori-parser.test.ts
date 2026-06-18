@@ -2,7 +2,9 @@ import { expect, test } from "bun:test";
 import { join } from "node:path";
 import { parseOriFixtures, type OriSegment } from "../src/ori-parser.ts";
 
-const ORI_PATH = join(import.meta.dir, "..", "fixtures", "box_pleating_packing_fixtures.ori");
+// Frozen snapshot for stable test indices. The working .ori
+// (box_pleating_packing_fixtures.ori) is a scratchpad and changes over time.
+const ORI_PATH = join(import.meta.dir, "..", "fixtures", "box_pleating_fixtures_stable.ori");
 const doc = await Bun.file(ORI_PATH).json();
 const fixtures = parseOriFixtures(doc);
 

@@ -3,7 +3,8 @@ import { join } from "node:path";
 import { parseOriFixtures, type GridPoint } from "../src/ori-parser.ts";
 import { findFlapCenters, propagateAxials } from "../src/box-pleated-molecule.ts";
 
-const ORI_PATH = join(import.meta.dir, "..", "fixtures", "box_pleating_packing_fixtures.ori");
+// Frozen snapshot for stable test indices; the working .ori is a scratchpad.
+const ORI_PATH = join(import.meta.dir, "..", "fixtures", "box_pleating_fixtures_stable.ori");
 const doc = await Bun.file(ORI_PATH).json();
 const fixtures = parseOriFixtures(doc);
 
