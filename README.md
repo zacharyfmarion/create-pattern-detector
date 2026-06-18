@@ -15,8 +15,10 @@ links it into the current worktree as `.venv`.
 
 Before using, exporting, or retraining CPLineNet, read
 `docs/model-training-history.md`. It records the current downstream/browser model,
-the checkpoint registry entry, ONNX export provenance, and why the later R3
-from-scratch close-pair run was not promoted.
+the checkpoint registry entry, ONNX export provenance, and why older close-pair
+or diagnostic runs were not promoted. The current promoted model is registered
+at
+`artifacts/checkpoints/runpod-v3-no-guide-grid-close-pair-dense-edges-max700-4090.json`.
 
 ## Usage
 

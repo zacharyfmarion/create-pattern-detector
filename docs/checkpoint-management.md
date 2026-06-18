@@ -58,7 +58,7 @@ loading or exporting a model.
 Current downstream/browser model:
 
 ```text
-artifacts/checkpoints/runpod-v3-close-pair-warmstart-4090.json
+artifacts/checkpoints/runpod-v3-no-guide-grid-close-pair-dense-edges-max700-4090.json
 ```
 
 Historical Python Phase 5 / V1 baseline:
@@ -71,6 +71,18 @@ Important non-promoted ablation:
 
 ```text
 artifacts/checkpoints/runpod-v3-close-pair-scratch-r3-4090.json
+```
+
+Previous promoted close-pair model, retained for comparison:
+
+```text
+artifacts/checkpoints/runpod-v3-close-pair-warmstart-4090.json
+```
+
+Previous promoted no-guide-grid close-pair model, retained for comparison:
+
+```text
+artifacts/checkpoints/runpod-v3-no-guide-grid-close-pair-full-r1-4090.json
 ```
 
 Each manifest records:
@@ -86,6 +98,25 @@ Each manifest records:
 
 The manifest does not make the weight file portable by itself. It is a registry
 entry for the local/shared artifact.
+
+## Local Artifact Persistence
+
+Do not treat a temporary Codex worktree as the only durable copy of a promoted
+model. Before calling a model promoted:
+
+1. Copy the ignored checkpoint run directory into the canonical local checkout
+   under `/Users/zacharymarion/Documents/code/create-pattern-detector`, using
+   the same `checkpoints/...` relative path recorded in the manifest.
+2. Verify the copied `latest.pt` SHA-256 against the checkpoint manifest.
+3. Copy the ONNX export into the canonical `tree-maker-rust` checkout under both
+   the stable product directory and the versioned export directory.
+4. Verify the ONNX SHA-256 against the checkpoint manifest and product model
+   manifest.
+
+This still is not a substitute for a real remote artifact store. If model
+weights need to be portable across machines or open-source consumers, publish
+the `.pt`/ONNX files to a release or object store and add that URI to the
+checkpoint manifest.
 
 ## Registering A New Checkpoint
 
@@ -116,7 +147,7 @@ metadata corrections.
 For the current downstream/browser model, load:
 
 ```text
-checkpoints/r1_close_pair_warmstart/latest.pt
+checkpoints/runpod_v3_no_guide_grid_close_pair_dense_edges_max700_probe_20260618/full/latest.pt
 ```
 
 Use the config stored inside the checkpoint to construct the model. Important
@@ -128,6 +159,8 @@ settings:
 - `image_size=1024`
 - `v2_heads=true`
 - `junction_offset_radius_px=3.0`
+- `augment_profile=v3-no-guide-grid-replay`
+- `max_edges=700` during the promoted continuation run
 
 Use `batch-stats` BatchNorm behavior for validation/vectorization. Browser ONNX
 exports should use explicit per-image BatchNorm ops and record

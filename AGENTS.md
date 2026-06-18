@@ -117,13 +117,24 @@ Do not commit model weights. Keep `.pt` and related checkpoint files under the
 ignored `checkpoints/` tree, and register blessed or important runs with small
 JSON manifests under `artifacts/checkpoints/`.
 
+Do not leave a promoted model only inside a temporary Codex worktree. After
+promotion, mirror the ignored checkpoint run directory into the canonical local
+checkout under `/Users/zacharymarion/Documents/code/create-pattern-detector`
+using the same `checkpoints/...` relative path recorded in the manifest, then
+verify the SHA-256. Downstream ONNX exports should likewise live in the
+canonical `tree-maker-rust/apps/web/public/models/` tree, not only in a
+throwaway worktree.
+
 Before replacing, exporting, or using a checkpoint, read
 `docs/model-training-history.md` first, then `docs/checkpoint-management.md`.
-The current downstream/browser model is the V3 close-pair R1 warm-start
-checkpoint registered at
-`artifacts/checkpoints/runpod-v3-close-pair-warmstart-4090.json`.
+The current downstream/browser model is the V3 no-guide-grid close-pair dense
+edges `MAX_EDGES=700` checkpoint registered at
+`artifacts/checkpoints/runpod-v3-no-guide-grid-close-pair-dense-edges-max700-4090.json`.
 
-Do not confuse the later R3 from-scratch run with the promoted model. R3 is
+Do not confuse the previous V3 close-pair R1 checkpoint, the no-guide-grid R1
+that this run superseded, or the later R3 from-scratch run with the promoted
+model. The previous close-pair R1 is retained at
+`artifacts/checkpoints/runpod-v3-close-pair-warmstart-4090.json`; R3 is
 registered as an ablation at
 `artifacts/checkpoints/runpod-v3-close-pair-scratch-r3-4090.json` because it
 landed statistically identical to R1 and was not promoted.
@@ -164,3 +175,13 @@ These canonical launchers set and verify the required R1 close-pair recipe:
 `run_cpline_runpod_v3_no_guide_grid_{probe,full}.sh` names are intentionally
 retired and fail with an "Are you sure?" message because they previously
 launched a dense-head diagnostic with `junction_offset_radius_px=0.0`.
+
+For dense BP follow-up probes from the current promoted model, use:
+
+```bash
+scripts/training/run_cpline_runpod_v3_no_guide_grid_close_pair_dense_edges_probe.sh
+```
+
+It defaults to the promoted `MAX_EDGES=700` checkpoint and verifies the same
+radius-3 close-pair recipe. Set `MAX_EDGES=1200` and an explicit `OUTPUT_ROOT`
+for the next controlled edge-envelope probe.

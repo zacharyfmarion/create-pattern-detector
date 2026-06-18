@@ -86,14 +86,21 @@ Use these numbers as the pre-training baseline for no-guide-grid training
 probes. The key gate is improving orthogonal BP raw/effective recall and
 reducing non-crease conflict without collapsing the diagonal/control slice.
 
-## No-Guide-Grid Dense Diagnostic
+## No-Guide-Grid And Dense-Edge Promoted Runs
 
-Two R1 warm-start no-guide-grid experiments were evaluated on the same full
-179-sample BP pack in `tree-maker-rust` on 2026-06-16:
+R1 warm-start no-guide-grid experiments were evaluated on the same full
+179-sample BP pack in `tree-maker-rust`:
 
 - Probe: 800 steps, no guide-grid training profiles, reinitialized
   `non_crease_head`.
-- Full diagnostic: 5000 steps with the same no-guide-grid profile.
+- Full diagnostic: 5000 steps with the same no-guide-grid profile, but launched
+  by the retired script that omitted the radius-3 close-pair offset recipe.
+- No-guide-grid close-pair full R1: 5000 steps launched by the verified
+  no-guide-grid close-pair script, reinitialized `non_crease_head`, and kept
+  `junction_offset_radius_px=3.0`.
+- Dense-edge max700 continuation: 1500 steps warm-started from the
+  no-guide-grid close-pair R1, kept all heads, raised `MAX_EDGES` from `300` to
+  `700`, and kept `junction_offset_radius_px=3.0`.
 
 Dense-head comparison:
 
@@ -101,25 +108,49 @@ Dense-head comparison:
 |---|---|---:|---:|---:|---:|---:|---:|
 | Shipped V3 R1 | Orthogonal BP creases | `0.5130` | `0.4744` | `0.0386` | `0.5422` | `0.5323` | `0.5887` |
 | No-grid probe, 800 steps | Orthogonal BP creases | `0.5528` | `0.5525` | `0.0003` | `0.0049` | `0.5687` | `0.2699` |
-| No-grid full, 5000 steps | Orthogonal BP creases | `0.6012` | `0.6001` | `0.0011` | `0.0154` | `0.6159` | `0.1062` |
+| No-grid full diagnostic, 5000 steps, radius 0 | Orthogonal BP creases | `0.6012` | `0.6001` | `0.0011` | `0.0154` | `0.6159` | `0.1062` |
+| No-grid close-pair full R1, superseded | Orthogonal BP creases | `0.6113` | `0.6104` | `0.0009` | `0.0128` | `0.6306` | `0.1216` |
+| Dense-edge max700, promoted | Orthogonal BP creases | `0.6482` | `0.6462` | `0.0019` | `0.0197` | `0.6646` | `0.1121` |
 | Shipped V3 R1 | Diagonal/other creases | `0.8752` | `0.8587` | `0.0166` | `0.0902` | `0.8802` | `0.1334` |
 | No-grid probe, 800 steps | Diagonal/other creases | `0.8756` | `0.8744` | `0.0012` | `0.0103` | `0.8811` | `0.2921` |
-| No-grid full, 5000 steps | Diagonal/other creases | `0.8810` | `0.8788` | `0.0023` | `0.0160` | `0.8833` | `0.0826` |
+| No-grid full diagnostic, 5000 steps, radius 0 | Diagonal/other creases | `0.8810` | `0.8788` | `0.0023` | `0.0160` | `0.8833` | `0.0826` |
+| No-grid close-pair full R1, superseded | Diagonal/other creases | `0.8816` | `0.8796` | `0.0021` | `0.0130` | `0.8868` | `0.0827` |
+| Dense-edge max700, promoted | Diagonal/other creases | `0.8983` | `0.8954` | `0.0029` | `0.0157` | `0.9013` | `0.0610` |
 
 This confirms the original grid-suppression hypothesis for the non-crease head:
 orthogonal BP crease pixels stopped being classified as non-crease guide-grid
-evidence, and effective recall now tracks raw recall.
+evidence, and effective recall now tracks raw recall. The later max700
+continuation shows that the remaining dense-orthogonal gap also responds to
+including denser existing synthetic examples.
 
 The remaining orthogonal-vs-diagonal recall gap is not fixed:
-`0.6012` raw recall for orthogonal BP creases versus `0.8810` for
-diagonal/other creases in the full diagnostic. Since non-crease conflict is now
-low, the residual gap is more likely due to data distribution and missing
-synthetic BP-style crease families than to non-crease suppression still being
-baked into the warm-start. A warm-start-only line-head bias is still possible,
-but the 800-step to 5000-step improvement argues against a hard inability to
-unlearn the old behavior.
+`0.6482` raw recall for orthogonal BP creases versus `0.8983` for
+diagonal/other creases in the current promoted run. Since non-crease conflict
+is now low, the residual gap is more likely due to data distribution, missing
+synthetic BP-style crease families, and dense vertical coverage than to
+non-crease suppression still being baked into the warm-start.
 
-Important caveat: the 5000-step full diagnostic accidentally trained with
+The promoted checkpoint is registered at
+`artifacts/checkpoints/runpod-v3-no-guide-grid-close-pair-dense-edges-max700-4090.json`.
+It also improved clean-15 strict topology in the product repo's current-pack
+eval relative to the previous no-guide-grid close-pair R1 (`0.9594 -> 0.9623`
+edge F1, missing `126 -> 112`, extra `89 -> 88`, merged `72 -> 66`).
+
+The dense-edge continuation also improved direction-specific BP recall:
+
+| Slice | Direction | No-grid close-pair R1 | Dense-edge max700 |
+| --- | --- | ---: | ---: |
+| All 179 | Horizontal | `0.6546` | `0.6874` |
+| All 179 | Vertical | `0.5736` | `0.6124` |
+| All 179 | 45/135 | `0.8634` | `0.8812` |
+| Dense top quartile | Horizontal | `0.4354` | `0.4763` |
+| Dense top quartile | Vertical | `0.3757` | `0.4074` |
+| Dense top quartile | 45/135 | `0.8082` | `0.8403` |
+| Very dense `edge_count >= 2000` | Horizontal | `0.4062` | `0.4446` |
+| Very dense `edge_count >= 2000` | Vertical | `0.3473` | `0.3797` |
+| Very dense `edge_count >= 2000` | 45/135 | `0.8059` | `0.8365` |
+
+The earlier 5000-step full diagnostic accidentally trained with
 `junction_offset_radius_px=0.0` because the old no-grid launcher did not forward
 the R1 close-pair offset parameters. Its dense-head BP metrics are valid, but it
 must not be promoted or exported as the product default. Future compatible
@@ -127,6 +158,12 @@ training runs must use:
 
 ```bash
 scripts/training/run_cpline_runpod_v3_no_guide_grid_close_pair_full.sh
+```
+
+For dense-edge follow-up probes from the promoted max700 checkpoint, use:
+
+```bash
+scripts/training/run_cpline_runpod_v3_no_guide_grid_close_pair_dense_edges_probe.sh
 ```
 
 ## Selection Recipe
