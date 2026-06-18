@@ -29,13 +29,21 @@ const AXIS_DIRS: GridPoint[] = [
   { x: 0, y: -1 },
 ];
 
+/**
+ * Stage A: launch axial contours from each flap center in the four axis
+ * directions and march them. A contour runs until it hits a ridge (where it
+ * reflects across, or terminates at a multi-ridge junction) or runs off the
+ * paper edge - hinges do NOT stop an axial. Contours traced from two different
+ * flap centers can retrace the same reflected path from opposite ends; they
+ * dedupe to one crease. Segments lying along the paper edge are dropped (they
+ * are the boundary, not interior creases) - so corner flaps contribute none.
+ */
 export function propagateAxials(
   ridges: OriSegment[],
-  terminators: OriSegment[],
   sheet: { width: number; height: number },
   seeds: GridPoint[],
 ): AxialResult {
-  const axials: OriSegment[] = [];
+  const all: OriSegment[] = [];
   const seen = new Set<string>();
   const junctionTerminations: GridPoint[] = [];
   let reflections = 0;
@@ -45,15 +53,15 @@ export function propagateAxials(
       let from = seed;
       let d = dir;
       for (let bounce = 0; bounce < MAX_BOUNCES; bounce++) {
-        const hit = marchRay(from, d, ridges, terminators, sheet);
+        const hit = marchRay(from, d, ridges, sheet);
         if (!hit) break;
-        addSegment(axials, seen, from, hit.point);
+        addSegment(all, seen, from, hit.point);
         if (hit.type === "boundary") break;
         if (hit.type === "junction") {
           junctionTerminations.push(hit.point);
           break;
         }
-        // ridge interior: reflect and continue.
+        // ridge interior: reflect across and continue.
         d = reflect(d, hit.ridgeDir!);
         from = hit.point;
         reflections++;
@@ -61,7 +69,16 @@ export function propagateAxials(
     }
   }
 
+  const axials = all.filter((s) => !onPaperEdge(s, sheet));
   return { axials, seeds, junctionTerminations, reflections };
+}
+
+function onPaperEdge(s: OriSegment, sheet: { width: number; height: number }): boolean {
+  const onX = (v: number): boolean => Math.abs(v) < EPS || Math.abs(v - sheet.width) < EPS;
+  const onY = (v: number): boolean => Math.abs(v) < EPS || Math.abs(v - sheet.height) < EPS;
+  const vertical = Math.abs(s.a.x - s.b.x) < EPS;
+  const horizontal = Math.abs(s.a.y - s.b.y) < EPS;
+  return (vertical && onX(s.a.x)) || (horizontal && onY(s.a.y));
 }
 
 /**
@@ -114,7 +131,6 @@ function marchRay(
   from: GridPoint,
   dir: GridPoint,
   ridges: OriSegment[],
-  terminators: OriSegment[],
   sheet: { width: number; height: number },
 ): RayHit | null {
   let best: { t: number; hit: RayHit } | null = null;
@@ -131,15 +147,7 @@ function marchRay(
     if (!best || inter.t < best.t - EPS) best = { t: inter.t, hit };
   }
 
-  // Terminators: the packing (hinge) outlines + paper boundary. A contour stops
-  // when it reaches its polygon's edge rather than leaking into a neighbour.
-  for (const seg of terminators) {
-    const inter = raySegmentIntersection(from, dir, seg.a, seg.b);
-    if (!inter || inter.t <= EPS || inter.collinear) continue;
-    if (!best || inter.t < best.t - EPS) best = { t: inter.t, hit: { point: inter.point, type: "boundary" } };
-  }
-
-  // Sheet rectangle as a guaranteed fallback terminator.
+  // The paper edge is the only non-ridge terminator.
   const boundaryHit = rayBoundaryIntersection(from, dir, sheet);
   if (boundaryHit && (!best || boundaryHit.t < best.t - EPS)) {
     best = { t: boundaryHit.t, hit: { point: boundaryHit.point, type: "boundary" } };

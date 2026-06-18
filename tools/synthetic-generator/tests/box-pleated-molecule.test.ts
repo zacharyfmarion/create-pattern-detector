@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { join } from "node:path";
-import { parseOriFixtures } from "../src/ori-parser.ts";
-import { findFlapCenters, type GridPoint } from "../src/box-pleated-molecule.ts";
+import { parseOriFixtures, type GridPoint } from "../src/ori-parser.ts";
+import { findFlapCenters, propagateAxials } from "../src/box-pleated-molecule.ts";
 
 const ORI_PATH = join(import.meta.dir, "..", "fixtures", "box_pleating_packing_fixtures.ori");
 const doc = await Bun.file(ORI_PATH).json();
@@ -36,4 +36,30 @@ test("every fixture yields at least one flap center", () => {
   for (const f of fixtures) {
     expect(findFlapCenters(f.ridges, f.packing).length).toBeGreaterThan(0);
   }
+});
+
+const segKey = (s: { a: GridPoint; b: GridPoint }): string => {
+  const a = `${s.a.x},${s.a.y}`;
+  const b = `${s.b.x},${s.b.y}`;
+  return a < b ? `${a}|${b}` : `${b}|${a}`;
+};
+
+test("axials reflect across ridges and the two ends dedupe to one path (#1)", () => {
+  const f = fixtures[1];
+  const seeds = findFlapCenters(f.ridges, f.packing);
+  const { axials } = propagateAxials(f.ridges, f.sheet, seeds);
+  // The contour from (3,1) reflects at the ridge (1,1) down to (1,3); the
+  // contour from (1,3) retraces it - both collapse to these two segments.
+  const keys = axials.map(segKey).sort();
+  expect(keys).toEqual(["1,1|3,1", "1,1|1,3"].map((k) => k).sort());
+  // No paper-edge segments leak through, and no duplicates.
+  expect(new Set(keys).size).toBe(keys.length);
+});
+
+test("a single full-paper flap produces the waterbomb '+' (#0)", () => {
+  const f = fixtures[0];
+  const seeds = findFlapCenters(f.ridges, f.packing);
+  const { axials } = propagateAxials(f.ridges, f.sheet, seeds);
+  // Four axials from the center (1,1) to the four edge midpoints.
+  expect(axials.length).toBe(4);
 });
