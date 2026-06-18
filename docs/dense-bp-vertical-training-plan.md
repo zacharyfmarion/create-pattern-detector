@@ -1,7 +1,8 @@
 # Dense BP Vertical Training Plan
 
 Status: In progress, 2026-06-18. The `MAX_EDGES=700` probe completed and was
-promoted; the next controlled probe is `MAX_EDGES=1200`.
+promoted; the `MAX_EDGES=1200` probe completed and is registered as a
+candidate, not the default.
 Primary goal: improve dense vertical crease-line detection on real box-pleated
 crease patterns without regressing the current clean topology benchmark.
 
@@ -342,5 +343,98 @@ examples improved BP vertical recall and did not regress clean-15 topology. It
 was promoted because it also improves clean-15 strict topology while preserving
 the radius-3 close-pair decoder contract.
 
-The next controlled step is a `MAX_EDGES=1200` probe warm-started from this
-promoted max700 model before adding tessellation data.
+The next decision is whether to promote the `MAX_EDGES=1200` candidate or hold
+the line at max700 until additional BP/tessellation data is available.
+
+### 2026-06-18: `MAX_EDGES=1200` Probe
+
+Status: completed and registered as a candidate only.
+
+Run:
+
+- Launcher:
+  `scripts/training/run_cpline_runpod_v3_no_guide_grid_close_pair_dense_edges_probe.sh`
+- RunPod pod: `54aa1fvtypz4l1`, NVIDIA L40S, stopped after artifacts were
+  copied back.
+- Cost estimate: about 1.17 pod-hours at `$0.99/hr`, around `$1.16`.
+- Checkpoint:
+  `checkpoints/runpod_v3_no_guide_grid_close_pair_dense_edges_max1200_probe_20260618/full/latest.pt`
+- Registry:
+  `artifacts/checkpoints/runpod-v3-no-guide-grid-close-pair-dense-edges-max1200-probe-l40s.json`
+- Checkpoint SHA-256:
+  `befa99edc4531919ffb8f36c933b2e394f8868cb6e0fb0be2d7b96eee74c9bac`
+- Init checkpoint:
+  `checkpoints/runpod_v3_no_guide_grid_close_pair_dense_edges_max700_probe_20260618/full/latest.pt`
+- ONNX export:
+  `tree-maker-rust/apps/web/public/models/cp-detector-v3-dense-edges-max1200-probe-20260618/model.onnx`
+- ONNX SHA-256:
+  `96ba3d56277f0ead32a6be813a31402434f29620f4b6edd113d3592e2c3ab145`
+
+Training config:
+
+- `MAX_EDGES=1200`
+- `max_steps=1500`
+- `train_samples=2048`
+- `val_samples=256`
+- `lr=0.00005`
+- `REINIT_HEADS=""`
+- `junction_sigma_px=1.5`
+- `junction_offset_radius_px=3.0`
+- `junction_offset_weight=0.5`
+- `junction_focal_alpha=2.0`
+- `junction_focal_beta=4.0`
+
+Training completed in `3381.6s`. First logged train loss was `0.4282`; last
+logged train loss was `0.5521`.
+
+Eval reports:
+
+- BP dense heads:
+  `tree-maker-rust/artifacts/cp-detect-correctness/reports/box-pleat-native-v1-dense-edges-max1200-probe-20260618-dense-heads/summary.json`
+- BP angle buckets:
+  `tree-maker-rust/artifacts/cp-detect-correctness/reports/box-pleat-native-v1-angle-buckets-dense-edges-max1200-probe-20260618/summary.json`
+- Clean-15 strict topology:
+  `tree-maker-rust/artifacts/cp-detect-correctness/reports/clean-1024-s15-strict-v3-dense-edges-max1200-probe-20260618/summary.json`
+
+Dense BP aggregate:
+
+| Metric | Promoted max700 | `MAX_EDGES=1200` probe |
+| --- | ---: | ---: |
+| Orthogonal effective recall | `0.6462` | `0.6746` |
+| Orthogonal non-crease conflict | `0.0197` | `0.0285` |
+| Diagonal effective recall | `0.8954` | `0.9007` |
+| All crease effective recall | `0.7030` | `0.7261` |
+
+BP angle buckets:
+
+| Slice | Direction | Promoted max700 | `MAX_EDGES=1200` probe |
+| --- | --- | ---: | ---: |
+| All 179 | Horizontal | `0.6874` | `0.7300` |
+| All 179 | Vertical | `0.6124` | `0.6272` |
+| All 179 | 45/135 | `0.8812` | `0.8866` |
+| Dense top quartile | Horizontal | `0.4763` | `0.5153` |
+| Dense top quartile | Vertical | `0.4074` | `0.4247` |
+| Dense top quartile | 45/135 | `0.8403` | `0.8501` |
+| Very dense `edge_count >= 2000` | Horizontal | `0.4446` | `0.4808` |
+| Very dense `edge_count >= 2000` | Vertical | `0.3797` | `0.3968` |
+| Very dense `edge_count >= 2000` | 45/135 | `0.8365` | `0.8438` |
+
+Clean-15 strict topology:
+
+| Metric | Promoted max700 | `MAX_EDGES=1200` probe |
+| --- | ---: | ---: |
+| Strict edge F1 | `0.9623` | `0.9655` |
+| Missing edges | `112` | `107` |
+| Extra edges | `88` | `76` |
+| Merged edges | `66` | `60` |
+| Exact topology samples | `4/15` | `4/15` |
+| Exact topology + assignment samples | `3/15` | `3/15` |
+
+Conclusion:
+
+The second controlled experiment continues to support the dense-edge-envelope
+hypothesis. Raising to `MAX_EDGES=1200` improves BP recall and clean-15 strict
+topology over max700. The tradeoff is a modest increase in non-crease conflict
+and slightly lower clean assignment accuracy (`0.9875 -> 0.9855`). Treat this
+as a strong promotion candidate, but not yet the default until the promotion
+decision is made explicitly.

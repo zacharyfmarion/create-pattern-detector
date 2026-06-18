@@ -101,6 +101,10 @@ R1 warm-start no-guide-grid experiments were evaluated on the same full
 - Dense-edge max700 continuation: 1500 steps warm-started from the
   no-guide-grid close-pair R1, kept all heads, raised `MAX_EDGES` from `300` to
   `700`, and kept `junction_offset_radius_px=3.0`.
+- Dense-edge max1200 probe: 1500 steps warm-started from the promoted max700
+  checkpoint, kept all heads, raised `MAX_EDGES` to `1200`, and kept
+  `junction_offset_radius_px=3.0`. It is an evaluated candidate, not the
+  promoted default.
 
 Dense-head comparison:
 
@@ -111,11 +115,13 @@ Dense-head comparison:
 | No-grid full diagnostic, 5000 steps, radius 0 | Orthogonal BP creases | `0.6012` | `0.6001` | `0.0011` | `0.0154` | `0.6159` | `0.1062` |
 | No-grid close-pair full R1, superseded | Orthogonal BP creases | `0.6113` | `0.6104` | `0.0009` | `0.0128` | `0.6306` | `0.1216` |
 | Dense-edge max700, promoted | Orthogonal BP creases | `0.6482` | `0.6462` | `0.0019` | `0.0197` | `0.6646` | `0.1121` |
+| Dense-edge max1200, candidate | Orthogonal BP creases | `0.6778` | `0.6746` | `0.0031` | `0.0285` | `0.6924` | `0.1209` |
 | Shipped V3 R1 | Diagonal/other creases | `0.8752` | `0.8587` | `0.0166` | `0.0902` | `0.8802` | `0.1334` |
 | No-grid probe, 800 steps | Diagonal/other creases | `0.8756` | `0.8744` | `0.0012` | `0.0103` | `0.8811` | `0.2921` |
 | No-grid full diagnostic, 5000 steps, radius 0 | Diagonal/other creases | `0.8810` | `0.8788` | `0.0023` | `0.0160` | `0.8833` | `0.0826` |
 | No-grid close-pair full R1, superseded | Diagonal/other creases | `0.8816` | `0.8796` | `0.0021` | `0.0130` | `0.8868` | `0.0827` |
 | Dense-edge max700, promoted | Diagonal/other creases | `0.8983` | `0.8954` | `0.0029` | `0.0157` | `0.9013` | `0.0610` |
+| Dense-edge max1200, candidate | Diagonal/other creases | `0.9046` | `0.9007` | `0.0038` | `0.0197` | `0.9075` | `0.0586` |
 
 This confirms the original grid-suppression hypothesis for the non-crease head:
 orthogonal BP crease pixels stopped being classified as non-crease guide-grid
@@ -149,6 +155,21 @@ The dense-edge continuation also improved direction-specific BP recall:
 | Very dense `edge_count >= 2000` | Horizontal | `0.4062` | `0.4446` |
 | Very dense `edge_count >= 2000` | Vertical | `0.3473` | `0.3797` |
 | Very dense `edge_count >= 2000` | 45/135 | `0.8059` | `0.8365` |
+
+The max1200 candidate improves these same direction-specific recall slices
+again, though non-crease conflict also rises modestly:
+
+| Slice | Direction | Dense-edge max700 | Dense-edge max1200 candidate |
+| --- | --- | ---: | ---: |
+| All 179 | Horizontal | `0.6874` | `0.7300` |
+| All 179 | Vertical | `0.6124` | `0.6272` |
+| All 179 | 45/135 | `0.8812` | `0.8866` |
+| Dense top quartile | Horizontal | `0.4763` | `0.5153` |
+| Dense top quartile | Vertical | `0.4074` | `0.4247` |
+| Dense top quartile | 45/135 | `0.8403` | `0.8501` |
+| Very dense `edge_count >= 2000` | Horizontal | `0.4446` | `0.4808` |
+| Very dense `edge_count >= 2000` | Vertical | `0.3797` | `0.3968` |
+| Very dense `edge_count >= 2000` | 45/135 | `0.8365` | `0.8438` |
 
 The earlier 5000-step full diagnostic accidentally trained with
 `junction_offset_radius_px=0.0` because the old no-grid launcher did not forward

@@ -87,6 +87,15 @@ artifacts/checkpoints/runpod-v3-no-guide-grid-close-pair-full-r1-4090.json
 checkpoints/runpod_v3_no_guide_grid_close_pair_full_r1_20260617/full/latest.pt
 ```
 
+The `MAX_EDGES=1200` dense-edge probe is registered as a candidate because it
+improved BP dense recall and clean-15 strict topology over the promoted max700
+model, but it is not the default until explicitly promoted:
+
+```text
+artifacts/checkpoints/runpod-v3-no-guide-grid-close-pair-dense-edges-max1200-probe-l40s.json
+checkpoints/runpod_v3_no_guide_grid_close_pair_dense_edges_max1200_probe_20260618/full/latest.pt
+```
+
 The first 5000-step no-guide-grid full run was also not promoted. It fixed the
 BP dense-head conflict, but the retired launcher omitted the close-pair offset
 recipe and exported with `junction_offset_radius_px=0.0`. Treat it as a dense
@@ -130,6 +139,7 @@ non-crease head:
 | No-grid full diagnostic, 5000 steps, radius 0 | 0.6012 | 0.6001 | 0.0154 | 0.8810 |
 | No-grid close-pair full R1, superseded | 0.6113 | 0.6104 | 0.0128 | 0.8816 |
 | Dense-edge max700 continuation, promoted | 0.6482 | 0.6462 | 0.0197 | 0.8983 |
+| Dense-edge max1200 probe, candidate | 0.6778 | 0.6746 | 0.0285 | 0.9046 |
 
 Interpretation:
 
@@ -161,6 +171,7 @@ The max700 continuation also improved the hardest BP angle buckets:
 | Dense top quartile, current max700 | 0.4763 | 0.4074 | 0.8403 |
 | Very dense `edge_count >= 2000`, previous no-guide-grid R1 | 0.4062 | 0.3473 | 0.8059 |
 | Very dense `edge_count >= 2000`, current max700 | 0.4446 | 0.3797 | 0.8365 |
+| Very dense `edge_count >= 2000`, max1200 candidate | 0.4808 | 0.3968 | 0.8438 |
 
 Future no-guide-grid runs that should remain close-pair-compatible must use a
 launcher that verifies the close-pair recipe. The canonical full no-guide-grid
@@ -194,6 +205,7 @@ scripts/training/run_cpline_runpod_v3_no_guide_grid_close_pair_dense_edges_probe
 | 2026-06-16 | V3 no-guide-grid full R1 diagnostic | Not registered; local ignored checkpoint `checkpoints/runpod_v3_no_guide_grid_full_r1_20260615/full/latest.pt` | R1 close-pair checkpoint, reinitialized `non_crease_head` | Dense BP evidence improved substantially, but the launcher omitted radius-3 close-pair offset args and produced `junction_offset_radius_px=0.0`. Treat as a dense-head diagnostic only, not a promotable model. |
 | 2026-06-17 | V3 no-guide-grid close-pair full R1 | `artifacts/checkpoints/runpod-v3-no-guide-grid-close-pair-full-r1-4090.json` | R1 close-pair checkpoint, reinitialized `non_crease_head` | Superseded browser/product model. Keeps radius-3 close-pair decoder compatibility, fixes BP non-crease suppression, and improves current-pack clean-15 strict topology. |
 | 2026-06-18 | V3 no-guide-grid close-pair dense-edge max700 | `artifacts/checkpoints/runpod-v3-no-guide-grid-close-pair-dense-edges-max700-4090.json` | No-guide-grid close-pair R1, no head reinit | Current promoted browser/product model. Raises the training edge envelope to `max_edges=700`, improves dense BP horizontal/vertical recall, and improves clean-15 strict topology to `0.9623` strict edge F1. |
+| 2026-06-18 | V3 no-guide-grid close-pair dense-edge max1200 probe | `artifacts/checkpoints/runpod-v3-no-guide-grid-close-pair-dense-edges-max1200-probe-l40s.json` | Promoted max700 checkpoint, no head reinit | Candidate only, not default. Raises the training edge envelope to `max_edges=1200`; improves BP orthogonal effective recall to `0.6746` and clean-15 strict edge F1 to `0.9655`, with modestly higher non-crease conflict. |
 
 ## Update Rules
 
