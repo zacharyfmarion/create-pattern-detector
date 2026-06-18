@@ -25,6 +25,42 @@ The current implementation is a preview-only packing stage:
 This stage does not yet assign final mountain/valley labels beyond BP Studio's
 layout layers, and it does not emit training `.fold` files.
 
+### Tight mode (`--tight`)
+
+The default and no-stretch paths trade paper efficiency for clean 45/90 grids.
+Tight mode instead reproduces the app's "Optimize Layout": it fixes a single
+sampled tree and restarts BP Studio's optimizer (basin-hopping on) from several
+random initial vectors, keeping the tightest realizable layout. Pythagorean
+stretch devices are permitted - their creases are well defined - so the packing
+fills the sheet far more efficiently. For 8 leaves this lands sheets around
+34-39 versus roughly 87 for the stretch-free banded layout (~5-6x less paper by
+area). BP Studio's pairwise packing constraint is Euclidean for every grid type
+(the C++ `circle`/`rounded` constraints; `diag` only changes the sheet
+boundary), so tight Euclidean optima almost always contain off-grid contacts and
+the stretch gussets that resolve them. Tight mode accepts that by design; the
+no-stretch modes remain available when a clean grid is required.
+
+## Geometry Completion
+
+The next implemented preview layer is an unassigned crease scaffold. It derives
+crease geometry from an accepted packing without assigning mountain/valley
+labels:
+
+- BP Studio ridge creases are preserved as `bp-ridge` lines.
+- BP Studio 45/90 contour segments are imported as `bp-contour` hinge/contour
+  candidates.
+- Every 45-degree BP ridge contributes the perimeter of its axis-aligned
+  bounding box as `computed-axial` candidates. This is a first-pass version of
+  the axial contour geometry needed before MV assignment.
+- Remaining unit grid cells outside flap exclusion regions receive a single
+  45-degree `gap-ridge` candidate so the sheet can be inspected as a fully
+  creased scaffold rather than a partial ridge layout.
+
+The `gap-ridge` layer is deliberately marked as inferred geometry. It is useful
+for finding and visualizing still-empty paper regions, but it is not yet a proof
+of Lang-style molecule decomposition or flat-foldability. The next validation
+step is to replace broad unit-cell gap fill with classified BP molecules.
+
 ## BP Studio Findings
 
 BP Studio's layout pipeline is not a discrete tiler of colored square and river
@@ -76,6 +112,19 @@ optimizer permits Euclidean/Pythagorean separations, so the current approach is
 to bias the initial vectors toward orthogonal edge/perimeter arrangements and
 then post-filter the completed BP Studio core layout.
 
+The initial-vector seeding is grid-native rather than rejection-driven. The
+tree sampler emits leaves as sibling pairs on a shared hub, so every no-stretch
+mode (`horizontal`, `vertical`, and `none`) seeds the canonical two-band layout:
+each sibling pair straddles a central axis while hubs spread along it. That makes
+every neighbour separation axial or 45-degree, which is exactly what BP Studio
+can box-pleat without stretch devices. The `none` case picks the band axis once
+per sample (not once per flap) and relies on the random per-leaf edge lengths to
+break exact mirror symmetry. Earlier builds flipped each flap's axis
+independently, scattering anchors off any common lattice; that dropped the
+asymmetric 8-leaf no-stretch yield to ~12% and leaned on the 96-attempt rejection
+cap. Per-sample banded seeding restores ~100% first-attempt yield across 4-12
+leaves.
+
 ## Next Stages
 
 1. Replace the temporary random sampler with a tree/symmetry sampler designed
@@ -112,6 +161,19 @@ bun run --cwd tools/synthetic-generator box-pleated-preview -- \
   --target-leaf-count 6 \
   --symmetry horizontal \
   --no-stretches
+```
+
+Generate unassigned completed scaffold previews:
+
+```bash
+BP_STUDIO_ROOT=/tmp/bp-studio-source \
+bun run --cwd tools/synthetic-generator box-pleated-preview -- \
+  --count 8 \
+  --out /tmp/box-pleated-scaffold-packings \
+  --target-leaf-count 6 \
+  --symmetry horizontal \
+  --no-stretches \
+  --scaffold
 ```
 
 Show BP Studio's internal hinge/river contours in the preview:

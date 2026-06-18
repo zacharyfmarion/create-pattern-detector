@@ -16,6 +16,14 @@ export interface BoxPleatedPackingConfig {
   targetLeafCount?: number;
   optimizerDistanceScale?: number;
   noStretches?: boolean;
+  /**
+   * Tight mode: run BP Studio's optimizer the way the app's "Optimize Layout"
+   * does - basin-hopping across several random restarts - and keep the tightest
+   * layout. Pythagorean stretch devices are allowed (their creases are well
+   * defined), trading the clean-grid guarantee for paper efficiency.
+   */
+  tight?: boolean;
+  tightRestarts?: number;
 }
 
 export interface BoxPleatedBounds {
@@ -134,8 +142,10 @@ const DEFAULT_MAX_ATTEMPTS = 24;
 const DEFAULT_NO_STRETCH_MAX_ATTEMPTS = 96;
 const DEFAULT_OPTIMIZER_DISTANCE_SCALE = 1;
 const DEFAULT_NO_STRETCH_OPTIMIZER_DISTANCE_SCALE = 1.25;
+const DEFAULT_TIGHT_RESTARTS = 16;
 
 export async function generateBoxPleatedPacking(config: BoxPleatedPackingConfig): Promise<BoxPleatedPacking> {
+  if (config.tight) return generateTightBoxPleatedPacking(config);
   const maxAttempts = config.maxAttempts ?? (config.noStretches ? DEFAULT_NO_STRETCH_MAX_ATTEMPTS : DEFAULT_MAX_ATTEMPTS);
   const failures: string[] = [];
 
@@ -178,6 +188,71 @@ export async function generateBoxPleatedPacking(config: BoxPleatedPackingConfig)
   throw new Error(`Unable to generate a valid BP Studio packing for ${config.id}: ${uniqueFailures.join("; ")}`);
 }
 
+async function generateTightBoxPleatedPacking(config: BoxPleatedPackingConfig): Promise<BoxPleatedPacking> {
+  const restarts = config.tightRestarts ?? DEFAULT_TIGHT_RESTARTS;
+  const rng = new SeededRandom(config.seed);
+  // Tight mode optimizes a single fixed tree; stretches are permitted, so the
+  // 45/90-biased distance scale is not needed.
+  const sampled = sampleTree({ ...config, noStretches: false }, rng);
+  const flaps = sampled.leafIds.map((id) => {
+    const node = sampled.nodes[id];
+    return { id, width: node.width ?? 0, height: node.height ?? 0 };
+  });
+  const hierarchy: BpOptimizerHierarchy = { leaves: sampled.leafIds, distMap: distMap(sampled), parents: [] };
+
+  // Restart the optimizer from independent random seeds (basin-hopping on) and
+  // keep every distinct layout; the tightest one wins.
+  const candidates: Array<{ request: BpOptimizerRequest; result: BpOptimizerResult }> = [];
+  const failures: string[] = [];
+  for (let restart = 0; restart < restarts; restart++) {
+    const request: BpOptimizerRequest = {
+      type: "rect",
+      flaps,
+      hierarchies: [hierarchy],
+      layout: "view",
+      useBH: true,
+      random: 0,
+      vec: sampled.leafIds.map(() => ({ x: rng.float(0.08, 0.92), y: rng.float(0.08, 0.92) })),
+    };
+    try {
+      const result = await solveWithBpStudioOptimizer(request, {
+        bpStudioRoot: config.bpStudioRoot,
+        seed: config.seed + restart,
+      });
+      candidates.push({ request, result });
+    } catch (error) {
+      failures.push(errorMessage(error));
+    }
+  }
+  candidates.sort((a, b) => a.result.width - b.result.width);
+
+  // Build the tightest layout that BP Studio's core can actually realize
+  // (skip any that report patternNotFound or violate packing constraints).
+  for (const candidate of candidates) {
+    let result: BuildResult;
+    try {
+      result = await buildPacking({
+        id: config.id,
+        seed: config.seed,
+        bucket: config.bucket,
+        bpStudioRoot: config.bpStudioRoot,
+        noStretches: false,
+        sampled,
+        optimizerRequest: candidate.request,
+        optimizerResult: candidate.result,
+      });
+    } catch (error) {
+      failures.push(`BP Studio core failed: ${errorMessage(error)}`);
+      continue;
+    }
+    if (result.errors.length === 0) return result.packing;
+    failures.push(...result.errors);
+  }
+
+  const uniqueFailures = [...new Set(failures)].slice(0, 12);
+  throw new Error(`Unable to optimize a tight BP Studio packing for ${config.id}: ${uniqueFailures.join("; ")}`);
+}
+
 export function validateBoxPleatedPacking(packing: BoxPleatedPacking): string[] {
   return validatePacking(packing);
 }
@@ -204,16 +279,18 @@ export function renderBoxPleatedPackingSvg(
   const axisParallels = packing.layout.objects.map(renderAxisParallels).join("\n");
   const dots = packing.flaps.map(renderFlapDots).join("\n");
 
-  const contourLegend = includeLayoutContours ? `    <line x1="0" y1="32" x2="42" y2="32" class="hinge"/>
-    <text class="legend" x="54" y="36">blue BP layout contours</text>
-    <line x1="0" y1="62" x2="42" y2="62" class="circle"/>
-    <text class="legend" x="54" y="66">blue flap radius outlines</text>
-    <line x1="0" y1="92" x2="42" y2="92" class="ridge"/>
-    <text class="legend" x="54" y="96">red ridge creases</text>
-    <line x1="0" y1="122" x2="42" y2="122" class="axis-parallel"/>
-    <text class="legend" x="54" y="126">green stretch lines</text>
-    <circle cx="8" cy="152" r="4" class="dot"/>
-    <text class="legend" x="54" y="156">flap anchor dots</text>` : `    <line x1="0" y1="32" x2="42" y2="32" class="circle"/>
+  const contourLegend = includeLayoutContours ? `    <rect x="0" y="26" width="42" height="12" class="flap-box"/>
+    <text class="legend" x="54" y="36">amber flap boxes (aux lines)</text>
+    <line x1="0" y1="62" x2="42" y2="62" class="river-box"/>
+    <text class="legend" x="54" y="66">cyan river contours (aux lines)</text>
+    <line x1="0" y1="92" x2="42" y2="92" class="circle"/>
+    <text class="legend" x="54" y="96">blue flap radius outlines</text>
+    <line x1="0" y1="122" x2="42" y2="122" class="ridge"/>
+    <text class="legend" x="54" y="126">red ridge creases</text>
+    <line x1="0" y1="152" x2="42" y2="152" class="axis-parallel"/>
+    <text class="legend" x="54" y="156">green stretch lines</text>
+    <circle cx="8" cy="182" r="4" class="dot"/>
+    <text class="legend" x="54" y="186">flap anchor dots</text>` : `    <line x1="0" y1="32" x2="42" y2="32" class="circle"/>
     <text class="legend" x="54" y="36">blue flap radius outlines</text>
     <line x1="0" y1="62" x2="42" y2="62" class="ridge"/>
     <text class="legend" x="54" y="66">red ridge creases</text>
@@ -238,6 +315,8 @@ ${contourLegend}
     .sheet { fill: none; stroke: #d4d4d4; stroke-width: 3; vector-effect: non-scaling-stroke; }
     .grid { stroke: #6d6d6d; stroke-width: 0.55; opacity: 0.65; vector-effect: non-scaling-stroke; }
     .hinge { fill: none; stroke: #5f93ff; stroke-width: 2.5; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+    .flap-box { fill: none; stroke: #f2b134; stroke-width: 2; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+    .river-box { fill: none; stroke: #38bdf8; stroke-width: 1.8; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
     .circle { fill: none; stroke: #5f93ff; stroke-width: 1.25; vector-effect: non-scaling-stroke; }
     .ridge { stroke: #ff3657; stroke-width: 1.7; stroke-linecap: round; vector-effect: non-scaling-stroke; }
     .axis-parallel { stroke: #53df63; stroke-width: 1.25; stroke-linecap: round; vector-effect: non-scaling-stroke; }
@@ -539,17 +618,21 @@ function validatePacking(packing: BoxPleatedPacking): string[] {
 function initialVectors(sampled: SampledTree, rng: SeededRandom): Array<{ x: number; y: number }> {
   const count = sampled.leafIds.length;
   if (sampled.noStretches && sampled.symmetry === "none") {
+    // Grid-native placement: the tree sampler emits leaves as sibling pairs
+    // sharing a hub, so the arrangement BP Studio box-pleats cleanly is the
+    // canonical two-band layout - each sibling pair straddles a central axis
+    // while hubs spread along it. Every resulting neighbour separation is axial
+    // or 45-degree, so BP Studio needs no stretch devices. We pick the band
+    // axis once per sample (not per flap) to keep the whole layout coherent;
+    // the random per-leaf edge lengths still break exact mirror symmetry and
+    // supply diversity. This avoids the rejection-sampling cliff that scattered
+    // radial layouts fell off of.
+    const horizontal = rng.next() < 0.5;
     return sampled.leafIds.map((_, index) => {
-      const lanes = Math.ceil(count / 2);
-      const lane = Math.floor(index / 2);
-      const t = (lane + 1) / (lanes + 1);
-      const side = index % 2 === 0 ? 0.16 : 0.84;
-      const horizontal = rng.next() < 0.5;
-      const jitter = rng.float(-0.035, 0.035);
-      return {
-        x: horizontal ? t + jitter : side + jitter,
-        y: horizontal ? side - jitter : t - jitter,
-      };
+      const band = (Math.floor(index / 2) + 1) / (Math.ceil(count / 2) + 1);
+      const side = index % 2 === 0 ? 0.22 : 0.78;
+      const jitter = rng.float(-0.02, 0.02);
+      return horizontal ? { x: band + jitter, y: side } : { x: side, y: band + jitter };
     });
   }
   if (sampled.symmetry === "vertical" || sampled.symmetry === "horizontal") {
@@ -679,9 +762,14 @@ function renderGrid(sheet: BoxPleatedBounds): string {
 }
 
 function renderHingeContours(object: BoxPleatedLayoutObject): string {
+  // BP Studio's flap and river fold-region contours - these are the "boxes"
+  // around flap circles and the river polygons that BP Studio draws and exports
+  // as FOLD auxiliary lines. Style flaps and rivers distinctly so they read
+  // separately from the blue flap radius circles.
+  const className = object.kind === "flap" ? "flap-box" : object.kind === "river" ? "river-box" : "hinge";
   return object.contours.map((contour) => {
     const paths = [pathData(contour.outer), ...(contour.inner ?? []).map(pathData)];
-    return paths.map((path) => `<path d="${path}" class="hinge"/>`).join("\n");
+    return paths.map((path) => `<path d="${path}" class="${className}"/>`).join("\n");
   }).join("\n");
 }
 
