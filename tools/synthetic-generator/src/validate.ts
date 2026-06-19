@@ -257,12 +257,6 @@ function checkTessellationFoldProgramStructure(fold: FOLDFormat): void {
   if (metadata.generator !== "tessellation-fold-program") {
     throw new Error("tessellation_metadata.generator must be tessellation-fold-program");
   }
-  if (metadata.subfamily !== "orthogonal-bp-grid") {
-    throw new Error(`unsupported tessellation subfamily: ${String(metadata.subfamily)}`);
-  }
-  if (metadata.repeatX < 3 || metadata.repeatY < 3) {
-    throw new Error("tessellation repeat counts must be at least 3");
-  }
   if (!metadata.targetActiveCreaseRange || metadata.targetActiveCreaseRange.length !== 2) {
     throw new Error("targetActiveCreaseRange is required");
   }
@@ -274,9 +268,6 @@ function checkTessellationFoldProgramStructure(fold: FOLDFormat): void {
   if (activeCreases < minActive || activeCreases > maxActive) {
     throw new Error(`active crease count ${activeCreases} is outside requested range ${minActive}-${maxActive}`);
   }
-  if ((metadata.angleHistogram["0"] ?? 0) <= 0 || (metadata.angleHistogram["90"] ?? 0) <= 0) {
-    throw new Error("orthogonal tessellation samples require horizontal and vertical angle coverage");
-  }
   const fractionSum =
     metadata.horizontalCreaseLengthFraction +
     metadata.verticalCreaseLengthFraction +
@@ -287,7 +278,13 @@ function checkTessellationFoldProgramStructure(fold: FOLDFormat): void {
   if (metadata.minRenderedSpacingPx1024 <= 0) {
     throw new Error("minRenderedSpacingPx1024 must be positive");
   }
-  checkTessellationLineAlternation(fold, metadata);
+  if (metadata.subfamily === "orthogonal-bp-grid") {
+    checkOrthogonalTessellationStructure(fold, metadata);
+  } else if (metadata.subfamily === "miura-ori") {
+    checkMiuraTessellationStructure(fold, metadata);
+  } else {
+    throw new Error(`unsupported tessellation subfamily: ${String(metadata.subfamily)}`);
+  }
   const labelPolicy = fold.label_policy;
   if (!labelPolicy?.trainingEligible) throw new Error("label_policy.trainingEligible must be true");
   if (
@@ -297,6 +294,116 @@ function checkTessellationFoldProgramStructure(fold: FOLDFormat): void {
   ) {
     throw new Error("label_policy must mark tessellation fold-program provenance");
   }
+}
+
+function checkOrthogonalTessellationStructure(fold: FOLDFormat, metadata: TessellationMetadata): void {
+  if (metadata.coordinateMode !== "regular-grid-intervals") {
+    throw new Error("orthogonal tessellation coordinateMode must be regular-grid-intervals");
+  }
+  const gridSizeX = requiredNumber(metadata.gridSizeX, "gridSizeX");
+  const gridSizeY = requiredNumber(metadata.gridSizeY, "gridSizeY");
+  const horizontalPleatInterval = requiredNumber(metadata.horizontalPleatInterval, "horizontalPleatInterval");
+  const verticalPleatInterval = requiredNumber(metadata.verticalPleatInterval, "verticalPleatInterval");
+  if (gridSizeX < metadata.repeatX || gridSizeY < metadata.repeatY) {
+    throw new Error("grid size must be at least the active repeat count");
+  }
+  if (gridSizeX % verticalPleatInterval !== 0 || gridSizeY % horizontalPleatInterval !== 0) {
+    throw new Error("pleat intervals must divide the base grid size");
+  }
+  if (
+    metadata.repeatX !== gridSizeX / verticalPleatInterval ||
+    metadata.repeatY !== gridSizeY / horizontalPleatInterval
+  ) {
+    throw new Error("active repeat counts must match grid size and pleat intervals");
+  }
+  if (metadata.repeatX < 3 || metadata.repeatY < 3) {
+    throw new Error("tessellation repeat counts must be at least 3");
+  }
+  if ((metadata.angleHistogram["0"] ?? 0) <= 0 || (metadata.angleHistogram["90"] ?? 0) <= 0) {
+    throw new Error("orthogonal tessellation samples require horizontal and vertical angle coverage");
+  }
+  checkTessellationRegularGridCoordinates(fold, metadata);
+  checkTessellationLineAlternation(fold, metadata);
+}
+
+function checkMiuraTessellationStructure(fold: FOLDFormat, metadata: TessellationMetadata): void {
+  if (metadata.coordinateMode !== "miura-square-zigzag-grid") {
+    throw new Error("Miura tessellation coordinateMode must be miura-square-zigzag-grid");
+  }
+  if (metadata.repeatX < 3 || metadata.repeatY < 3) {
+    throw new Error("Miura repeat counts must be at least 3");
+  }
+  requiredNumber(metadata.miuraSkewFactor, "miuraSkewFactor");
+  requiredNumber(metadata.miuraCellAspectRatio, "miuraCellAspectRatio");
+  if ((metadata.angleHistogram["0"] ?? 0) <= 0) {
+    throw new Error("Miura tessellation samples require horizontal angle coverage");
+  }
+  const diagonalAngles = Object.entries(metadata.angleHistogram)
+    .filter(([angle]) => angle !== "0" && angle !== "90")
+    .reduce((sum, [, count]) => sum + count, 0);
+  if (diagonalAngles <= 0) {
+    throw new Error("Miura tessellation samples require diagonal angle coverage");
+  }
+  if (metadata.verticalCreaseLengthFraction !== 0 || metadata.diagonalCreaseLengthFraction <= 0) {
+    throw new Error("Miura tessellation samples must report diagonal, not vertical, crease length");
+  }
+  if (metadata.assignmentMode !== "miura-column-alternating") {
+    throw new Error(`unsupported Miura assignment mode: ${String(metadata.assignmentMode)}`);
+  }
+  checkMiuraGridCoordinates(fold, metadata);
+  checkMiuraLineAlternation(fold, metadata);
+}
+
+function checkTessellationRegularGridCoordinates(fold: FOLDFormat, metadata: TessellationMetadata): void {
+  const cols = metadata.repeatX;
+  const rows = metadata.repeatY;
+  const gridSizeX = requiredNumber(metadata.gridSizeX, "gridSizeX");
+  const gridSizeY = requiredNumber(metadata.gridSizeY, "gridSizeY");
+  const horizontalPleatInterval = requiredNumber(metadata.horizontalPleatInterval, "horizontalPleatInterval");
+  const verticalPleatInterval = requiredNumber(metadata.verticalPleatInterval, "verticalPleatInterval");
+  const expectedVertices = (cols + 1) * (rows + 1);
+  if (fold.vertices_coords.length !== expectedVertices) {
+    throw new Error(`orthogonal grid vertex layout mismatch: expected ${expectedVertices} vertices`);
+  }
+
+  const xCoords = Array.from({ length: cols + 1 }, (_, x) => fold.vertices_coords[x]?.[0]);
+  const yCoords = Array.from({ length: rows + 1 }, (_, y) => fold.vertices_coords[y * (cols + 1)]?.[1]);
+  axisWidths("x", xCoords);
+  axisWidths("y", yCoords);
+  const expectedDx = verticalPleatInterval / gridSizeX;
+  const expectedDy = horizontalPleatInterval / gridSizeY;
+  for (let x = 0; x <= cols; x++) {
+    const expected = x * expectedDx;
+    if (Math.abs(Number(xCoords[x]) - expected) > 1e-7) {
+      throw new Error(`x coordinate ${x} must equal ${expected} on the regular grid`);
+    }
+  }
+  for (let y = 0; y <= rows; y++) {
+    const expected = y * expectedDy;
+    if (Math.abs(Number(yCoords[y]) - expected) > 1e-7) {
+      throw new Error(`y coordinate ${y} must equal ${expected} on the regular grid`);
+    }
+  }
+  const minRenderedSpacing = roundRatio(1024 * Math.min(expectedDx, expectedDy));
+  if (Math.abs(metadata.minRenderedSpacingPx1024 - minRenderedSpacing) > 0.01) {
+    throw new Error(`minRenderedSpacingPx1024 ${metadata.minRenderedSpacingPx1024} does not match coordinates ${minRenderedSpacing}`);
+  }
+}
+
+function axisWidths(axis: "x" | "y", coords: Array<number | undefined>): number[] {
+  if (coords.some((coord) => coord === undefined || !Number.isFinite(coord))) {
+    throw new Error(`${axis}-axis coordinate list is incomplete`);
+  }
+  if (Math.abs(Number(coords[0])) > 1e-7 || Math.abs(Number(coords[coords.length - 1]) - 1) > 1e-7) {
+    throw new Error(`${axis}-axis coordinates must span 0 to 1`);
+  }
+  const widths: number[] = [];
+  for (let index = 0; index < coords.length - 1; index++) {
+    const width = Number(coords[index + 1]) - Number(coords[index]);
+    if (width <= 0) throw new Error(`${axis}-axis coordinates must be strictly increasing`);
+    widths.push(width);
+  }
+  return widths;
 }
 
 function checkTessellationLineAlternation(fold: FOLDFormat, metadata: TessellationMetadata): void {
@@ -336,6 +443,88 @@ function checkTessellationLineAlternation(fold: FOLDFormat, metadata: Tessellati
         }
       } else {
         throw new Error(`unsupported tessellation assignment mode: ${String(metadata.assignmentMode)}`);
+      }
+    }
+  }
+}
+
+function checkMiuraGridCoordinates(fold: FOLDFormat, metadata: TessellationMetadata): void {
+  const cols = metadata.repeatX;
+  const rows = metadata.repeatY;
+  const skewFactor = requiredNumber(metadata.miuraSkewFactor, "miuraSkewFactor");
+  const expectedVertices = (cols + 1) * (rows + 1);
+  if (fold.vertices_coords.length !== expectedVertices) {
+    throw new Error(`Miura grid vertex layout mismatch: expected ${expectedVertices} vertices`);
+  }
+
+  const vertexIndex = (x: number, y: number): number => y * (cols + 1) + x;
+
+  for (let y = 0; y <= rows; y++) {
+    const offset = y % 2 === 0 ? 0 : skewFactor;
+    for (let x = 0; x <= cols; x++) {
+      const [actualX, actualY] = fold.vertices_coords[vertexIndex(x, y)] ?? [NaN, NaN];
+      const expectedX = x === 0 || x === cols ? x / cols : (x + offset) / cols;
+      const expectedY = y / rows;
+      if (Math.abs(actualX - expectedX) > 1e-7 || Math.abs(actualY - expectedY) > 1e-7) {
+        throw new Error(`Miura vertex (${x}, ${y}) must match square alternating-offset coordinates`);
+      }
+    }
+  }
+
+  const edgeLengths = fold.edges_vertices.map(([a, b]) => distance(fold.vertices_coords[a], fold.vertices_coords[b]));
+  const minRenderedSpacing = roundRatio(1024 * Math.min(...edgeLengths));
+  if (Math.abs(metadata.minRenderedSpacingPx1024 - minRenderedSpacing) > 0.01) {
+    throw new Error(`minRenderedSpacingPx1024 ${metadata.minRenderedSpacingPx1024} does not match Miura coordinates ${minRenderedSpacing}`);
+  }
+}
+
+function checkMiuraLineAlternation(fold: FOLDFormat, metadata: TessellationMetadata): void {
+  const cols = metadata.repeatX;
+  const rows = metadata.repeatY;
+  const expectedEdges = (rows + 1) * cols + rows * (cols + 1);
+  if (fold.edges_vertices.length !== expectedEdges || fold.edges_assignment.length !== expectedEdges) {
+    throw new Error(`Miura grid edge layout mismatch: expected ${expectedEdges} edges`);
+  }
+
+  const horizontalIndex = (y: number, x: number): number => y * cols + x;
+  const diagonalOffset = (rows + 1) * cols;
+  const diagonalIndex = (y: number, x: number): number => diagonalOffset + y * (cols - 1) + (x - 1);
+  const borderOffset = diagonalOffset + rows * (cols - 1);
+  const leftBorderIndex = (y: number): number => borderOffset + y * 2;
+  const rightBorderIndex = (y: number): number => borderOffset + y * 2 + 1;
+
+  for (let y = 0; y <= rows; y++) {
+    for (let x = 0; x < cols; x++) {
+      const assignment = fold.edges_assignment[horizontalIndex(y, x)];
+      if (y === 0 || y === rows) {
+        if (assignment !== "B") throw new Error(`Miura top/bottom border edge (${x}, ${y}) must be B`);
+      } else if (!isMountainOrValley(assignment)) {
+        throw new Error(`Miura interior horizontal edge (${x}, ${y}) must be M/V`);
+      }
+    }
+  }
+  for (let y = 0; y < rows; y++) {
+    if (fold.edges_assignment[leftBorderIndex(y)] !== "B" || fold.edges_assignment[rightBorderIndex(y)] !== "B") {
+      throw new Error(`Miura side border edges at row ${y} must be B`);
+    }
+  }
+
+  for (let y = 1; y < rows; y++) {
+    for (let x = 1; x < cols; x++) {
+      const left = fold.edges_assignment[horizontalIndex(y, x - 1)];
+      const right = fold.edges_assignment[horizontalIndex(y, x)];
+      const above = fold.edges_assignment[diagonalIndex(y - 1, x)];
+      const below = fold.edges_assignment[diagonalIndex(y, x)];
+      const assignments = [left, right, above, below];
+      if (!assignments.every(isMountainOrValley)) {
+        throw new Error(`interior Miura vertex (${x}, ${y}) must have only M/V incident creases`);
+      }
+      const mountainCount = assignments.filter((assignment) => assignment === "M").length;
+      if (mountainCount !== 1 && mountainCount !== 3) {
+        throw new Error(`interior Miura vertex (${x}, ${y}) must have a 3-to-1 M/V split`);
+      }
+      if (above !== below || below !== right || left !== oppositeAssignment(right)) {
+        throw new Error(`Miura column assignment mismatch at vertex (${x}, ${y})`);
       }
     }
   }
@@ -448,4 +637,15 @@ function countValues(values: readonly string[]): Record<string, number> {
   const counts: Record<string, number> = {};
   for (const value of values) counts[value] = (counts[value] ?? 0) + 1;
   return counts;
+}
+
+function requiredNumber(value: number | undefined, label: string): number {
+  if (value === undefined || !Number.isFinite(value)) {
+    throw new Error(`${label} is required`);
+  }
+  return value;
+}
+
+function roundRatio(value: number): number {
+  return Math.round(value * 1_000_000) / 1_000_000;
 }

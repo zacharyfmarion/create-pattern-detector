@@ -4,7 +4,7 @@ export type TreeMakerSymmetryClass = "diagonal" | "middle-axis" | "asymmetric";
 export type TreeMakerSymmetryVariant = "main-diagonal" | "anti-diagonal" | "vertical" | "horizontal" | "none";
 export type TreeMakerTopology = "radial-star" | "hubbed-limbs" | "spine-chain" | "branched-hybrid";
 export type RabbitEarFoldProgramAxiom = "axiom1" | "axiom2" | "axiom3" | "axiom4" | "axiom7";
-export type TessellationSubfamily = "orthogonal-bp-grid";
+export type TessellationSubfamily = "orthogonal-bp-grid" | "miura-ori";
 export type TreeMakerCreaseKind =
   | "BORDER"
   | "AXIAL"
@@ -79,6 +79,13 @@ export interface RabbitEarFoldProgramMetadata {
 export interface TessellationMetadata {
   generator: "tessellation-fold-program";
   subfamily: TessellationSubfamily;
+  coordinateMode: "regular-grid-intervals" | "miura-square-zigzag-grid";
+  gridSizeX?: number;
+  gridSizeY?: number;
+  horizontalPleatInterval?: number;
+  verticalPleatInterval?: number;
+  miuraSkewFactor?: number;
+  miuraCellAspectRatio?: number;
   repeatX: number;
   repeatY: number;
   activeCreaseCount: number;
@@ -88,7 +95,7 @@ export interface TessellationMetadata {
   diagonalCreaseLengthFraction: number;
   minRenderedSpacingPx1024: number;
   angleHistogram: Record<string, number>;
-  assignmentMode: "vertical-line-alternating" | "horizontal-line-alternating";
+  assignmentMode: "vertical-line-alternating" | "horizontal-line-alternating" | "miura-column-alternating";
   verticalBias: boolean;
   generatorSteps: string[];
 }
@@ -204,6 +211,17 @@ export interface TessellationSamplerConfig {
   verticalBiasProbability?: number;
   minRepeats?: number;
   maxRepeats?: number;
+  gridSizes?: number[];
+  pleatIntervalPairs?: Array<{
+    horizontal: number;
+    vertical: number;
+    weight?: number;
+  }>;
+  miuraCols?: number[];
+  miuraRows?: number[];
+  miuraSkewFactors?: number[];
+  miuraMinCellAspectRatio?: number;
+  miuraMaxCellAspectRatio?: number;
 }
 
 export interface ValidationResult {

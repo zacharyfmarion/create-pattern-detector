@@ -138,6 +138,12 @@ def analyze_sample(sample_id: str, row: dict[str, Any], fold: dict[str, Any], an
         },
         "tessellation": {
             "subfamily": tessellation.get("subfamily"),
+            "gridSizeX": tessellation.get("gridSizeX"),
+            "gridSizeY": tessellation.get("gridSizeY"),
+            "horizontalPleatInterval": tessellation.get("horizontalPleatInterval"),
+            "verticalPleatInterval": tessellation.get("verticalPleatInterval"),
+            "miuraSkewFactor": tessellation.get("miuraSkewFactor"),
+            "miuraCellAspectRatio": tessellation.get("miuraCellAspectRatio"),
             "repeatX": tessellation.get("repeatX"),
             "repeatY": tessellation.get("repeatY"),
             "verticalCreaseLengthFraction": tessellation.get("verticalCreaseLengthFraction"),
@@ -160,6 +166,18 @@ def build_report(samples: list[dict[str, Any]], skipped: list[dict[str, Any]], m
         "topology": Counter(sample["tree"].get("topology") for sample in samples),
         "tessellationSubfamily": Counter(sample["tessellation"].get("subfamily") for sample in samples),
         "tessellationVerticalBias": Counter(sample["tessellation"].get("verticalBias") for sample in samples),
+        "tessellationGridSize": Counter(sample["tessellation"].get("gridSizeX") for sample in samples),
+        "tessellationPleatIntervals": Counter(
+            f"H{sample['tessellation'].get('horizontalPleatInterval')}-V{sample['tessellation'].get('verticalPleatInterval')}"
+            for sample in samples
+            if sample["tessellation"].get("horizontalPleatInterval") is not None
+            and sample["tessellation"].get("verticalPleatInterval") is not None
+        ),
+        "tessellationMiuraRepeats": Counter(
+            f"{sample['tessellation'].get('repeatX')}x{sample['tessellation'].get('repeatY')}"
+            for sample in samples
+            if sample["tessellation"].get("subfamily") == "miura-ori"
+        ),
     }
     merged_assignments = merge_counters(sample["assignments"] for sample in samples)
     merged_degree = merge_counters(sample["degree_histogram"] for sample in samples)
@@ -183,6 +201,16 @@ def build_report(samples: list[dict[str, Any]], skipped: list[dict[str, Any]], m
             sample["tessellation"].get("minRenderedSpacingPx1024")
             for sample in samples
             if sample["tessellation"].get("minRenderedSpacingPx1024") is not None
+        ),
+        "tessellation_miura_skew_factor": summarize(
+            sample["tessellation"].get("miuraSkewFactor")
+            for sample in samples
+            if sample["tessellation"].get("miuraSkewFactor") is not None
+        ),
+        "tessellation_miura_cell_aspect_ratio": summarize(
+            sample["tessellation"].get("miuraCellAspectRatio")
+            for sample in samples
+            if sample["tessellation"].get("miuraCellAspectRatio") is not None
         ),
         "border_intersections": summarize(sample["border_intersections"] for sample in samples),
         "assignment_totals": clean_counter(merged_assignments),

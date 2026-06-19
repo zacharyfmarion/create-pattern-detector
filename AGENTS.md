@@ -99,9 +99,10 @@ Large generated releases live outside the repo:
 ```text
 /Users/zacharymarion/Documents/datasets/create-pattern-detector/synthetic/treemaker_tree_v1
 /Users/zacharymarion/Documents/datasets/create-pattern-detector/synthetic/rabbit_ear_fold_program_v1
-/Users/zacharymarion/Documents/datasets/create-pattern-detector/synthetic/tessellation_fold_program_v1
+/Users/zacharymarion/Documents/datasets/create-pattern-detector/synthetic/tessellation_orthogonal_bp_grid_v2_15pct
+/Users/zacharymarion/Documents/datasets/create-pattern-detector/synthetic/tessellation_miura_ori_v2_15pct
 /Users/zacharymarion/Documents/datasets/create-pattern-detector/synthetic/cp_training_mix_v1
-/Users/zacharymarion/Documents/datasets/create-pattern-detector/synthetic/cp_training_mix_v2_tessellation
+/Users/zacharymarion/Documents/datasets/create-pattern-detector/synthetic/cp_training_mix_v3_tessellation_15pct
 ```
 
 Future worktrees should link the current mixed root when training:
@@ -114,9 +115,18 @@ PYTHONPATH=. python3.10 scripts/data/smoke_shared_synthetic_data.py --root data/
 Use `recipes/synthetic/tessellation_fold_program_v1.yaml` and
 `scripts/data/visualize_synthetic_folds.py` for the tessellation release. Do not
 mutate `cp_training_mix_v1`; build a new mixed release when tessellation samples
-are added to training. The first such external mix is
-`cp_training_mix_v2_tessellation` and should be compared against the promoted
-`MAX_EDGES=1200` baseline before becoming the default.
+are added to training. The current 15% tessellation experiment mix is
+`cp_training_mix_v3_tessellation_15pct`.
+
+When training on `cp_training_mix_v3_tessellation_15pct`, do not use natural or
+plain balanced family sampling. Use `TRAIN_FAMILY_SAMPLING=v3-tessellation-15pct`
+or the dedicated tessellation launcher. The preset preserves the old dense-edge
+base exposure while adding tessellations:
+
+- `42.5%` `treemaker-tree`
+- `42.5%` `rabbit-ear-fold-program`
+- `12%` `tessellation_orthogonal_bp_grid_v2_15pct`
+- `3%` `tessellation_miura_ori_v2_15pct`
 
 See `docs/synthetic-fold-datasets.md` for generation, shard merge, folded-preview,
 and mix-building commands.
@@ -140,6 +150,12 @@ Before replacing, exporting, or using a checkpoint, read
 The current downstream/browser model is the V3 no-guide-grid close-pair dense
 edges `MAX_EDGES=1200` checkpoint registered at
 `artifacts/checkpoints/runpod-v3-no-guide-grid-close-pair-dense-edges-max1200-l40s.json`.
+
+The latest registered BP-data candidate is the corrected 15% tessellation run at
+`artifacts/checkpoints/runpod-v3-no-guide-grid-close-pair-dense-edges-tess15-weighted-4090.json`.
+It is promotable based on dense BP and clean-15 evals, but it is not the stable
+downstream model until the canonical checkpoint and `tree-maker-rust`
+`cp-detector-v3` artifacts are explicitly promoted.
 
 Do not confuse the previous V3 close-pair R1 checkpoint, the no-guide-grid R1
 or max700 dense-edge checkpoints that this run superseded, or the later R3
@@ -196,3 +212,16 @@ It defaults to the promoted `MAX_EDGES=1200` checkpoint and verifies the same
 radius-3 close-pair recipe. It refuses to write into an existing `OUTPUT_ROOT`
 unless `ALLOW_EXISTING_OUTPUT_ROOT=1` is set, so use a fresh explicit
 `OUTPUT_ROOT` for new probes.
+
+For the 15% tessellation BP-data experiment, use:
+
+```bash
+scripts/training/run_cpline_runpod_v3_no_guide_grid_close_pair_dense_edges_tess15_probe.sh
+```
+
+That launcher defaults to
+`data/generated/synthetic/cp_training_mix_v3_tessellation_15pct/raw-manifest.jsonl`
+and `TRAIN_FAMILY_SAMPLING=v3-tessellation-15pct`. The generic dense-edge
+launcher also auto-selects this sampler for that manifest and fails with an
+"Are you sure?" message if a non-default tessellation sampler is used without
+`ALLOW_NONDEFAULT_TESS15_SAMPLING=1`.

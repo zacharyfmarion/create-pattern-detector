@@ -163,6 +163,11 @@ test("Tessellation fold-program validation rejects wrong provenance", async () =
     tessellation_metadata: {
       generator: "tessellation-fold-program",
       subfamily: "orthogonal-bp-grid",
+      coordinateMode: "regular-grid-intervals",
+      gridSizeX: 4,
+      gridSizeY: 4,
+      horizontalPleatInterval: 1,
+      verticalPleatInterval: 1,
       repeatX: 4,
       repeatY: 4,
       activeCreaseCount: 0,

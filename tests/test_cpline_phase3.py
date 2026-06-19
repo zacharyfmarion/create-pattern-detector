@@ -4,6 +4,7 @@ import subprocess
 import sys
 
 import numpy as np
+import pytest
 import torch
 from torch.utils.data import DataLoader
 
@@ -908,6 +909,125 @@ def test_cpline_dataset_balanced_family_sampling_oversamples_small_family():
     }
 
     assert family_counts == {"treemaker-tree": 4, "rabbit-ear-fold-program": 4}
+
+
+def test_cpline_dataset_tessellation_15pct_sampling_preserves_base_mix():
+    records = (
+        [
+            {
+                "id": f"tree-{idx}",
+                "foldPath": f"tree-{idx}.fold",
+                "split": "train",
+                "family": "treemaker-tree",
+                "sourceDataset": "cp_training_mix_v1",
+                "edges": 8,
+            }
+            for idx in range(100)
+        ]
+        + [
+            {
+                "id": f"rabbit-{idx}",
+                "foldPath": f"rabbit-{idx}.fold",
+                "split": "train",
+                "family": "rabbit-ear-fold-program",
+                "sourceDataset": "cp_training_mix_v1",
+                "edges": 8,
+            }
+            for idx in range(100)
+        ]
+        + [
+            {
+                "id": f"bp-{idx}",
+                "foldPath": f"bp-{idx}.fold",
+                "split": "train",
+                "family": "tessellation-fold-program",
+                "sourceDataset": "tessellation_orthogonal_bp_grid_v2_15pct",
+                "edges": 8,
+            }
+            for idx in range(100)
+        ]
+        + [
+            {
+                "id": f"miura-{idx}",
+                "foldPath": f"miura-{idx}.fold",
+                "split": "train",
+                "family": "tessellation-fold-program",
+                "sourceDataset": "tessellation_miura_ori_v2_15pct",
+                "edges": 8,
+            }
+            for idx in range(100)
+        ]
+    )
+
+    selected = select_records(
+        records,
+        split="train",
+        limit=200,
+        max_edges=20,
+        seed=7,
+        family_sampling="v3-tessellation-15pct",
+    )
+    source_counts = {
+        source: sum(record["sourceDataset"] == source for record in selected)
+        for source in {
+            "cp_training_mix_v1",
+            "tessellation_orthogonal_bp_grid_v2_15pct",
+            "tessellation_miura_ori_v2_15pct",
+        }
+    }
+    family_counts = {
+        family: sum(record["family"] == family for record in selected)
+        for family in {
+            "treemaker-tree",
+            "rabbit-ear-fold-program",
+            "tessellation-fold-program",
+        }
+    }
+
+    assert family_counts == {
+        "treemaker-tree": 85,
+        "rabbit-ear-fold-program": 85,
+        "tessellation-fold-program": 30,
+    }
+    assert source_counts == {
+        "cp_training_mix_v1": 170,
+        "tessellation_orthogonal_bp_grid_v2_15pct": 24,
+        "tessellation_miura_ori_v2_15pct": 6,
+    }
+
+
+def test_cpline_dataset_tessellation_15pct_sampling_requires_tess_groups():
+    records = [
+        {
+            "id": f"tree-{idx}",
+            "foldPath": f"tree-{idx}.fold",
+            "split": "train",
+            "family": "treemaker-tree",
+            "sourceDataset": "cp_training_mix_v1",
+            "edges": 8,
+        }
+        for idx in range(100)
+    ] + [
+        {
+            "id": f"rabbit-{idx}",
+            "foldPath": f"rabbit-{idx}.fold",
+            "split": "train",
+            "family": "rabbit-ear-fold-program",
+            "sourceDataset": "cp_training_mix_v1",
+            "edges": 8,
+        }
+        for idx in range(100)
+    ]
+
+    with pytest.raises(ValueError, match="tessellation_orthogonal_bp_grid_v2_15pct"):
+        select_records(
+            records,
+            split="train",
+            limit=200,
+            max_edges=20,
+            seed=7,
+            family_sampling="v3-tessellation-15pct",
+        )
 
 
 def test_cpline_augmentation_visualization_script_smoke(tmp_path):

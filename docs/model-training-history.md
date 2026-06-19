@@ -195,6 +195,30 @@ For controlled dense-edge follow-up probes from the current promoted model, use:
 scripts/training/run_cpline_runpod_v3_no_guide_grid_close_pair_dense_edges_probe.sh
 ```
 
+For the 15% tessellation BP-data experiment, use the dedicated wrapper:
+
+```bash
+scripts/training/run_cpline_runpod_v3_no_guide_grid_close_pair_dense_edges_tess15_probe.sh
+```
+
+It defaults to `cp_training_mix_v3_tessellation_15pct` and
+`TRAIN_FAMILY_SAMPLING=v3-tessellation-15pct`, which preserves the previous
+dense-edge base exposure while adding 12% orthogonal BP-grid and 3% Miura
+tessellations. Do not use `natural` or plain `balanced` sampling for that mix
+unless intentionally running a sampler ablation.
+
+The corrected tessellation run is registered as a promotable candidate at:
+
+```text
+artifacts/checkpoints/runpod-v3-no-guide-grid-close-pair-dense-edges-tess15-weighted-4090.json
+```
+
+It improves BP orthogonal effective recall from `0.6746` to `0.7547` and
+very-dense vertical effective recall from `0.3968` to `0.4875`, while clean-15
+strict edge F1 remains effectively tied with max1200 (`0.9651` vs `0.9655`).
+The first tessellation run with `TRAIN_FAMILY_SAMPLING=natural` remains a
+non-promotable sampler ablation.
+
 ## Timeline
 
 | Date | Run | Checkpoint | Init | Outcome |
@@ -207,6 +231,7 @@ scripts/training/run_cpline_runpod_v3_no_guide_grid_close_pair_dense_edges_probe
 | 2026-06-17 | V3 no-guide-grid close-pair full R1 | `artifacts/checkpoints/runpod-v3-no-guide-grid-close-pair-full-r1-4090.json` | R1 close-pair checkpoint, reinitialized `non_crease_head` | Superseded browser/product model. Keeps radius-3 close-pair decoder compatibility, fixes BP non-crease suppression, and improves current-pack clean-15 strict topology. |
 | 2026-06-18 | V3 no-guide-grid close-pair dense-edge max700 | `artifacts/checkpoints/runpod-v3-no-guide-grid-close-pair-dense-edges-max700-4090.json` | No-guide-grid close-pair R1, no head reinit | Superseded browser/product model. Raises the training edge envelope to `max_edges=700`, improves dense BP horizontal/vertical recall, and improves clean-15 strict topology to `0.9623` strict edge F1. |
 | 2026-06-18 | V3 no-guide-grid close-pair dense-edge max1200 | `artifacts/checkpoints/runpod-v3-no-guide-grid-close-pair-dense-edges-max1200-l40s.json` | Max700 checkpoint, no head reinit | Current promoted browser/product model. Raises the training edge envelope to `max_edges=1200`; improves BP orthogonal effective recall to `0.6746` and clean-15 strict edge F1 to `0.9655`, with modestly higher non-crease conflict. |
+| 2026-06-19 | V3 no-guide-grid close-pair dense-edge tess15 weighted | `artifacts/checkpoints/runpod-v3-no-guide-grid-close-pair-dense-edges-tess15-weighted-4090.json` | Max1200 checkpoint, no head reinit | Promotable candidate, not yet swapped into the stable downstream model path. Uses `TRAIN_FAMILY_SAMPLING=v3-tessellation-15pct` to preserve balanced TreeMaker/Rabbit exposure while adding 12% orthogonal BP-grid and 3% Miura tessellations. BP orthogonal effective recall improves to `0.7547`; clean-15 strict edge F1 remains tied at `0.9651`. |
 
 ## Update Rules
 

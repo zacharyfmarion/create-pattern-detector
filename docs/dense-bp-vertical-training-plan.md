@@ -194,6 +194,12 @@ Training design:
 - Reuse the best `MAX_EDGES` envelope found in Experiment A.
 - Compare against the Experiment A model, not only against the current promoted
   baseline.
+- For the current 15% tessellation mix,
+  `cp_training_mix_v3_tessellation_15pct`, use
+  `TRAIN_FAMILY_SAMPLING=v3-tessellation-15pct`, not `natural` or plain
+  `balanced`. This preserves the old dense-edge base exposure while adding the
+  requested tessellation slice: 42.5% TreeMaker, 42.5% Rabbit Ear, 12%
+  orthogonal BP grid, and 3% Miura.
 
 ## Evaluation Matrix
 
@@ -237,8 +243,22 @@ Before spending RunPod budget:
 2. Confirm the selected checkpoint is the current promoted dense-edge model.
 3. Print the resolved `MAX_EDGES`.
 4. Print the resolved close-pair junction parameters.
-5. Run a tiny data-loader smoke with the selected `MAX_EDGES`.
-6. Confirm the expected number of train/val examples after filtering.
+5. Print `train_family_sampling` and the selected train source counts from
+   `run_config.json`.
+6. Run a tiny data-loader smoke with the selected `MAX_EDGES`.
+7. Confirm the expected number of train/val examples after filtering.
+
+For the 15% tessellation experiment, use:
+
+```bash
+scripts/training/run_cpline_runpod_v3_no_guide_grid_close_pair_dense_edges_tess15_probe.sh
+```
+
+The generic dense-edge launcher auto-selects
+`TRAIN_FAMILY_SAMPLING=v3-tessellation-15pct` when the manifest path contains
+`cp_training_mix_v3_tessellation_15pct`. It fails with an "Are you sure?"
+message if a non-default tessellation sampler is used without
+`ALLOW_NONDEFAULT_TESS15_SAMPLING=1`.
 
 ## Open Questions
 
@@ -480,3 +500,86 @@ that passed initial Rabbit Ear spot checks but made vertical-heavy examples look
 like one-color ladders. The release was regenerated with line-level alternation
 and the recipe now requires every accepted tessellation row to pass both
 `local-flat-foldability` and `rabbit-ear-solver`.
+
+### 2026-06-19: Tessellation Sampler Safety Fix
+
+The first 15% tessellation probe accidentally used
+`TRAIN_FAMILY_SAMPLING=natural` on
+`cp_training_mix_v3_tessellation_15pct`. That did add about 15% tessellations,
+but it also changed the old base exposure from balanced TreeMaker/Rabbit Ear to
+the manifest-natural distribution: roughly 73% TreeMaker, 12% Rabbit Ear, and
+15% tessellation. Its BP vertical recall gains therefore cannot be cleanly
+separated from the Rabbit Ear exposure reduction, and it should not be promoted.
+
+The corrected sampler is now explicit:
+
+```text
+TRAIN_FAMILY_SAMPLING=v3-tessellation-15pct
+```
+
+For a 2048-sample training slice at `MAX_EDGES=1200`, seed `31`, this selects:
+
+| Source | Records |
+| --- | ---: |
+| `treemaker-tree` from `cp_training_mix_v1` | `870` |
+| `rabbit-ear-fold-program` from `cp_training_mix_v1` | `870` |
+| `tessellation_orthogonal_bp_grid_v2_15pct` | `246` |
+| `tessellation_miura_ori_v2_15pct` | `62` |
+
+The launcher now records `train_selection_summary` in `run_config.json` and
+fails with an "Are you sure?" message if the tessellation mix is launched with
+a non-default sampler without an explicit override.
+
+### 2026-06-19: Corrected 15% Tessellation Probe
+
+The corrected run used the dedicated launcher:
+
+```bash
+scripts/training/run_cpline_runpod_v3_no_guide_grid_close_pair_dense_edges_tess15_probe.sh
+```
+
+Run details:
+
+- Checkpoint: `checkpoints/runpod_v3_no_guide_grid_close_pair_dense_edges_tess15_weighted_probe_20260619/full/latest.pt`
+- Registry: `artifacts/checkpoints/runpod-v3-no-guide-grid-close-pair-dense-edges-tess15-weighted-4090.json`
+- Init: promoted max1200 dense-edge checkpoint
+- GPU: RunPod RTX 4090, pod `rtljlswig1uksp`
+- Steps: `1500`
+- Training sampler: `v3-tessellation-15pct`
+- Train selection: `870` TreeMaker, `870` Rabbit Ear, `246` orthogonal BP grid, `62` Miura
+- Close-pair contract: `junction_offset_radius_px=3.0`
+
+Dense BP results:
+
+| Run | Orthogonal eRecall | Orthogonal non-crease conflict | All crease eRecall |
+| --- | ---: | ---: | ---: |
+| max1200 promoted baseline | `0.6746` | `0.0285` | `0.7261` |
+| first tess15 natural-sampler ablation | `0.7277` | `0.0303` | `0.7651` |
+| corrected tess15 weighted probe | `0.7547` | `0.0266` | `0.7854` |
+
+Angle-bucket dense BP results:
+
+| Cohort | Run | Horizontal eRecall | Vertical eRecall | 45/135 eRecall |
+| --- | --- | ---: | ---: | ---: |
+| all 179 | max1200 | `0.7300` | `0.6272` | `0.8866` |
+| all 179 | corrected tess15 weighted | `0.7529` | `0.7634` | `0.8801` |
+| dense top quartile | max1200 | `0.5153` | `0.4247` | `0.8501` |
+| dense top quartile | corrected tess15 weighted | `0.5578` | `0.5311` | `0.8465` |
+| very dense, edges >= 2000 | max1200 | `0.4808` | `0.3968` | `0.8438` |
+| very dense, edges >= 2000 | corrected tess15 weighted | `0.5238` | `0.4875` | `0.8389` |
+
+Clean-15 strict gate:
+
+| Run | Exact topology | Exact topology + assignment | Strict eF1 | Missing | Extra | Merged | Split |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| max1200 promoted baseline | `4/15` | `3/15` | `0.9655` | `107` | `76` | `60` | `9` |
+| first tess15 natural-sampler ablation | `3/15` | `3/15` | `0.9611` | `117` | `89` | `67` | `11` |
+| corrected tess15 weighted probe | `4/15` | `3/15` | `0.9651` | `108` | `77` | `55` | `16` |
+
+Interpretation: the corrected sampler removes the confound and improves the
+actual BP target more than the accidental natural-sampler run, especially on
+vertical dense BP lines. Clean-15 is effectively tied with max1200: one more
+missing edge, one more extra edge, five fewer merges, and seven more splits. The
+net result is promotable, but the stable downstream `cp-detector-v3` path should
+only be swapped in a promotion commit that also mirrors the ignored checkpoint
+out of any temporary worktree.

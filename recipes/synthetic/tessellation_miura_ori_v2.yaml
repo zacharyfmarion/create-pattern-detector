@@ -1,5 +1,5 @@
-name: tessellation_fold_program_v1
-seed: 129170
+name: tessellation_miura_ori_v2
+seed: 20260620
 imageSize: 768
 padding: 42
 
@@ -31,33 +31,12 @@ complexityBuckets:
 
 tessellationSampler:
   subfamilyWeights:
-    orthogonal-bp-grid: 1.0
-  verticalBiasProbability: 0.75
+    miura-ori: 1.0
   minRepeats: 6
   maxRepeats: 48
-  gridSizes: [8, 10, 12, 15, 16, 18, 20, 24, 30, 32, 36, 40, 45, 48]
-  pleatIntervalPairs:
-    - horizontal: 1
-      vertical: 1
-      weight: 1.4
-    - horizontal: 1
-      vertical: 2
-      weight: 1.2
-    - horizontal: 2
-      vertical: 1
-      weight: 1.2
-    - horizontal: 1
-      vertical: 3
-      weight: 0.9
-    - horizontal: 3
-      vertical: 1
-      weight: 0.9
-    - horizontal: 2
-      vertical: 3
-      weight: 0.6
-    - horizontal: 3
-      vertical: 2
-      weight: 0.6
+  miuraSkewFactors: [0.24, 0.33, 0.45, 0.58]
+  miuraMinCellAspectRatio: 0.5
+  miuraMaxCellAspectRatio: 3.0
 
 validation:
   strictGlobal: true

@@ -114,10 +114,24 @@ def label_lines(row: dict[str, Any], fold: dict[str, Any]) -> list[str]:
     spacing = meta.get("minRenderedSpacingPx1024")
     repeat_x = meta.get("repeatX")
     repeat_y = meta.get("repeatY")
+    grid_x = meta.get("gridSizeX")
+    grid_y = meta.get("gridSizeY")
+    horizontal_interval = meta.get("horizontalPleatInterval")
+    vertical_interval = meta.get("verticalPleatInterval")
+    subfamily = str(meta.get("subfamily") or "")
+    miura_skew = meta.get("miuraSkewFactor")
+    miura_aspect = meta.get("miuraCellAspectRatio")
 
     lines = [sample_id, f"{family} / {bucket} / {edges} edges"]
-    if vertical is not None and spacing is not None and repeat_x is not None and repeat_y is not None:
+    if subfamily == "miura-ori" and spacing is not None and repeat_x is not None and repeat_y is not None:
+        diag = meta.get("diagonalCreaseLengthFraction")
+        lines.append(f"miura {repeat_x}x{repeat_y}, diag={float(diag or 0):.2f}, min {float(spacing):.1f}px")
+        if miura_skew is not None and miura_aspect is not None:
+            lines.append(f"square sheet, skew {float(miura_skew):.2f}, cell aspect {float(miura_aspect):.2f}")
+    elif vertical is not None and spacing is not None and repeat_x is not None and repeat_y is not None:
         lines.append(f"{repeat_x}x{repeat_y}, vertical={float(vertical):.2f}, min {float(spacing):.1f}px")
+        if grid_x is not None and grid_y is not None and horizontal_interval is not None and vertical_interval is not None:
+            lines.append(f"grid {grid_x}x{grid_y}, H every {horizontal_interval}, V every {vertical_interval}")
     else:
         lines.append("M red, V blue, B black")
     return lines

@@ -37,6 +37,24 @@ export CHECKPOINT_EVERY="${CHECKPOINT_EVERY:-500}"
 export SKIP_GRAPH_EVAL="${SKIP_GRAPH_EVAL:-1}"
 export SKIP_FINAL_EVAL="${SKIP_FINAL_EVAL:-1}"
 
+if [[ -z "${TRAIN_FAMILY_SAMPLING+x}" ]]; then
+  if [[ "${MANIFEST:-}" == *"cp_training_mix_v3_tessellation_15pct"* ]]; then
+    export TRAIN_FAMILY_SAMPLING="v3-tessellation-15pct"
+  else
+    export TRAIN_FAMILY_SAMPLING="balanced"
+  fi
+else
+  export TRAIN_FAMILY_SAMPLING
+fi
+
+if [[ "${MANIFEST:-}" == *"cp_training_mix_v3_tessellation_15pct"* \
+  && "$TRAIN_FAMILY_SAMPLING" != "v3-tessellation-15pct" \
+  && "${ALLOW_NONDEFAULT_TESS15_SAMPLING:-0}" != "1" ]]; then
+  echo "Are you sure? Tessellation-15% training must use TRAIN_FAMILY_SAMPLING=v3-tessellation-15pct by default." >&2
+  echo "Set ALLOW_NONDEFAULT_TESS15_SAMPLING=1 only for an intentional sampler ablation." >&2
+  exit 2
+fi
+
 if [[ -e "$OUTPUT_ROOT" && "${ALLOW_EXISTING_OUTPUT_ROOT:-0}" != "1" ]]; then
   echo "Are you sure? OUTPUT_ROOT already exists: $OUTPUT_ROOT" >&2
   echo "Set OUTPUT_ROOT to a new run directory, or set ALLOW_EXISTING_OUTPUT_ROOT=1 if you really intend to reuse it." >&2
@@ -51,6 +69,7 @@ verify_run_config() {
     --expect-str "eval_augment_profile=$EVAL_PROFILE" \
     --expect-str "reinit_heads=$REINIT_HEADS" \
     --expect-str "init_checkpoint=$FULL_INIT_CHECKPOINT" \
+    --expect-str "train_family_sampling=$TRAIN_FAMILY_SAMPLING" \
     --expect-str "max_edges=$MAX_EDGES" \
     --expect-float "junction_sigma_px=$JUNCTION_SIGMA_PX" \
     --expect-float "junction_offset_radius_px=$JUNCTION_OFFSET_RADIUS_PX" \

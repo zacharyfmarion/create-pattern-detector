@@ -1,5 +1,5 @@
-name: tessellation_fold_program_v1
-seed: 129170
+name: tessellation_orthogonal_bp_grid_v2
+seed: 20260619
 imageSize: 768
 padding: 42
 
