@@ -1,10 +1,11 @@
 {
   "schemaVersion": 1,
   "id": "runpod-v3-no-guide-grid-close-pair-dense-edges-max700-4090",
-  "status": "promoted",
+  "status": "superseded",
+  "supersededBy": "runpod-v3-no-guide-grid-close-pair-dense-edges-max1200-l40s",
   "phase": "v3-no-guide-grid-close-pair-dense-edges",
   "registeredAt": "2026-06-18",
-  "description": "Promoted V3 browser/default checkpoint. Warm-started from the prior no-guide-grid close-pair R1 model, kept all heads, raised the training edge envelope from max_edges=300 to max_edges=700, and preserved the close-pair radius-3 junction-offset recipe. Promoted because it improves dense box-pleat horizontal/vertical crease recall and clean-15 strict topology without regressing the current product decoder contract.",
+  "description": "Superseded V3 browser/default checkpoint. Warm-started from the prior no-guide-grid close-pair R1 model, kept all heads, raised the training edge envelope from max_edges=300 to max_edges=700, and preserved the close-pair radius-3 junction-offset recipe. It improved dense box-pleat horizontal/vertical crease recall and clean-15 strict topology, but was later superseded by the max1200 continuation.",
   "checkpoint": {
     "gitTracked": false,
     "relativePath": "checkpoints/runpod_v3_no_guide_grid_close_pair_dense_edges_max700_probe_20260618/full/latest.pt",

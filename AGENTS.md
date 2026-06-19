@@ -128,12 +128,12 @@ throwaway worktree.
 Before replacing, exporting, or using a checkpoint, read
 `docs/model-training-history.md` first, then `docs/checkpoint-management.md`.
 The current downstream/browser model is the V3 no-guide-grid close-pair dense
-edges `MAX_EDGES=700` checkpoint registered at
-`artifacts/checkpoints/runpod-v3-no-guide-grid-close-pair-dense-edges-max700-4090.json`.
+edges `MAX_EDGES=1200` checkpoint registered at
+`artifacts/checkpoints/runpod-v3-no-guide-grid-close-pair-dense-edges-max1200-l40s.json`.
 
 Do not confuse the previous V3 close-pair R1 checkpoint, the no-guide-grid R1
-that this run superseded, or the later R3 from-scratch run with the promoted
-model. The previous close-pair R1 is retained at
+or max700 dense-edge checkpoints that this run superseded, or the later R3
+from-scratch run with the promoted model. The previous close-pair R1 is retained at
 `artifacts/checkpoints/runpod-v3-close-pair-warmstart-4090.json`; R3 is
 registered as an ablation at
 `artifacts/checkpoints/runpod-v3-close-pair-scratch-r3-4090.json` because it
@@ -182,6 +182,7 @@ For dense BP follow-up probes from the current promoted model, use:
 scripts/training/run_cpline_runpod_v3_no_guide_grid_close_pair_dense_edges_probe.sh
 ```
 
-It defaults to the promoted `MAX_EDGES=700` checkpoint and verifies the same
-radius-3 close-pair recipe. Set `MAX_EDGES=1200` and an explicit `OUTPUT_ROOT`
-for the next controlled edge-envelope probe.
+It defaults to the promoted `MAX_EDGES=1200` checkpoint and verifies the same
+radius-3 close-pair recipe. It refuses to write into an existing `OUTPUT_ROOT`
+unless `ALLOW_EXISTING_OUTPUT_ROOT=1` is set, so use a fresh explicit
+`OUTPUT_ROOT` for new probes.

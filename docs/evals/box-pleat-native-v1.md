@@ -101,10 +101,9 @@ R1 warm-start no-guide-grid experiments were evaluated on the same full
 - Dense-edge max700 continuation: 1500 steps warm-started from the
   no-guide-grid close-pair R1, kept all heads, raised `MAX_EDGES` from `300` to
   `700`, and kept `junction_offset_radius_px=3.0`.
-- Dense-edge max1200 probe: 1500 steps warm-started from the promoted max700
+- Dense-edge max1200 probe: 1500 steps warm-started from the then-promoted max700
   checkpoint, kept all heads, raised `MAX_EDGES` to `1200`, and kept
-  `junction_offset_radius_px=3.0`. It is an evaluated candidate, not the
-  promoted default.
+  `junction_offset_radius_px=3.0`. It is now the promoted default.
 
 Dense-head comparison:
 
@@ -114,14 +113,14 @@ Dense-head comparison:
 | No-grid probe, 800 steps | Orthogonal BP creases | `0.5528` | `0.5525` | `0.0003` | `0.0049` | `0.5687` | `0.2699` |
 | No-grid full diagnostic, 5000 steps, radius 0 | Orthogonal BP creases | `0.6012` | `0.6001` | `0.0011` | `0.0154` | `0.6159` | `0.1062` |
 | No-grid close-pair full R1, superseded | Orthogonal BP creases | `0.6113` | `0.6104` | `0.0009` | `0.0128` | `0.6306` | `0.1216` |
-| Dense-edge max700, promoted | Orthogonal BP creases | `0.6482` | `0.6462` | `0.0019` | `0.0197` | `0.6646` | `0.1121` |
-| Dense-edge max1200, candidate | Orthogonal BP creases | `0.6778` | `0.6746` | `0.0031` | `0.0285` | `0.6924` | `0.1209` |
+| Dense-edge max700, superseded | Orthogonal BP creases | `0.6482` | `0.6462` | `0.0019` | `0.0197` | `0.6646` | `0.1121` |
+| Dense-edge max1200, promoted | Orthogonal BP creases | `0.6778` | `0.6746` | `0.0031` | `0.0285` | `0.6924` | `0.1209` |
 | Shipped V3 R1 | Diagonal/other creases | `0.8752` | `0.8587` | `0.0166` | `0.0902` | `0.8802` | `0.1334` |
 | No-grid probe, 800 steps | Diagonal/other creases | `0.8756` | `0.8744` | `0.0012` | `0.0103` | `0.8811` | `0.2921` |
 | No-grid full diagnostic, 5000 steps, radius 0 | Diagonal/other creases | `0.8810` | `0.8788` | `0.0023` | `0.0160` | `0.8833` | `0.0826` |
 | No-grid close-pair full R1, superseded | Diagonal/other creases | `0.8816` | `0.8796` | `0.0021` | `0.0130` | `0.8868` | `0.0827` |
-| Dense-edge max700, promoted | Diagonal/other creases | `0.8983` | `0.8954` | `0.0029` | `0.0157` | `0.9013` | `0.0610` |
-| Dense-edge max1200, candidate | Diagonal/other creases | `0.9046` | `0.9007` | `0.0038` | `0.0197` | `0.9075` | `0.0586` |
+| Dense-edge max700, superseded | Diagonal/other creases | `0.8983` | `0.8954` | `0.0029` | `0.0157` | `0.9013` | `0.0610` |
+| Dense-edge max1200, promoted | Diagonal/other creases | `0.9046` | `0.9007` | `0.0038` | `0.0197` | `0.9075` | `0.0586` |
 
 This confirms the original grid-suppression hypothesis for the non-crease head:
 orthogonal BP crease pixels stopped being classified as non-crease guide-grid
@@ -137,12 +136,12 @@ synthetic BP-style crease families, and dense vertical coverage than to
 non-crease suppression still being baked into the warm-start.
 
 The promoted checkpoint is registered at
-`artifacts/checkpoints/runpod-v3-no-guide-grid-close-pair-dense-edges-max700-4090.json`.
+`artifacts/checkpoints/runpod-v3-no-guide-grid-close-pair-dense-edges-max1200-l40s.json`.
 It also improved clean-15 strict topology in the product repo's current-pack
-eval relative to the previous no-guide-grid close-pair R1 (`0.9594 -> 0.9623`
-edge F1, missing `126 -> 112`, extra `89 -> 88`, merged `72 -> 66`).
+eval relative to the previous no-guide-grid close-pair R1 (`0.9594 -> 0.9655`
+edge F1, missing `126 -> 107`, extra `89 -> 76`, merged `72 -> 60`).
 
-The dense-edge continuation also improved direction-specific BP recall:
+The dense-edge continuations also improved direction-specific BP recall:
 
 | Slice | Direction | No-grid close-pair R1 | Dense-edge max700 |
 | --- | --- | ---: | ---: |
@@ -156,10 +155,10 @@ The dense-edge continuation also improved direction-specific BP recall:
 | Very dense `edge_count >= 2000` | Vertical | `0.3473` | `0.3797` |
 | Very dense `edge_count >= 2000` | 45/135 | `0.8059` | `0.8365` |
 
-The max1200 candidate improves these same direction-specific recall slices
+The max1200 promoted model improves these same direction-specific recall slices
 again, though non-crease conflict also rises modestly:
 
-| Slice | Direction | Dense-edge max700 | Dense-edge max1200 candidate |
+| Slice | Direction | Dense-edge max700 | Dense-edge max1200 promoted |
 | --- | --- | ---: | ---: |
 | All 179 | Horizontal | `0.6874` | `0.7300` |
 | All 179 | Vertical | `0.6124` | `0.6272` |
@@ -181,7 +180,7 @@ training runs must use:
 scripts/training/run_cpline_runpod_v3_no_guide_grid_close_pair_full.sh
 ```
 
-For dense-edge follow-up probes from the promoted max700 checkpoint, use:
+For dense-edge follow-up probes from the promoted max1200 checkpoint, use:
 
 ```bash
 scripts/training/run_cpline_runpod_v3_no_guide_grid_close_pair_dense_edges_probe.sh

@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
-  "id": "runpod-v3-no-guide-grid-close-pair-dense-edges-max1200-probe-l40s",
-  "status": "candidate",
+  "id": "runpod-v3-no-guide-grid-close-pair-dense-edges-max1200-l40s",
+  "status": "promoted",
   "phase": "v3-no-guide-grid-close-pair-dense-edges",
   "registeredAt": "2026-06-18",
-  "description": "Candidate dense-edge continuation probe. Warm-started from the promoted max700 checkpoint, kept all heads, raised MAX_EDGES from 700 to 1200, and preserved the close-pair radius-3 junction-offset recipe. It improves BP dense recall and clean-15 strict topology over max700, but is not the promoted/default model until explicitly promoted.",
+  "description": "Promoted V3 browser/default checkpoint. Warm-started from the max700 dense-edge checkpoint, kept all heads, raised MAX_EDGES from 700 to 1200, and preserved the close-pair radius-3 junction-offset recipe. Promoted because it improves BP dense recall and clean-15 strict topology over max700; the known tradeoff is a modest increase in non-crease conflict.",
   "checkpoint": {
     "gitTracked": false,
     "relativePath": "checkpoints/runpod_v3_no_guide_grid_close_pair_dense_edges_max1200_probe_20260618/full/latest.pt",
@@ -56,8 +56,9 @@
     "batchnormMode": "batch-stats",
     "vectorizerThreshold": 0.65,
     "junctionOffsetRadiusPx": 3.0,
-    "notes": "junction_offset remains radius-normalized and must be decoded with radius-3 offset-vote clustering. Browser ONNX export uses explicit per-image BatchNorm ops. This candidate increases the dense training edge envelope but also raises non-crease conflict modestly versus max700.",
-    "downstreamVersionedOnnxManifest": "tree-maker-rust/apps/web/public/models/cp-detector-v3-dense-edges-max1200-probe-20260618/manifest.json",
+    "notes": "junction_offset remains radius-normalized and must be decoded with radius-3 offset-vote clustering. Browser ONNX export uses explicit per-image BatchNorm ops. This model increases the dense training edge envelope but also raises non-crease conflict modestly versus max700.",
+    "downstreamOnnxManifest": "tree-maker-rust/apps/web/public/models/cp-detector-v3/manifest.json",
+    "downstreamVersionedOnnxManifest": "tree-maker-rust/apps/web/public/models/cp-detector-v3-dense-edges-max1200-20260618/manifest.json",
     "downstreamOnnxSha256": "96ba3d56277f0ead32a6be813a31402434f29620f4b6edd113d3592e2c3ab145"
   },
   "evaluation": {
@@ -109,6 +110,7 @@
   "relatedDocs": [
     "docs/model-training-history.md",
     "docs/evals/box-pleat-native-v1.md",
+    "docs/checkpoint-management.md",
     "docs/dense-bp-vertical-training-plan.md"
   ]
 }

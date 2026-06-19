@@ -6,9 +6,9 @@ cd "$ROOT_DIR"
 
 PYTHON="${PYTHON:-.venv/bin/python}"
 
-export MAX_EDGES="${MAX_EDGES:-700}"
+export MAX_EDGES="${MAX_EDGES:-1200}"
 
-PROMOTED_CHECKPOINT="${PROMOTED_CHECKPOINT:-checkpoints/runpod_v3_no_guide_grid_close_pair_dense_edges_max700_probe_20260618/full/latest.pt}"
+PROMOTED_CHECKPOINT="${PROMOTED_CHECKPOINT:-checkpoints/runpod_v3_no_guide_grid_close_pair_dense_edges_max1200_probe_20260618/full/latest.pt}"
 
 export OUTPUT_ROOT="${OUTPUT_ROOT:-checkpoints/runpod_v3_no_guide_grid_close_pair_dense_edges_max${MAX_EDGES}_probe_20260618}"
 export PROFILE="${PROFILE:-v3-no-guide-grid-replay}"
@@ -36,6 +36,12 @@ export LOG_MEMORY="${LOG_MEMORY:-1}"
 export CHECKPOINT_EVERY="${CHECKPOINT_EVERY:-500}"
 export SKIP_GRAPH_EVAL="${SKIP_GRAPH_EVAL:-1}"
 export SKIP_FINAL_EVAL="${SKIP_FINAL_EVAL:-1}"
+
+if [[ -e "$OUTPUT_ROOT" && "${ALLOW_EXISTING_OUTPUT_ROOT:-0}" != "1" ]]; then
+  echo "Are you sure? OUTPUT_ROOT already exists: $OUTPUT_ROOT" >&2
+  echo "Set OUTPUT_ROOT to a new run directory, or set ALLOW_EXISTING_OUTPUT_ROOT=1 if you really intend to reuse it." >&2
+  exit 2
+fi
 
 verify_run_config() {
   local run_config="$1"

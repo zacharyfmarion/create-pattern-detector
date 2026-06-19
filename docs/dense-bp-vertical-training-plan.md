@@ -1,8 +1,8 @@
 # Dense BP Vertical Training Plan
 
 Status: In progress, 2026-06-18. The `MAX_EDGES=700` probe completed and was
-promoted; the `MAX_EDGES=1200` probe completed and is registered as a
-candidate, not the default.
+promoted; the `MAX_EDGES=1200` follow-up then improved BP and clean-15 metrics
+again and is now the promoted default.
 Primary goal: improve dense vertical crease-line detection on real box-pleated
 crease patterns without regressing the current clean topology benchmark.
 
@@ -27,14 +27,14 @@ The baseline before Experiment A was:
 - Init: prior close-pair R1 checkpoint, with `non_crease_head` reinitialized
 - Required decoder setting: `junction_offset_radius_px=3.0`
 
-The current promoted model after the first probe is:
+The current promoted model after the second probe is:
 
 - Checkpoint manifest:
-  `artifacts/checkpoints/runpod-v3-no-guide-grid-close-pair-dense-edges-max700-4090.json`
+  `artifacts/checkpoints/runpod-v3-no-guide-grid-close-pair-dense-edges-max1200-l40s.json`
 - Checkpoint:
-  `checkpoints/runpod_v3_no_guide_grid_close_pair_dense_edges_max700_probe_20260618/full/latest.pt`
-- Training edge filter: `maxEdges: 700`
-- Init: superseded no-guide-grid close-pair R1, no head reinitialization
+  `checkpoints/runpod_v3_no_guide_grid_close_pair_dense_edges_max1200_probe_20260618/full/latest.pt`
+- Training edge filter: `maxEdges: 1200`
+- Init: superseded max700 dense-edge model, no head reinitialization
 - Required decoder setting: `junction_offset_radius_px=3.0`
 
 The no-guide-grid training fixed the original non-crease suppression failure:
@@ -79,7 +79,7 @@ Keep fixed:
   - `junction_focal_alpha=2.0`
   - `junction_focal_beta=4.0`
 - Init checkpoint for the first probe: superseded no-guide-grid close-pair R1
-- Init checkpoint for follow-up probes: current promoted max700 model
+- Init checkpoint for follow-up probes: current promoted max1200 model
 - Do not reinitialize heads
 - Do not add tessellation data
 
@@ -94,16 +94,16 @@ Recommended probes:
 3. Only try `MAX_EDGES=2000` after confirming label rendering and GPU memory
    are still acceptable.
 
-The canonical launcher for the first probe is:
+The canonical launcher for dense-edge follow-up probes is:
 
 ```bash
 scripts/training/run_cpline_runpod_v3_no_guide_grid_close_pair_dense_edges_probe.sh
 ```
 
-It defaults to `MAX_EDGES=700`, initializes from the current promoted max700
+It defaults to `MAX_EDGES=1200`, initializes from the current promoted max1200
 checkpoint, leaves `REINIT_HEADS` empty, and verifies the radius-3 close-pair
-configuration after preflight and after training. Set `MAX_EDGES=1200` and an
-explicit `OUTPUT_ROOT` for the next probe.
+configuration after preflight and after training. Set an explicit fresh
+`OUTPUT_ROOT` for any follow-up probe.
 
 Suggested cheap probe shape:
 
@@ -231,8 +231,7 @@ retired because they launched a non-promotable dense-head diagnostic with
 Before spending RunPod budget:
 
 1. Confirm the selected manifest exists on the pod.
-2. Confirm the selected checkpoint is the current promoted dense-edge max700
-   model when launching the `MAX_EDGES=1200` probe.
+2. Confirm the selected checkpoint is the current promoted dense-edge model.
 3. Print the resolved `MAX_EDGES`.
 4. Print the resolved close-pair junction parameters.
 5. Run a tiny data-loader smoke with the selected `MAX_EDGES`.
@@ -343,12 +342,12 @@ examples improved BP vertical recall and did not regress clean-15 topology. It
 was promoted because it also improves clean-15 strict topology while preserving
 the radius-3 close-pair decoder contract.
 
-The next decision is whether to promote the `MAX_EDGES=1200` candidate or hold
-the line at max700 until additional BP/tessellation data is available.
+The next decision is whether to try a still larger dense-edge probe or move on
+to BP/tessellation data.
 
 ### 2026-06-18: `MAX_EDGES=1200` Probe
 
-Status: completed and registered as a candidate only.
+Status: completed and promoted as the current downstream/browser model.
 
 Run:
 
@@ -360,13 +359,13 @@ Run:
 - Checkpoint:
   `checkpoints/runpod_v3_no_guide_grid_close_pair_dense_edges_max1200_probe_20260618/full/latest.pt`
 - Registry:
-  `artifacts/checkpoints/runpod-v3-no-guide-grid-close-pair-dense-edges-max1200-probe-l40s.json`
+  `artifacts/checkpoints/runpod-v3-no-guide-grid-close-pair-dense-edges-max1200-l40s.json`
 - Checkpoint SHA-256:
   `befa99edc4531919ffb8f36c933b2e394f8868cb6e0fb0be2d7b96eee74c9bac`
 - Init checkpoint:
   `checkpoints/runpod_v3_no_guide_grid_close_pair_dense_edges_max700_probe_20260618/full/latest.pt`
 - ONNX export:
-  `tree-maker-rust/apps/web/public/models/cp-detector-v3-dense-edges-max1200-probe-20260618/model.onnx`
+  `tree-maker-rust/apps/web/public/models/cp-detector-v3-dense-edges-max1200-20260618/model.onnx`
 - ONNX SHA-256:
   `96ba3d56277f0ead32a6be813a31402434f29620f4b6edd113d3592e2c3ab145`
 
@@ -398,7 +397,7 @@ Eval reports:
 
 Dense BP aggregate:
 
-| Metric | Promoted max700 | `MAX_EDGES=1200` probe |
+| Metric | Superseded max700 | Promoted `MAX_EDGES=1200` |
 | --- | ---: | ---: |
 | Orthogonal effective recall | `0.6462` | `0.6746` |
 | Orthogonal non-crease conflict | `0.0197` | `0.0285` |
@@ -407,7 +406,7 @@ Dense BP aggregate:
 
 BP angle buckets:
 
-| Slice | Direction | Promoted max700 | `MAX_EDGES=1200` probe |
+| Slice | Direction | Superseded max700 | Promoted `MAX_EDGES=1200` |
 | --- | --- | ---: | ---: |
 | All 179 | Horizontal | `0.6874` | `0.7300` |
 | All 179 | Vertical | `0.6124` | `0.6272` |
@@ -421,7 +420,7 @@ BP angle buckets:
 
 Clean-15 strict topology:
 
-| Metric | Promoted max700 | `MAX_EDGES=1200` probe |
+| Metric | Superseded max700 | Promoted `MAX_EDGES=1200` |
 | --- | ---: | ---: |
 | Strict edge F1 | `0.9623` | `0.9655` |
 | Missing edges | `112` | `107` |
@@ -435,6 +434,5 @@ Conclusion:
 The second controlled experiment continues to support the dense-edge-envelope
 hypothesis. Raising to `MAX_EDGES=1200` improves BP recall and clean-15 strict
 topology over max700. The tradeoff is a modest increase in non-crease conflict
-and slightly lower clean assignment accuracy (`0.9875 -> 0.9855`). Treat this
-as a strong promotion candidate, but not yet the default until the promotion
-decision is made explicitly.
+and slightly lower clean assignment accuracy (`0.9875 -> 0.9855`). It is now
+promoted because the BP and strict-topology gains are larger than that tradeoff.
