@@ -22,12 +22,20 @@
 import type { GridPoint, OriFixture, OriSegment } from "./ori-parser.ts";
 import {
   findFlapCenters,
+  hingeEndpoint,
   planarize,
   propagateAxials,
   propagateAxialFamilyWithLevels,
   propagateHinges,
   segmentKey,
 } from "./box-pleated-molecule.ts";
+
+const AXIS_DIRS: GridPoint[] = [
+  { x: 1, y: 0 },
+  { x: -1, y: 0 },
+  { x: 0, y: 1 },
+  { x: 0, y: -1 },
+];
 
 export type Assignment = "M" | "V" | "B";
 export type CreaseType = "axial" | "ridge" | "hinge" | "boundary";
@@ -106,6 +114,86 @@ export function assignCreases(m: BoxPleatedMolecule): AssignedEdge[] {
 
   assignHinges(m, edges);
   return edges;
+}
+
+export interface AssignmentResult {
+  molecule: BoxPleatedMolecule;
+  edges: AssignedEdge[];
+  conflicts: GridPoint[];
+}
+
+/**
+ * Full assignment with the ridge-crossing repair. The deterministic pass leaves
+ * Maekawa failures at degree-4 vertices where four ridges cross with no axial or
+ * hinge to balance them (the meeting point of four flaps' ridges, e.g. a
+ * pinwheel). Such a vertex cannot satisfy |M-V|=2 with four ridges alone, so we
+ * add a single straight hinge line through it (two collinear arms), turning it
+ * into a degree-6 vertex that can. Arms are marched to the nearest ridge or the
+ * paper edge, preferring the axis whose arms terminate on the edge. We re-assign
+ * after each repair and loop until no such vertex remains.
+ */
+export function assignBoxPleated(f: OriFixture): AssignmentResult {
+  const m = buildMolecule(f);
+  const hinges = [...m.hinges];
+  let edges = assignCreases({ ...m, hinges });
+
+  for (let iter = 0; iter < 64; iter++) {
+    const targets = ridgeCrossingFailures(edges, f.sheet);
+    if (targets.length === 0) break;
+    let added = false;
+    for (const c of targets) {
+      // Resolve the crossing by adding two hinge arms (degree 4 -> 6, so |M-V|=2
+      // becomes reachable). March each axis direction with the shared hinge
+      // marcher and pick the two arms that reach the paper edge first - an
+      // edge-terminating arm has no far-end junction to balance, so it is easier
+      // to assign. An arm that stops at a ridge (inward) is still valid as a
+      // fallback. At a corner-adjacent crossing the two best arms are the
+      // perpendicular pair toward the nearest edges, e.g. (2,2) -> (0,2),(2,0).
+      const arms = AXIS_DIRS.map((d) => hingeEndpoint(c, d, m.ridges, m.ridgeSeeds, hinges, m.axialFamily, f.sheet))
+        .filter((end): end is GridPoint => end !== null && !samePoint(end, c))
+        .map((end) => ({ end, onEdge: isOnEdge(end, f.sheet) }));
+      arms.sort((a, b) => Number(b.onEdge) - Number(a.onEdge));
+      const chosen = arms.slice(0, 2).map((arm) => ({ a: c, b: arm.end }));
+      if (chosen.length === 0) continue;
+      const trial = assignCreases({ ...m, hinges: [...hinges, ...chosen] });
+      if (!maekawaConflicts(trial, f.sheet).some((p) => samePoint(p, c))) {
+        hinges.push(...chosen);
+        edges = trial;
+        added = true;
+        break;
+      }
+    }
+    if (!added) break;
+  }
+
+  return { molecule: { ...m, hinges }, edges, conflicts: maekawaConflicts(edges, f.sheet) };
+}
+
+/** Degree-4 interior vertices whose incident creases are all ridges and that fail Maekawa. */
+function ridgeCrossingFailures(edges: AssignedEdge[], sheet: { width: number; height: number }): GridPoint[] {
+  const incidence = new Map<string, AssignedEdge[]>();
+  for (const e of edges) {
+    for (const p of [e.a, e.b]) {
+      const k = pointKey(p);
+      if (!incidence.has(k)) incidence.set(k, []);
+      incidence.get(k)!.push(e);
+    }
+  }
+  const out: GridPoint[] = [];
+  for (const [k, incident] of incidence) {
+    const v = parsePoint(k);
+    if (isBoundaryVertex(v, sheet)) continue;
+    if (incident.length !== 4) continue;
+    if (!incident.every((e) => e.type === "ridge")) continue;
+    const M = incident.filter((e) => e.mv === "M").length;
+    const V = incident.filter((e) => e.mv === "V").length;
+    if (Math.abs(M - V) !== 2) out.push(v); // not a valid 3-1 split
+  }
+  return out;
+}
+
+function isOnEdge(p: GridPoint, sheet: { width: number; height: number }): boolean {
+  return Math.abs(p.x) < EPS || Math.abs(p.y) < EPS || Math.abs(p.x - sheet.width) < EPS || Math.abs(p.y - sheet.height) < EPS;
 }
 
 /** Interior vertices where Maekawa (|M - V| = 2) fails, given the assignment. */

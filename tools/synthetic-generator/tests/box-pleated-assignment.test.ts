@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { join } from "node:path";
 import { parseOriFixtures, type OriFixture, type OriSegment } from "../src/ori-parser.ts";
-import { buildMolecule, assignCreases, maekawaConflicts } from "../src/box-pleated-assignment.ts";
+import { buildMolecule, assignCreases, maekawaConflicts, assignBoxPleated } from "../src/box-pleated-assignment.ts";
 
 const gt = parseOriFixtures(await Bun.file(join(import.meta.dir, "..", "fixtures", "box_pleating_fixtures_gt.ori")).json());
 const rivers = parseOriFixtures(await Bun.file(join(import.meta.dir, "..", "fixtures", "box_pleating_river_fixtures_stable.ori")).json());
@@ -76,11 +76,10 @@ test("fully flat-foldable molecules assign with zero Maekawa conflicts", () => {
   expect(assign(rivers[2]).conflicts).toEqual([]);
 });
 
-test("deterministic-pass conflict counts (baseline for the upcoming repair stage)", () => {
-  // The deterministic assignment leaves a small, stable set of Maekawa
-  // conflicts at degree-8 flap centers (the 3-1 split) and pure ridge-ridge
-  // crossings, to be resolved by the crease-flip repair stage. This locks the
-  // current behavior so the repair stage's improvement is measurable.
+test("deterministic-pass conflict counts (before ridge-crossing repair)", () => {
+  // The deterministic assignment (no repair) leaves Maekawa conflicts at
+  // degree-8 flap centers (the 3-1 split) and degree-4 ridge crossings. Locked
+  // so the repair stage's improvement stays measurable.
   const counts: Record<string, number> = {};
   for (let idx = 12; idx <= 17; idx++) counts[`gt${idx}`] = assign(scale(gt[idx], 2)).conflicts.length;
   rivers.forEach((f, i) => (counts[`river${i}`] = assign(f).conflicts.length));
@@ -95,4 +94,39 @@ test("deterministic-pass conflict counts (baseline for the upcoming repair stage
     river1: 8,
     river2: 0,
   });
+});
+
+test("ridge-crossing repair adds edge-biased hinges and reduces conflicts", () => {
+  // assignBoxPleated resolves degree-4 ridge crossings by adding two hinge arms,
+  // preferring the paper edge. river0's four crossings clear (only its central
+  // degree-8 vertex remains); gt17 fully resolves.
+  const counts: Record<string, number> = {};
+  for (let idx = 12; idx <= 17; idx++) counts[`gt${idx}`] = assignBoxPleated(scale(gt[idx], 2)).conflicts.length;
+  rivers.forEach((f, i) => (counts[`river${i}`] = assignBoxPleated(f).conflicts.length));
+  expect(counts).toEqual({
+    gt12: 2,
+    gt13: 2,
+    gt14: 2,
+    gt15: 1,
+    gt16: 0,
+    gt17: 0,
+    river0: 1,
+    river1: 8,
+    river2: 0,
+  });
+});
+
+test("river0 ridge crossings get the two edge-going hinge arms (hand-verified)", () => {
+  const { molecule } = assignBoxPleated(rivers[0]);
+  const hingeKeys = molecule.hinges
+    .map((h) => `${h.a.x},${h.a.y}->${h.b.x},${h.b.y}`)
+    .sort();
+  expect(hingeKeys).toEqual(
+    [
+      "2,2->0,2", "2,2->2,0",
+      "2,6->0,6", "2,6->2,8",
+      "6,2->8,2", "6,2->6,0",
+      "6,6->8,6", "6,6->6,8",
+    ].sort(),
+  );
 });

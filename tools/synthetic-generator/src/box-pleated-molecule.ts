@@ -713,7 +713,13 @@ function isFailingJunction(vx: number, vy: number, neighbors: GridPoint[], sheet
 }
 
 /** Nearest stop for a hinge marching from `from` along axis `dir`. */
-function hingeEndpoint(
+/**
+ * March a hinge from `from` along axis `dir` to its nearest stop: a ridge, a
+ * flap center, another hinge, the start of a collinear axial-family crease (a
+ * hinge may cross axials but not lie along one), or the paper edge. Shared by
+ * the geometry-stage hinge propagation and the M/V-stage ridge-crossing repair.
+ */
+export function hingeEndpoint(
   from: GridPoint,
   dir: GridPoint,
   ridges: OriSegment[],
