@@ -199,6 +199,45 @@ export function propagateAxialOffsets(
   return subtractRidgeOverlaps(out.filter((s) => !onPaperEdge(s, sheet)), ridges);
 }
 
+/**
+ * Stage B (full): the complete axial+n pleat set. Iterates the axial+1 rule:
+ * axial+1 are the pleats one unit off the axials; axial+2 are one unit off the
+ * axial+1 family; and so on. We re-run the offset rule with the accumulated
+ * axial-family creases as sources until no new creases appear. The seed
+ * "skip if already on a crease" guard makes this converge - each round only the
+ * frontier of empty paper produces new pleats.
+ */
+export function propagateAllAxialOffsets(
+  ridges: OriSegment[],
+  sheet: { width: number; height: number },
+  axials: OriSegment[],
+  edgeAxials: OriSegment[],
+): OriSegment[] {
+  const family: OriSegment[] = [...axials];
+  const seen = new Set<string>(family.map(segmentKey));
+  for (let round = 0; round < 64; round++) {
+    const next = propagateAxialOffsets(ridges, sheet, family, edgeAxials);
+    let added = 0;
+    for (const s of next) {
+      const k = segmentKey(s);
+      if (seen.has(k)) continue;
+      seen.add(k);
+      family.push(s);
+      added++;
+    }
+    if (added === 0) break;
+  }
+  // Return only the pleats (everything beyond the level-0 axials).
+  const axialKeys = new Set(axials.map(segmentKey));
+  return family.filter((s) => !axialKeys.has(segmentKey(s)));
+}
+
+function segmentKey(s: OriSegment): string {
+  const a = `${s.a.x},${s.a.y}`;
+  const b = `${s.b.x},${s.b.y}`;
+  return a < b ? `${a}|${b}` : `${b}|${a}`;
+}
+
 function onPaperEdge(s: OriSegment, sheet: { width: number; height: number }): boolean {
   const onX = (v: number): boolean => Math.abs(v) < EPS || Math.abs(v - sheet.width) < EPS;
   const onY = (v: number): boolean => Math.abs(v) < EPS || Math.abs(v - sheet.height) < EPS;
@@ -216,7 +255,11 @@ function onPaperEdge(s: OriSegment, sheet: { width: number; height: number }): b
  * inscribed circle need to be on the paper for the flap to be valid. Blue is
  * read only to classify endpoints, never emitted as a crease.
  */
-export function findFlapCenters(ridges: OriSegment[], packing: OriSegment[]): GridPoint[] {
+export function findFlapCenters(
+  ridges: OriSegment[],
+  packing: OriSegment[],
+  options?: { boundary: OriSegment[]; sheet: { width: number; height: number } },
+): GridPoint[] {
   const onHinge = (p: GridPoint): boolean => packing.some((seg) => pointOnSegment(p, seg));
   // Ridge degree per endpoint - the flap center is the convergence of its ridges.
   const degree = new Map<string, number>();
@@ -236,7 +279,89 @@ export function findFlapCenters(ridges: OriSegment[], packing: OriSegment[]): Gr
     else center = null; // both on hinges: a ridge between two corners, no center here
     if (center) centers.set(key(center), center);
   }
+
+  // Rivers do not generate axials - they are gaps consumed by axial+n from
+  // neighbouring flaps. Drop any candidate center that sits in a river region.
+  if (options) {
+    const isFlapCell = classifyFlapRegions(packing, options.boundary, options.sheet);
+    return [...centers.values()].filter((p) => cellsAround(p).some(([cx, cy]) => isFlapCell(cx, cy)));
+  }
   return [...centers.values()];
+}
+
+function cellsAround(p: GridPoint): Array<[number, number]> {
+  const out: Array<[number, number]> = [];
+  for (const dx of [-1, 0]) {
+    for (const dy of [-1, 0]) out.push([Math.round(p.x) + dx, Math.round(p.y) + dy]);
+  }
+  return out;
+}
+
+/**
+ * Classify each packing region as flap or river and return a predicate for
+ * whether a unit cell belongs to a flap. The packing + paper boundary partition
+ * the sheet into regions; a region is a RIVER when it is non-solid (it does not
+ * fill its bounding box - an L, ring, or wrapping band, which is how rivers that
+ * turn or encircle a flap appear). A solid rectangular region is a FLAP (a
+ * possibly paper-edge-cropped square; note the blue packing does not always wall
+ * a flap off from a neighbour, so flap regions can be non-square rectangles).
+ * Matches the manual rule: rivers are fixed-width gaps that emit no axials.
+ *
+ * LIMITATION: a perfectly straight river spanning edge-to-edge is a solid
+ * rectangle and would be misclassified as a flap. No current fixture exercises
+ * that; revisit if one does.
+ */
+function classifyFlapRegions(
+  packing: OriSegment[],
+  boundary: OriSegment[],
+  sheet: { width: number; height: number },
+): (cx: number, cy: number) => boolean {
+  const W = Math.round(sheet.width);
+  const H = Math.round(sheet.height);
+  const vWall = new Set<string>();
+  const hWall = new Set<string>();
+  for (const s of [...packing, ...boundary]) {
+    if (Math.abs(s.a.x - s.b.x) < EPS) {
+      const x = Math.round(s.a.x);
+      for (let y = Math.round(Math.min(s.a.y, s.b.y)); y < Math.round(Math.max(s.a.y, s.b.y)); y++) vWall.add(`${x},${y}`);
+    } else if (Math.abs(s.a.y - s.b.y) < EPS) {
+      const y = Math.round(s.a.y);
+      for (let x = Math.round(Math.min(s.a.x, s.b.x)); x < Math.round(Math.max(s.a.x, s.b.x)); x++) hWall.add(`${x},${y}`);
+    }
+  }
+  const label = new Int32Array(W * H).fill(-1);
+  const idx = (x: number, y: number): number => y * W + x;
+  const regions: Array<Array<[number, number]>> = [];
+  for (let sy = 0; sy < H; sy++) {
+    for (let sx = 0; sx < W; sx++) {
+      if (label[idx(sx, sy)] !== -1) continue;
+      const id = regions.length;
+      const cells: Array<[number, number]> = [];
+      const stack: Array<[number, number]> = [[sx, sy]];
+      label[idx(sx, sy)] = id;
+      while (stack.length) {
+        const [x, y] = stack.pop()!;
+        cells.push([x, y]);
+        if (x > 0 && !vWall.has(`${x},${y}`) && label[idx(x - 1, y)] === -1) { label[idx(x - 1, y)] = id; stack.push([x - 1, y]); }
+        if (x < W - 1 && !vWall.has(`${x + 1},${y}`) && label[idx(x + 1, y)] === -1) { label[idx(x + 1, y)] = id; stack.push([x + 1, y]); }
+        if (y > 0 && !hWall.has(`${x},${y}`) && label[idx(x, y - 1)] === -1) { label[idx(x, y - 1)] = id; stack.push([x, y - 1]); }
+        if (y < H - 1 && !hWall.has(`${x},${y + 1}`) && label[idx(x, y + 1)] === -1) { label[idx(x, y + 1)] = id; stack.push([x, y + 1]); }
+      }
+      regions.push(cells);
+    }
+  }
+  const flap = new Array<boolean>(regions.length).fill(false);
+  for (let i = 0; i < regions.length; i++) {
+    const cs = regions[i];
+    const xs = cs.map((c) => c[0]);
+    const ys = cs.map((c) => c[1]);
+    const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+    const bw = x1 - x0 + 1, bh = y1 - y0 + 1;
+    // Solid (fills its bbox) -> flap; non-solid (L/ring/wrapping band) -> river.
+    flap[i] = cs.length === bw * bh;
+  }
+  return (cx: number, cy: number): boolean =>
+    cx < 0 || cy < 0 || cx >= W || cy >= H ? false : flap[label[idx(cx, cy)]];
 }
 
 function pointOnSegment(p: GridPoint, seg: OriSegment): boolean {
