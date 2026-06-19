@@ -49,7 +49,7 @@ test("global flat-foldability of pipeline output (baseline; cross-validated vs t
     gt13: true,
     gt14: false,
     gt15: false,
-    gt16: false,
+    gt16: true, // fixed by the minimize-axial-crossings hinge heuristic
     gt17: true,
     river0: true,
     river1: false,

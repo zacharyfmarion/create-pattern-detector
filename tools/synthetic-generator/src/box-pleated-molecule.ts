@@ -597,11 +597,14 @@ export function propagateHinges(
       const armDirs = new Set(
         junction.neighbors.map((n) => `${Math.sign(n.x - junction.x)},${Math.sign(n.y - junction.y)}`),
       );
-      // Gather every direction whose hinge resolves this junction, then prefer
-      // one that terminates on the paper edge over one ending in the interior:
-      // an edge-terminating hinge is simpler to give a valid M/V assignment (its
-      // far end is a boundary vertex, not a new interior junction to balance).
-      const candidates: Array<{ end: GridPoint; onEdge: boolean }> = [];
+      // Gather every direction whose hinge resolves this junction, then choose:
+      //  1. prefer one that terminates on the paper edge over the interior (an
+      //     edge-terminating hinge ends at a boundary vertex, not a new interior
+      //     junction to balance), then
+      //  2. among those, prefer the hinge that crosses the fewest axial-family
+      //     creases - the shorter/cleaner route, which tends to keep the result
+      //     globally flat-foldable.
+      const candidates: Array<{ end: GridPoint; onEdge: boolean; axialCrossings: number }> = [];
       for (const dir of HINGE_DIRS) {
         if (armDirs.has(`${dir.x},${dir.y}`)) continue;
         const end = hingeEndpoint(
@@ -619,11 +622,15 @@ export function propagateHinges(
         const probe = planarize([...all, candidate]);
         const refreshed = probe.get(key({ x: junction.x, y: junction.y }));
         if (refreshed && !isFailingJunction(junction.x, junction.y, refreshed, sheet)) {
-          candidates.push({ end, onEdge: isOnPaperEdge(end, sheet) });
+          candidates.push({
+            end,
+            onEdge: isOnPaperEdge(end, sheet),
+            axialCrossings: countAxialCrossings(candidate, axialFamily),
+          });
         }
       }
       if (candidates.length === 0) continue;
-      candidates.sort((a, b) => Number(b.onEdge) - Number(a.onEdge));
+      candidates.sort((a, b) => Number(b.onEdge) - Number(a.onEdge) || a.axialCrossings - b.axialCrossings);
       const candidate: OriSegment = { a: { x: junction.x, y: junction.y }, b: candidates[0].end };
       placed.add(segKey(candidate.a, candidate.b));
       hinges.push(candidate);
@@ -787,4 +794,16 @@ function parseKey(k: string): GridPoint {
 
 function isOnPaperEdge(p: GridPoint, sheet: { width: number; height: number }): boolean {
   return Math.abs(p.x) < EPS || Math.abs(p.y) < EPS || Math.abs(p.x - sheet.width) < EPS || Math.abs(p.y - sheet.height) < EPS;
+}
+
+/** Count axial-family creases a hinge segment properly crosses (not just touches an endpoint). */
+function countAxialCrossings(hinge: OriSegment, axialFamily: OriSegment[]): number {
+  let count = 0;
+  for (const a of axialFamily) {
+    const inter = raySegmentIntersection(hinge.a, { x: hinge.b.x - hinge.a.x, y: hinge.b.y - hinge.a.y }, a.a, a.b);
+    if (!inter || inter.collinear) continue;
+    // Proper crossing strictly between the hinge endpoints.
+    if (inter.t > EPS && inter.t < 1 - EPS) count++;
+  }
+  return count;
 }
