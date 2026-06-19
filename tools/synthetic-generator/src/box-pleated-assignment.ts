@@ -144,16 +144,29 @@ export function maekawaConflicts(edges: AssignedEdge[], sheet: { width: number; 
 function assignRidges(m: BoxPleatedMolecule): Map<string, Assignment> {
   const colors = new Map<string, Assignment>();
   for (const ridge of mergeCollinear(m.ridges)) {
-    const center = m.ridgeSeeds.find((c) => pointOnSegment(c, ridge));
-    if (center) {
-      // Emit each arm from the center toward each non-center endpoint.
-      for (const end of [ridge.a, ridge.b]) {
-        if (samePoint(center, end)) continue;
-        emitRidgeArm(center, end, m, colors);
-      }
-    } else {
-      // No center on this ridge (rare) - seed from an endpoint.
+    // A single straight ridge can pass through several flap centers (e.g. the
+    // main diagonals of a pinwheel). Split it at every center and seed each
+    // sub-span from its own center, alternating outward and terminating at the
+    // next center. Seeding from the wrong center would arrive at the far end
+    // with flipped parity; the per-span seeds agree on shared boundaries.
+    const centers = m.ridgeSeeds.filter((c) => pointOnSegment(c, ridge));
+    if (centers.length === 0) {
       emitRidgeArm(ridge.a, ridge.b, m, colors);
+      continue;
+    }
+    const dir = { x: ridge.b.x - ridge.a.x, y: ridge.b.y - ridge.a.y };
+    const along = (p: GridPoint): number => (p.x - ridge.a.x) * dir.x + (p.y - ridge.a.y) * dir.y;
+    const stops = [ridge.a, ...centers, ridge.b]
+      .map((p) => ({ p, t: along(p) }))
+      .sort((a, b) => a.t - b.t);
+    const uniq: Array<{ p: GridPoint; t: number }> = [];
+    for (const s of stops) if (!uniq.some((x) => Math.abs(x.t - s.t) < EPS)) uniq.push(s);
+    const isCenter = (p: GridPoint): boolean => centers.some((c) => samePoint(c, p));
+    for (let i = 0; i + 1 < uniq.length; i++) {
+      const s0 = uniq[i].p;
+      const s1 = uniq[i + 1].p;
+      if (isCenter(s0)) emitRidgeArm(s0, s1, m, colors);
+      else if (isCenter(s1)) emitRidgeArm(s1, s0, m, colors);
     }
   }
   return colors;

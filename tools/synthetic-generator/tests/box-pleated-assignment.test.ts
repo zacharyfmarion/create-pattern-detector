@@ -51,6 +51,25 @@ test("the outermost axial crease is a mountain fold (box-pleat convention)", () 
   }
 });
 
+test("ridges through multiple flap centers seed from the nearest center (river0 diagonal)", () => {
+  // The main diagonal of river0 passes through centers (0,0),(4,4),(8,8).
+  // Each sub-span must alternate from its own center: the segment from (0,0)
+  // crosses an M axial at (1,1) -> M, and the segment into center (4,4) crosses
+  // an M axial at (3,3) -> M. Seeding the whole diagonal from one end would
+  // flip the parity and color these V.
+  const { edges } = assign(rivers[0]);
+  const colorOf = (a: number[], b: number[]): string | null => {
+    const e = edges.find(
+      (e) =>
+        (e.a.x === a[0] && e.a.y === a[1] && e.b.x === b[0] && e.b.y === b[1]) ||
+        (e.a.x === b[0] && e.a.y === b[1] && e.b.x === a[0] && e.b.y === a[1]),
+    );
+    return e ? e.mv : null;
+  };
+  expect(colorOf([0, 0], [1, 1])).toBe("M");
+  expect(colorOf([3, 3], [4, 4])).toBe("M");
+});
+
 test("fully flat-foldable molecules assign with zero Maekawa conflicts", () => {
   // gt16 and river2 are satisfied by the deterministic pass alone.
   expect(assign(scale(gt[16], 2)).conflicts).toEqual([]);
@@ -69,11 +88,11 @@ test("deterministic-pass conflict counts (baseline for the upcoming repair stage
     gt12: 2,
     gt13: 2,
     gt14: 2,
-    gt15: 2,
+    gt15: 1,
     gt16: 0,
     gt17: 1,
-    river0: 4,
-    river1: 7,
+    river0: 5,
+    river1: 8,
     river2: 0,
   });
 });
