@@ -1,8 +1,8 @@
 # Dense BP Vertical Training Plan
 
-Status: In progress, 2026-06-18. The `MAX_EDGES=700` probe completed and was
-promoted; the `MAX_EDGES=1200` follow-up then improved BP and clean-15 metrics
-again and is now the promoted default.
+Status: In progress, 2026-06-19. The `MAX_EDGES=700` and `MAX_EDGES=1200`
+probes were both promoted and then superseded. The corrected 15% tessellation
+weighted continuation is now the promoted default.
 Primary goal: improve dense vertical crease-line detection on real box-pleated
 crease patterns without regressing the current clean topology benchmark.
 
@@ -27,14 +27,15 @@ The baseline before Experiment A was:
 - Init: prior close-pair R1 checkpoint, with `non_crease_head` reinitialized
 - Required decoder setting: `junction_offset_radius_px=3.0`
 
-The current promoted model after the second probe is:
+The current promoted model after the tessellation probe is:
 
 - Checkpoint manifest:
-  `artifacts/checkpoints/runpod-v3-no-guide-grid-close-pair-dense-edges-max1200-l40s.json`
+  `artifacts/checkpoints/runpod-v3-no-guide-grid-close-pair-dense-edges-tess15-weighted-4090.json`
 - Checkpoint:
-  `checkpoints/runpod_v3_no_guide_grid_close_pair_dense_edges_max1200_probe_20260618/full/latest.pt`
+  `checkpoints/runpod_v3_no_guide_grid_close_pair_dense_edges_tess15_weighted_probe_20260619/full/latest.pt`
 - Training edge filter: `maxEdges: 1200`
-- Init: superseded max700 dense-edge model, no head reinitialization
+- Init: superseded max1200 dense-edge model, no head reinitialization
+- Training sampler: `v3-tessellation-15pct`
 - Required decoder setting: `junction_offset_radius_px=3.0`
 
 The no-guide-grid training fixed the original non-crease suppression failure:
@@ -79,7 +80,7 @@ Keep fixed:
   - `junction_focal_alpha=2.0`
   - `junction_focal_beta=4.0`
 - Init checkpoint for the first probe: superseded no-guide-grid close-pair R1
-- Init checkpoint for follow-up probes: current promoted max1200 model
+- Init checkpoint for follow-up probes: current promoted tess15 weighted model
 - Do not reinitialize heads
 - Do not add tessellation data
 
@@ -100,10 +101,10 @@ The canonical launcher for dense-edge follow-up probes is:
 scripts/training/run_cpline_runpod_v3_no_guide_grid_close_pair_dense_edges_probe.sh
 ```
 
-It defaults to `MAX_EDGES=1200`, initializes from the current promoted max1200
-checkpoint, leaves `REINIT_HEADS` empty, and verifies the radius-3 close-pair
-configuration after preflight and after training. Set an explicit fresh
-`OUTPUT_ROOT` for any follow-up probe.
+It defaults to `MAX_EDGES=1200`, initializes from the current promoted tess15
+weighted checkpoint, leaves `REINIT_HEADS` empty, and verifies the radius-3
+close-pair configuration after preflight and after training. Set an explicit
+fresh `OUTPUT_ROOT` for any follow-up probe.
 
 Suggested cheap probe shape:
 
@@ -240,7 +241,8 @@ retired because they launched a non-promotable dense-head diagnostic with
 Before spending RunPod budget:
 
 1. Confirm the selected manifest exists on the pod.
-2. Confirm the selected checkpoint is the current promoted dense-edge model.
+2. Confirm the selected checkpoint is the current promoted dense-edge/tess15
+   model.
 3. Print the resolved `MAX_EDGES`.
 4. Print the resolved close-pair junction parameters.
 5. Print `train_family_sampling` and the selected train source counts from
@@ -275,7 +277,8 @@ message if a non-default tessellation sampler is used without
 
 ### 2026-06-18: `MAX_EDGES=700` Probe
 
-Status: completed and promoted as the current downstream/browser model.
+Status: completed and previously promoted; superseded by max1200 and then by
+tess15 weighted.
 
 Run:
 
@@ -370,7 +373,7 @@ to BP/tessellation data.
 
 ### 2026-06-18: `MAX_EDGES=1200` Probe
 
-Status: completed and promoted as the current downstream/browser model.
+Status: completed and previously promoted; superseded by tess15 weighted.
 
 Run:
 
@@ -542,7 +545,7 @@ Run details:
 
 - Checkpoint: `checkpoints/runpod_v3_no_guide_grid_close_pair_dense_edges_tess15_weighted_probe_20260619/full/latest.pt`
 - Registry: `artifacts/checkpoints/runpod-v3-no-guide-grid-close-pair-dense-edges-tess15-weighted-4090.json`
-- Init: promoted max1200 dense-edge checkpoint
+- Init: superseded max1200 dense-edge checkpoint
 - GPU: RunPod RTX 4090, pod `rtljlswig1uksp`
 - Steps: `1500`
 - Training sampler: `v3-tessellation-15pct`
@@ -579,7 +582,7 @@ Clean-15 strict gate:
 Interpretation: the corrected sampler removes the confound and improves the
 actual BP target more than the accidental natural-sampler run, especially on
 vertical dense BP lines. Clean-15 is effectively tied with max1200: one more
-missing edge, one more extra edge, five fewer merges, and seven more splits. The
-net result is promotable, but the stable downstream `cp-detector-v3` path should
-only be swapped in a promotion commit that also mirrors the ignored checkpoint
-out of any temporary worktree.
+missing edge, one more extra edge, five fewer merges, and seven more splits.
+The net result was promoted on 2026-06-19. The stable downstream
+`cp-detector-v3` path now points at this ONNX export, and the ignored checkpoint
+has been mirrored into the canonical local detector checkout.

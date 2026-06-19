@@ -1,10 +1,11 @@
 {
   "schemaVersion": 1,
   "id": "runpod-v3-no-guide-grid-close-pair-dense-edges-max1200-l40s",
-  "status": "promoted",
+  "status": "superseded",
+  "supersededBy": "runpod-v3-no-guide-grid-close-pair-dense-edges-tess15-weighted-4090",
   "phase": "v3-no-guide-grid-close-pair-dense-edges",
   "registeredAt": "2026-06-18",
-  "description": "Promoted V3 browser/default checkpoint. Warm-started from the max700 dense-edge checkpoint, kept all heads, raised MAX_EDGES from 700 to 1200, and preserved the close-pair radius-3 junction-offset recipe. Promoted because it improves BP dense recall and clean-15 strict topology over max700; the known tradeoff is a modest increase in non-crease conflict.",
+  "description": "Superseded V3 browser/default checkpoint. Warm-started from the max700 dense-edge checkpoint, kept all heads, raised MAX_EDGES from 700 to 1200, and preserved the close-pair radius-3 junction-offset recipe. It improved BP dense recall and clean-15 strict topology over max700, but was later superseded by the corrected tess15 weighted model.",
   "checkpoint": {
     "gitTracked": false,
     "relativePath": "checkpoints/runpod_v3_no_guide_grid_close_pair_dense_edges_max1200_probe_20260618/full/latest.pt",

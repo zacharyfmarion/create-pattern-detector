@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
   "id": "runpod-v3-no-guide-grid-close-pair-dense-edges-tess15-weighted-4090",
-  "status": "candidate",
+  "status": "promoted",
   "phase": "v3-no-guide-grid-close-pair-dense-edges-tessellation",
   "registeredAt": "2026-06-19",
-  "description": "Corrected 15% tessellation BP-data probe. Warm-started from the promoted max1200 dense-edge checkpoint, preserved the close-pair radius-3 junction-offset recipe, and used the explicit v3-tessellation-15pct sampler so the base exposure remained balanced TreeMaker/Rabbit Ear while adding 12% orthogonal BP-grid and 3% Miura tessellations. The earlier natural-sampler tessellation run is a non-promotable ablation because it also reduced Rabbit Ear exposure.",
+  "description": "Current promoted V3 browser/default checkpoint. Corrected 15% tessellation BP-data probe. Warm-started from the max1200 dense-edge checkpoint, preserved the close-pair radius-3 junction-offset recipe, and used the explicit v3-tessellation-15pct sampler so the base exposure remained balanced TreeMaker/Rabbit Ear while adding 12% orthogonal BP-grid and 3% Miura tessellations. The earlier natural-sampler tessellation run is a non-promotable ablation because it also reduced Rabbit Ear exposure.",
   "checkpoint": {
     "gitTracked": false,
     "relativePath": "checkpoints/runpod_v3_no_guide_grid_close_pair_dense_edges_tess15_weighted_probe_20260619/full/latest.pt",
@@ -68,7 +68,7 @@
     "batchnormMode": "batch-stats",
     "vectorizerThreshold": 0.65,
     "junctionOffsetRadiusPx": 3.0,
-    "notes": "junction_offset remains radius-normalized and must be decoded with radius-3 offset-vote clustering. Browser ONNX export uses explicit per-image BatchNorm ops. This model is a strong promotion candidate because it improves BP horizontal/vertical dense evidence while preserving clean-15 strict topology within measurement noise.",
+    "notes": "junction_offset remains radius-normalized and must be decoded with radius-3 offset-vote clustering. Browser ONNX export uses explicit per-image BatchNorm ops. This model is promoted because it improves BP horizontal/vertical dense evidence while preserving clean-15 strict topology within measurement noise.",
     "downstreamVersionedOnnxManifest": "tree-maker-rust/apps/web/public/models/cp-detector-v3-tess15-weighted-20260619/manifest.json",
     "downstreamOnnxSha256": "b425cfd6caecde93caa92f0e8952040f5bada0345c5387a222d1fb915e283742"
   },

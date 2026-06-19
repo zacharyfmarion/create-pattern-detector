@@ -5,17 +5,18 @@ exports. Read this before using, replacing, exporting, or retraining a model.
 
 ## Current Model
 
-The current downstream/browser model is the V3 no-guide-grid close-pair dense
-edges `MAX_EDGES=1200` checkpoint:
+The current downstream/browser model is the V3 no-guide-grid close-pair
+dense-edge 15% tessellation weighted checkpoint:
 
 ```text
-artifacts/checkpoints/runpod-v3-no-guide-grid-close-pair-dense-edges-max1200-l40s.json
-checkpoints/runpod_v3_no_guide_grid_close_pair_dense_edges_max1200_probe_20260618/full/latest.pt
+artifacts/checkpoints/runpod-v3-no-guide-grid-close-pair-dense-edges-tess15-weighted-4090.json
+checkpoints/runpod_v3_no_guide_grid_close_pair_dense_edges_tess15_weighted_probe_20260619/full/latest.pt
 ```
 
-It warm-started from the previous dense-edge max700 checkpoint, kept all heads,
-increased the training edge envelope from `max_edges=700` to `max_edges=1200`,
-and preserved the close-pair radius-3 junction-offset recipe.
+It warm-started from the previous dense-edge max1200 checkpoint, kept all
+heads, preserved the `max_edges=1200` training envelope, added the corrected
+15% tessellation mix with `TRAIN_FAMILY_SAMPLING=v3-tessellation-15pct`, and
+preserved the close-pair radius-3 junction-offset recipe.
 In `tree-maker-rust` / Ori Studio, the stable product default path is:
 
 ```text
@@ -26,16 +27,16 @@ apps/web/public/models/cp-detector-v3/model.onnx
 The versioned export used to promote that default is:
 
 ```text
-apps/web/public/models/cp-detector-v3-dense-edges-max1200-20260618/manifest.json
-apps/web/public/models/cp-detector-v3-dense-edges-max1200-20260618/model.onnx
+apps/web/public/models/cp-detector-v3-tess15-weighted-20260619/manifest.json
+apps/web/public/models/cp-detector-v3-tess15-weighted-20260619/model.onnx
 ```
 
 Important settings:
 
 - PyTorch checkpoint SHA-256:
-  `befa99edc4531919ffb8f36c933b2e394f8868cb6e0fb0be2d7b96eee74c9bac`
+  `0827adc76d7d33b67e7121f912ef06378649b62dae59340cc2a1ab7e0d39988d`
 - ONNX SHA-256 in `tree-maker-rust`:
-  `96ba3d56277f0ead32a6be813a31402434f29620f4b6edd113d3592e2c3ab145`
+  `b425cfd6caecde93caa92f0e8952040f5bada0345c5387a222d1fb915e283742`
 - Image size: `1024`
 - Backbone: `hrnet_w18`
 - V2 auxiliary heads: enabled
@@ -44,7 +45,9 @@ Important settings:
 - Junction offset radius: `3.0` px. Decoders must use offset-vote clustering
   rather than legacy sub-pixel-only offset decoding.
 - Promoted continuation envelope: `max_edges=1200`, `1500` steps, no head
-  reinitialization from the prior max700 dense-edge checkpoint.
+  reinitialization from the prior max1200 dense-edge checkpoint.
+- Training mix: `cp_training_mix_v3_tessellation_15pct` with
+  `TRAIN_FAMILY_SAMPLING=v3-tessellation-15pct`.
 
 ## Do Not Confuse Older Runs
 
@@ -95,6 +98,14 @@ artifacts/checkpoints/runpod-v3-no-guide-grid-close-pair-dense-edges-max700-4090
 checkpoints/runpod_v3_no_guide_grid_close_pair_dense_edges_max700_probe_20260618/full/latest.pt
 ```
 
+The `MAX_EDGES=1200` dense-edge continuation was the previous promoted
+browser/product model and is retained for comparison:
+
+```text
+artifacts/checkpoints/runpod-v3-no-guide-grid-close-pair-dense-edges-max1200-l40s.json
+checkpoints/runpod_v3_no_guide_grid_close_pair_dense_edges_max1200_probe_20260618/full/latest.pt
+```
+
 The first 5000-step no-guide-grid full run was also not promoted. It fixed the
 BP dense-head conflict, but the retired launcher omitted the close-pair offset
 recipe and exported with `junction_offset_radius_px=0.0`. Treat it as a dense
@@ -138,24 +149,24 @@ non-crease head:
 | No-grid full diagnostic, 5000 steps, radius 0 | 0.6012 | 0.6001 | 0.0154 | 0.8810 |
 | No-grid close-pair full R1, superseded | 0.6113 | 0.6104 | 0.0128 | 0.8816 |
 | Dense-edge max700 continuation, superseded | 0.6482 | 0.6462 | 0.0197 | 0.8983 |
-| Dense-edge max1200 continuation, promoted | 0.6778 | 0.6746 | 0.0285 | 0.9046 |
+| Dense-edge max1200 continuation, superseded | 0.6778 | 0.6746 | 0.0285 | 0.9046 |
+| Dense-edge tess15 weighted, promoted | 0.7582 | 0.7547 | 0.0266 | 0.8989 |
 
 Interpretation:
 
 - The non-crease suppression failure is essentially fixed: effective recall now
   tracks raw recall, and non-crease conflict fell from 54.2% in the shipped V3
-  R1 to 2.9% in the current promoted max1200 model.
+  R1 to 2.7% in the current promoted tess15 weighted model.
 - Orthogonal BP creases are still not equal to diagonal/other creases
-  (`0.6482` raw recall vs `0.8983`). Since non-crease conflict is low and the
-  max700 continuation improved both BP and clean-15 metrics without adding new
-  BP families, the remaining gap is still most likely a data-distribution and
-  dense-vertical-coverage problem. The current synthetic mix is mostly
-  TreeMaker/Rabbit-Ear/22.5-style data and does not explicitly generate
-  box-pleat crease patterns.
+  (`0.7582` raw recall vs `0.8989`). Since non-crease conflict is low and the
+  tess15 weighted continuation improved the target BP vertical slices by adding
+  explicit BP/tessellation families, the remaining gap is still most likely a
+  data-distribution and dense-vertical-coverage problem rather than residual
+  non-crease suppression.
 - Clean-15 product strict topology improved on the current product pack:
   previous no-guide-grid close-pair R1 `0.9594` edge F1 / `126` missing / `89`
-  extra / `72` merged; promoted max1200 dense-edge continuation `0.9655` edge
-  F1 / `107` missing / `76` extra / `60` merged.
+  extra / `72` merged; promoted tess15 weighted continuation `0.9651` edge
+  F1 / `108` missing / `77` extra / `55` merged.
 - The older 5000-step no-grid diagnostic remains non-promotable because it
   trained and exported with `junction_offset_radius_px=0.0`; the promoted run
   above used the verified close-pair launcher and has radius `3.0`.
@@ -166,13 +177,16 @@ The dense-edge continuations also improved the hardest BP angle buckets:
 | --- | ---: | ---: | ---: |
 | All 179, previous no-guide-grid R1 | 0.6546 | 0.5736 | 0.8634 |
 | All 179, max700 | 0.6874 | 0.6124 | 0.8812 |
-| All 179, current max1200 | 0.7300 | 0.6272 | 0.8866 |
+| All 179, max1200 | 0.7300 | 0.6272 | 0.8866 |
+| All 179, current tess15 weighted | 0.7529 | 0.7634 | 0.8801 |
 | Dense top quartile, previous no-guide-grid R1 | 0.4354 | 0.3757 | 0.8082 |
 | Dense top quartile, max700 | 0.4763 | 0.4074 | 0.8403 |
-| Dense top quartile, current max1200 | 0.5153 | 0.4247 | 0.8501 |
+| Dense top quartile, max1200 | 0.5153 | 0.4247 | 0.8501 |
+| Dense top quartile, current tess15 weighted | 0.5578 | 0.5311 | 0.8465 |
 | Very dense `edge_count >= 2000`, previous no-guide-grid R1 | 0.4062 | 0.3473 | 0.8059 |
 | Very dense `edge_count >= 2000`, max700 | 0.4446 | 0.3797 | 0.8365 |
-| Very dense `edge_count >= 2000`, current max1200 | 0.4808 | 0.3968 | 0.8438 |
+| Very dense `edge_count >= 2000`, max1200 | 0.4808 | 0.3968 | 0.8438 |
+| Very dense `edge_count >= 2000`, current tess15 weighted | 0.5238 | 0.4875 | 0.8389 |
 
 Future no-guide-grid runs that should remain close-pair-compatible must use a
 launcher that verifies the close-pair recipe. The canonical full no-guide-grid
@@ -189,7 +203,8 @@ That script sets and verifies the R1 close-pair parameters
 `run_cpline_runpod_v3_no_guide_grid_{probe,full}.sh` names intentionally fail
 with an "Are you sure?" message unless explicitly acknowledged.
 
-For controlled dense-edge follow-up probes from the current promoted model, use:
+For controlled dense-edge follow-up probes from the current promoted tess15
+weighted model, use:
 
 ```bash
 scripts/training/run_cpline_runpod_v3_no_guide_grid_close_pair_dense_edges_probe.sh
@@ -207,7 +222,7 @@ dense-edge base exposure while adding 12% orthogonal BP-grid and 3% Miura
 tessellations. Do not use `natural` or plain `balanced` sampling for that mix
 unless intentionally running a sampler ablation.
 
-The corrected tessellation run is registered as a promotable candidate at:
+The corrected tessellation run is registered as the current promoted model at:
 
 ```text
 artifacts/checkpoints/runpod-v3-no-guide-grid-close-pair-dense-edges-tess15-weighted-4090.json
@@ -230,8 +245,8 @@ non-promotable sampler ablation.
 | 2026-06-16 | V3 no-guide-grid full R1 diagnostic | Not registered; local ignored checkpoint `checkpoints/runpod_v3_no_guide_grid_full_r1_20260615/full/latest.pt` | R1 close-pair checkpoint, reinitialized `non_crease_head` | Dense BP evidence improved substantially, but the launcher omitted radius-3 close-pair offset args and produced `junction_offset_radius_px=0.0`. Treat as a dense-head diagnostic only, not a promotable model. |
 | 2026-06-17 | V3 no-guide-grid close-pair full R1 | `artifacts/checkpoints/runpod-v3-no-guide-grid-close-pair-full-r1-4090.json` | R1 close-pair checkpoint, reinitialized `non_crease_head` | Superseded browser/product model. Keeps radius-3 close-pair decoder compatibility, fixes BP non-crease suppression, and improves current-pack clean-15 strict topology. |
 | 2026-06-18 | V3 no-guide-grid close-pair dense-edge max700 | `artifacts/checkpoints/runpod-v3-no-guide-grid-close-pair-dense-edges-max700-4090.json` | No-guide-grid close-pair R1, no head reinit | Superseded browser/product model. Raises the training edge envelope to `max_edges=700`, improves dense BP horizontal/vertical recall, and improves clean-15 strict topology to `0.9623` strict edge F1. |
-| 2026-06-18 | V3 no-guide-grid close-pair dense-edge max1200 | `artifacts/checkpoints/runpod-v3-no-guide-grid-close-pair-dense-edges-max1200-l40s.json` | Max700 checkpoint, no head reinit | Current promoted browser/product model. Raises the training edge envelope to `max_edges=1200`; improves BP orthogonal effective recall to `0.6746` and clean-15 strict edge F1 to `0.9655`, with modestly higher non-crease conflict. |
-| 2026-06-19 | V3 no-guide-grid close-pair dense-edge tess15 weighted | `artifacts/checkpoints/runpod-v3-no-guide-grid-close-pair-dense-edges-tess15-weighted-4090.json` | Max1200 checkpoint, no head reinit | Promotable candidate, not yet swapped into the stable downstream model path. Uses `TRAIN_FAMILY_SAMPLING=v3-tessellation-15pct` to preserve balanced TreeMaker/Rabbit exposure while adding 12% orthogonal BP-grid and 3% Miura tessellations. BP orthogonal effective recall improves to `0.7547`; clean-15 strict edge F1 remains tied at `0.9651`. |
+| 2026-06-18 | V3 no-guide-grid close-pair dense-edge max1200 | `artifacts/checkpoints/runpod-v3-no-guide-grid-close-pair-dense-edges-max1200-l40s.json` | Max700 checkpoint, no head reinit | Superseded browser/product model. Raises the training edge envelope to `max_edges=1200`; improves BP orthogonal effective recall to `0.6746` and clean-15 strict edge F1 to `0.9655`, with modestly higher non-crease conflict. |
+| 2026-06-19 | V3 no-guide-grid close-pair dense-edge tess15 weighted | `artifacts/checkpoints/runpod-v3-no-guide-grid-close-pair-dense-edges-tess15-weighted-4090.json` | Max1200 checkpoint, no head reinit | Current promoted browser/product model. Uses `TRAIN_FAMILY_SAMPLING=v3-tessellation-15pct` to preserve balanced TreeMaker/Rabbit exposure while adding 12% orthogonal BP-grid and 3% Miura tessellations. BP orthogonal effective recall improves to `0.7547`; clean-15 strict edge F1 remains tied at `0.9651`. |
 
 ## Update Rules
 

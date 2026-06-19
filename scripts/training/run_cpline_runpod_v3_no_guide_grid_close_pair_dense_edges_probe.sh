@@ -7,10 +7,11 @@ cd "$ROOT_DIR"
 PYTHON="${PYTHON:-.venv/bin/python}"
 
 export MAX_EDGES="${MAX_EDGES:-1200}"
+RUN_DATE="${RUN_DATE:-$(date +%Y%m%d)}"
 
-PROMOTED_CHECKPOINT="${PROMOTED_CHECKPOINT:-checkpoints/runpod_v3_no_guide_grid_close_pair_dense_edges_max1200_probe_20260618/full/latest.pt}"
+PROMOTED_CHECKPOINT="${PROMOTED_CHECKPOINT:-checkpoints/runpod_v3_no_guide_grid_close_pair_dense_edges_tess15_weighted_probe_20260619/full/latest.pt}"
 
-export OUTPUT_ROOT="${OUTPUT_ROOT:-checkpoints/runpod_v3_no_guide_grid_close_pair_dense_edges_max${MAX_EDGES}_probe_20260618}"
+export OUTPUT_ROOT="${OUTPUT_ROOT:-checkpoints/runpod_v3_no_guide_grid_close_pair_dense_edges_max${MAX_EDGES}_probe_${RUN_DATE}}"
 export PROFILE="${PROFILE:-v3-no-guide-grid-replay}"
 export EVAL_PROFILE="${EVAL_PROFILE:-v3-no-guide-grid-replay}"
 export INIT_CHECKPOINT="${INIT_CHECKPOINT:-$PROMOTED_CHECKPOINT}"

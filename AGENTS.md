@@ -147,19 +147,16 @@ throwaway worktree.
 
 Before replacing, exporting, or using a checkpoint, read
 `docs/model-training-history.md` first, then `docs/checkpoint-management.md`.
-The current downstream/browser model is the V3 no-guide-grid close-pair dense
-edges `MAX_EDGES=1200` checkpoint registered at
-`artifacts/checkpoints/runpod-v3-no-guide-grid-close-pair-dense-edges-max1200-l40s.json`.
-
-The latest registered BP-data candidate is the corrected 15% tessellation run at
+The current downstream/browser model is the corrected V3 no-guide-grid
+close-pair dense-edge 15% tessellation run registered at
 `artifacts/checkpoints/runpod-v3-no-guide-grid-close-pair-dense-edges-tess15-weighted-4090.json`.
-It is promotable based on dense BP and clean-15 evals, but it is not the stable
-downstream model until the canonical checkpoint and `tree-maker-rust`
-`cp-detector-v3` artifacts are explicitly promoted.
+It is exported in `tree-maker-rust` under the stable `cp-detector-v3` product
+path and the versioned `cp-detector-v3-tess15-weighted-20260619` path.
 
-Do not confuse the previous V3 close-pair R1 checkpoint, the no-guide-grid R1
-or max700 dense-edge checkpoints that this run superseded, or the later R3
-from-scratch run with the promoted model. The previous close-pair R1 is retained at
+Do not confuse the previous V3 close-pair R1 checkpoint, the no-guide-grid R1,
+max700 dense-edge, or max1200 dense-edge checkpoints that this run superseded,
+or the later R3 from-scratch run with the promoted model. The previous
+close-pair R1 is retained at
 `artifacts/checkpoints/runpod-v3-close-pair-warmstart-4090.json`; R3 is
 registered as an ablation at
 `artifacts/checkpoints/runpod-v3-close-pair-scratch-r3-4090.json` because it
@@ -202,7 +199,8 @@ These canonical launchers set and verify the required R1 close-pair recipe:
 retired and fail with an "Are you sure?" message because they previously
 launched a dense-head diagnostic with `junction_offset_radius_px=0.0`.
 
-For dense BP follow-up probes from the current promoted model, use:
+For dense BP follow-up probes from the current promoted tess15 weighted model,
+use:
 
 ```bash
 scripts/training/run_cpline_runpod_v3_no_guide_grid_close_pair_dense_edges_probe.sh

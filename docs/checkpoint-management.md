@@ -58,7 +58,7 @@ loading or exporting a model.
 Current downstream/browser model:
 
 ```text
-artifacts/checkpoints/runpod-v3-no-guide-grid-close-pair-dense-edges-max1200-l40s.json
+artifacts/checkpoints/runpod-v3-no-guide-grid-close-pair-dense-edges-tess15-weighted-4090.json
 ```
 
 Historical Python Phase 5 / V1 baseline:
@@ -89,6 +89,12 @@ Previous promoted dense-edge model, retained for comparison:
 
 ```text
 artifacts/checkpoints/runpod-v3-no-guide-grid-close-pair-dense-edges-max700-4090.json
+```
+
+Previous promoted max1200 dense-edge model, retained for comparison:
+
+```text
+artifacts/checkpoints/runpod-v3-no-guide-grid-close-pair-dense-edges-max1200-l40s.json
 ```
 
 Each manifest records:
@@ -153,7 +159,7 @@ metadata corrections.
 For the current downstream/browser model, load:
 
 ```text
-checkpoints/runpod_v3_no_guide_grid_close_pair_dense_edges_max1200_probe_20260618/full/latest.pt
+checkpoints/runpod_v3_no_guide_grid_close_pair_dense_edges_tess15_weighted_probe_20260619/full/latest.pt
 ```
 
 Use the config stored inside the checkpoint to construct the model. Important
@@ -167,6 +173,7 @@ settings:
 - `junction_offset_radius_px=3.0`
 - `augment_profile=v3-no-guide-grid-replay`
 - `max_edges=1200` during the promoted continuation run
+- `train_family_sampling=v3-tessellation-15pct`
 
 Use `batch-stats` BatchNorm behavior for validation/vectorization. Browser ONNX
 exports should use explicit per-image BatchNorm ops and record
