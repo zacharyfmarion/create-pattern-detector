@@ -96,24 +96,19 @@ test("deterministic-pass conflict counts (before ridge-crossing repair)", () => 
   });
 });
 
-test("ridge-crossing repair adds edge-biased hinges and reduces conflicts", () => {
-  // assignBoxPleated resolves degree-4 ridge crossings by adding two hinge arms,
-  // preferring the paper edge. river0's four crossings clear (only its central
-  // degree-8 vertex remains); gt17 fully resolves.
-  const counts: Record<string, number> = {};
-  for (let idx = 12; idx <= 17; idx++) counts[`gt${idx}`] = assignBoxPleated(scale(gt[idx], 2)).conflicts.length;
-  rivers.forEach((f, i) => (counts[`river${i}`] = assignBoxPleated(f).conflicts.length));
-  expect(counts).toEqual({
-    gt12: 2,
-    gt13: 2,
-    gt14: 2,
-    gt15: 1,
-    gt16: 0,
-    gt17: 0,
-    river0: 1,
-    river1: 8,
-    river2: 0,
-  });
+test("ridge-crossing repair adds the expected hinges (river0)", () => {
+  // assignBoxPleated resolves degree-4 ridge crossings by adding two edge-biased
+  // hinge arms. river0 gains eight hinges (two per crossing).
+  expect(assignBoxPleated(rivers[0]).molecule.hinges.length).toBe(8);
+});
+
+test("the full pipeline assigns every fixture to a Maekawa-valid CP (zero conflicts)", () => {
+  for (let idx = 12; idx <= 17; idx++) {
+    expect(assignBoxPleated(scale(gt[idx], 2)).conflicts).toEqual([]);
+  }
+  for (const f of rivers) {
+    expect(assignBoxPleated(f).conflicts).toEqual([]);
+  }
 });
 
 test("river0 ridge crossings get the two edge-going hinge arms (hand-verified)", () => {

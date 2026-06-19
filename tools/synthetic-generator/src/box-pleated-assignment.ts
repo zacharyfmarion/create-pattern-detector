@@ -166,6 +166,11 @@ export function assignBoxPleated(f: OriFixture): AssignmentResult {
     if (!added) break;
   }
 
+  // Final repair: flip non-ridge creases to clear any remaining Maekawa
+  // conflicts (degree-8 flap-center 3-1 splits, and crossings the hinge repair
+  // could not resolve to the edge).
+  repairByFlipping(edges, f.sheet);
+
   return { molecule: { ...m, hinges }, edges, conflicts: maekawaConflicts(edges, f.sheet) };
 }
 
@@ -190,6 +195,70 @@ function ridgeCrossingFailures(edges: AssignedEdge[], sheet: { width: number; he
     if (Math.abs(M - V) !== 2) out.push(v); // not a valid 3-1 split
   }
   return out;
+}
+
+/**
+ * Min-conflicts repair. Flips non-ridge creases (axials/pleats/hinges) to clear
+ * remaining Maekawa conflicts: repeatedly pick the incident flip that most
+ * reduces the total conflict count (allowing a least-bad non-improving move to
+ * escape a local minimum), then chase any newly broken vertex. A flip only
+ * changes its two endpoint vertices, so each candidate is cheap to score. Ridge
+ * and boundary creases are never flipped. Mutates `edges` in place.
+ */
+function repairByFlipping(edges: AssignedEdge[], sheet: { width: number; height: number }, maxIters = 4000): void {
+  const incidence = new Map<string, AssignedEdge[]>();
+  for (const e of edges) {
+    for (const p of [e.a, e.b]) {
+      const k = pointKey(p);
+      if (!incidence.has(k)) incidence.set(k, []);
+      incidence.get(k)!.push(e);
+    }
+  }
+  const conflictAt = (vk: string): boolean => {
+    const incident = incidence.get(vk);
+    if (!incident) return false;
+    const v = parsePoint(vk);
+    if (isBoundaryVertex(v, sheet)) return false;
+    if (isStraightDegree2(v, incident)) return false;
+    let M = 0;
+    let V = 0;
+    for (const e of incident) {
+      if (e.mv === "M") M++;
+      else if (e.mv === "V") V++;
+    }
+    return Math.abs(M - V) !== 2;
+  };
+
+  const flippable = (e: AssignedEdge): boolean => e.type === "axial" || e.type === "hinge";
+  // Tabu the most recent flips so we do not immediately undo a non-improving move.
+  const tabu: string[] = [];
+  const tabuSize = 6;
+
+  for (let iter = 0; iter < maxIters; iter++) {
+    const conflicted = [...incidence.keys()].filter(conflictAt);
+    if (conflicted.length === 0) break;
+
+    const candidateEdges = new Set<AssignedEdge>();
+    for (const vk of conflicted) for (const e of incidence.get(vk)!) if (flippable(e)) candidateEdges.add(e);
+
+    let best: { edge: AssignedEdge; delta: number } | null = null;
+    for (const e of candidateEdges) {
+      const ek = segKey(e.a, e.b);
+      const before = (conflictAt(pointKey(e.a)) ? 1 : 0) + (conflictAt(pointKey(e.b)) ? 1 : 0);
+      e.mv = e.mv === "M" ? "V" : "M";
+      const after = (conflictAt(pointKey(e.a)) ? 1 : 0) + (conflictAt(pointKey(e.b)) ? 1 : 0);
+      e.mv = e.mv === "M" ? "V" : "M"; // restore
+      const delta = after - before;
+      const tabued = tabu.includes(ek) && delta >= 0;
+      if (tabued) continue;
+      if (!best || delta < best.delta) best = { edge: e, delta };
+    }
+    if (!best) break;
+
+    best.edge.mv = best.edge.mv === "M" ? "V" : "M";
+    tabu.push(segKey(best.edge.a, best.edge.b));
+    if (tabu.length > tabuSize) tabu.shift();
+  }
 }
 
 function isOnEdge(p: GridPoint, sheet: { width: number; height: number }): boolean {
