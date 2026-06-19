@@ -213,9 +213,35 @@ export function propagateAllAxialOffsets(
   axials: OriSegment[],
   edgeAxials: OriSegment[],
 ): OriSegment[] {
+  return propagateAxialFamilyWithLevels(ridges, sheet, axials, edgeAxials).pleats;
+}
+
+export interface AxialFamilyLevels {
+  /** Pleats (axial+1, +2, ...), excluding the level-0 axials. */
+  pleats: OriSegment[];
+  /** Map from segment key to pleat level: 0 = base axial, 1 = axial+1, etc. */
+  level: Map<string, number>;
+  /** The deepest level present. */
+  maxLevel: number;
+}
+
+/**
+ * Like {@link propagateAllAxialOffsets} but also records the pleat level of each
+ * axial-family segment (0 = base axial, 1 = axial+1, ...). M/V assignment uses
+ * the level parity: outermost (highest level) is mountain, alternating inward.
+ */
+export function propagateAxialFamilyWithLevels(
+  ridges: OriSegment[],
+  sheet: { width: number; height: number },
+  axials: OriSegment[],
+  edgeAxials: OriSegment[],
+): AxialFamilyLevels {
   const family: OriSegment[] = [...axials];
   const seen = new Set<string>(family.map(segmentKey));
-  for (let round = 0; round < 64; round++) {
+  const level = new Map<string, number>();
+  for (const s of axials) level.set(segmentKey(s), 0);
+  let maxLevel = 0;
+  for (let round = 1; round < 64; round++) {
     const next = propagateAxialOffsets(ridges, sheet, family, edgeAxials);
     let added = 0;
     for (const s of next) {
@@ -223,16 +249,17 @@ export function propagateAllAxialOffsets(
       if (seen.has(k)) continue;
       seen.add(k);
       family.push(s);
+      level.set(k, round);
+      maxLevel = round;
       added++;
     }
     if (added === 0) break;
   }
-  // Return only the pleats (everything beyond the level-0 axials).
   const axialKeys = new Set(axials.map(segmentKey));
-  return family.filter((s) => !axialKeys.has(segmentKey(s)));
+  return { pleats: family.filter((s) => !axialKeys.has(segmentKey(s))), level, maxLevel };
 }
 
-function segmentKey(s: OriSegment): string {
+export function segmentKey(s: OriSegment): string {
   const a = `${s.a.x},${s.a.y}`;
   const b = `${s.b.x},${s.b.y}`;
   return a < b ? `${a}|${b}` : `${b}|${a}`;
