@@ -507,3 +507,242 @@ function segKey(a: GridPoint, b: GridPoint): string {
 function round(v: number): number {
   return Math.round(v * 1e4) / 1e4;
 }
+
+// ---------------------------------------------------------------------------
+// Stage C: hinge creases.
+//
+// After axials and the axial+n pleats, some interior junctions still fail the
+// local flat-foldability conditions (Kawasaki + even degree >= 4). A hinge
+// crease resolves such a junction by extending from it until it meets a stop.
+//
+// Rule (from the manual construction):
+//   - Only real junctions are considered (a straight degree-2 pass-through is
+//     not a junction).
+//   - For each failing junction, try a hinge in each axis direction that is not
+//     already occupied by an incident crease. March it until the nearest stop:
+//     a ridge, a flap center, another hinge, the start of a collinear
+//     axial-family crease (a hinge may cross axials but not lie along one), or
+//     the paper edge.
+//   - Accept the hinge only if it actually makes that junction valid. Adding one
+//     hinge can fix several junctions (e.g. a straight hinge connecting two
+//     failing junctions through a non-center ridge crossing), and adding a hinge
+//     can break a previously-valid vertex, so we re-evaluate the whole pattern
+//     after each hinge and loop until nothing fails or no progress is possible.
+// ---------------------------------------------------------------------------
+
+export interface PlanarVertex {
+  x: number;
+  y: number;
+  neighbors: GridPoint[];
+}
+
+export interface HingeResult {
+  hinges: OriSegment[];
+  /** Junctions still failing after hinge propagation (empty when fully solved). */
+  unresolved: GridPoint[];
+}
+
+const HINGE_DIRS: GridPoint[] = [
+  { x: 1, y: 0 },
+  { x: -1, y: 0 },
+  { x: 0, y: 1 },
+  { x: 0, y: -1 },
+];
+const MAX_HINGE_ITERS = 2000;
+
+export function propagateHinges(
+  ridges: OriSegment[],
+  axialFamily: OriSegment[],
+  flapCenters: GridPoint[],
+  sheet: { width: number; height: number },
+  existing: OriSegment[],
+): HingeResult {
+  const all = [...existing];
+  const hinges: OriSegment[] = [];
+  const placed = new Set<string>();
+
+  for (let iter = 0; iter < MAX_HINGE_ITERS; iter++) {
+    const failing = failingJunctions(planarize(all), sheet);
+    if (failing.length === 0) break;
+
+    let progressed = false;
+    for (const junction of failing) {
+      const armDirs = new Set(
+        junction.neighbors.map((n) => `${Math.sign(n.x - junction.x)},${Math.sign(n.y - junction.y)}`),
+      );
+      for (const dir of HINGE_DIRS) {
+        if (armDirs.has(`${dir.x},${dir.y}`)) continue;
+        const end = hingeEndpoint(
+          { x: junction.x, y: junction.y },
+          dir,
+          ridges,
+          flapCenters,
+          hinges,
+          [...axialFamily, ...hinges],
+          sheet,
+        );
+        if (!end || samePoint(end, junction)) continue;
+        const segmentId = segKey({ x: junction.x, y: junction.y }, end);
+        if (placed.has(segmentId)) continue;
+
+        // Accept only if it makes this junction valid.
+        const candidate: OriSegment = { a: { x: junction.x, y: junction.y }, b: end };
+        const probe = planarize([...all, candidate]);
+        const refreshed = probe.get(key({ x: junction.x, y: junction.y }));
+        if (refreshed && !isFailingJunction(junction.x, junction.y, refreshed, sheet)) {
+          placed.add(segmentId);
+          hinges.push(candidate);
+          all.push(candidate);
+          progressed = true;
+          break;
+        }
+      }
+      if (progressed) break;
+    }
+    if (!progressed) break;
+  }
+
+  const unresolved = failingJunctions(planarize(all), sheet).map((j) => ({ x: j.x, y: j.y }));
+  return { hinges, unresolved };
+}
+
+/** Planarize a set of segments into a vertex adjacency map (split at every crossing/T-junction). */
+export function planarize(segments: OriSegment[]): Map<string, GridPoint[]> {
+  const edges = new Set<string>();
+  for (let i = 0; i < segments.length; i++) {
+    const a = segments[i].a;
+    const b = segments[i].b;
+    const points: GridPoint[] = [a, b];
+    for (let j = 0; j < segments.length; j++) {
+      if (i === j) continue;
+      const x = segmentIntersection(a, b, segments[j].a, segments[j].b);
+      if (x) points.push(x);
+      for (const e of [segments[j].a, segments[j].b]) {
+        if (pointOnSegmentStrict(e, a, b)) points.push(e);
+      }
+    }
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    points.sort((p, q) => (p.x - a.x) * dx + (p.y - a.y) * dy - ((q.x - a.x) * dx + (q.y - a.y) * dy));
+    for (let k = 0; k + 1 < points.length; k++) {
+      const u = points[k];
+      const v = points[k + 1];
+      if (key(u) === key(v)) continue;
+      edges.add(segKey(u, v));
+    }
+  }
+  const adj = new Map<string, GridPoint[]>();
+  for (const edge of edges) {
+    const [uk, vk] = edge.split("|");
+    const u = parseKey(uk);
+    const v = parseKey(vk);
+    pushNeighbor(adj, uk, v);
+    pushNeighbor(adj, vk, u);
+  }
+  return adj;
+}
+
+function pushNeighbor(adj: Map<string, GridPoint[]>, vk: string, n: GridPoint): void {
+  const list = adj.get(vk);
+  if (!list) {
+    adj.set(vk, [n]);
+    return;
+  }
+  if (!list.some((p) => key(p) === key(n))) list.push(n);
+}
+
+/** Interior real junctions that fail Kawasaki or are not even degree >= 4. */
+export function failingJunctions(adj: Map<string, GridPoint[]>, sheet: { width: number; height: number }): PlanarVertex[] {
+  const out: PlanarVertex[] = [];
+  for (const [vk, neighbors] of adj) {
+    const v = parseKey(vk);
+    if (isFailingJunction(v.x, v.y, neighbors, sheet)) out.push({ x: v.x, y: v.y, neighbors });
+  }
+  return out;
+}
+
+function isFailingJunction(vx: number, vy: number, neighbors: GridPoint[], sheet: { width: number; height: number }): boolean {
+  // Boundary vertices are not interior flat-fold vertices.
+  if (vx < EPS || vy < EPS || Math.abs(vx - sheet.width) < EPS || Math.abs(vy - sheet.height) < EPS) return false;
+  const deg = neighbors.length;
+  const angles = neighbors.map((n) => Math.atan2(n.y - vy, n.x - vx)).sort((a, b) => a - b);
+  // A straight degree-2 pass-through is not a junction.
+  if (deg === 2 && Math.abs(Math.abs(angles[1] - angles[0]) - Math.PI) < 1e-6) return false;
+  const sectors: number[] = [];
+  for (let i = 0; i < deg; i++) {
+    let s = angles[(i + 1) % deg] - angles[i];
+    if (s < 0) s += 2 * Math.PI;
+    sectors.push(s);
+  }
+  let alt = 0;
+  for (let i = 0; i < sectors.length; i++) alt += (i % 2 === 0 ? 1 : -1) * sectors[i];
+  const kawasaki = deg >= 4 && deg % 2 === 0 && Math.abs(alt) < 1e-6;
+  return !kawasaki;
+}
+
+/** Nearest stop for a hinge marching from `from` along axis `dir`. */
+function hingeEndpoint(
+  from: GridPoint,
+  dir: GridPoint,
+  ridges: OriSegment[],
+  flapCenters: GridPoint[],
+  hinges: OriSegment[],
+  collinearAxials: OriSegment[],
+  sheet: { width: number; height: number },
+): GridPoint | null {
+  let best = Infinity;
+  const crossStop = (segs: OriSegment[]): void => {
+    for (const r of segs) {
+      const inter = raySegmentIntersection(from, dir, r.a, r.b);
+      if (inter && !inter.collinear && inter.t > EPS && inter.t < best) best = inter.t;
+    }
+  };
+  crossStop(ridges);
+  crossStop(hinges);
+  for (const c of flapCenters) {
+    const t = (c.x - from.x) * dir.x + (c.y - from.y) * dir.y;
+    if (t <= EPS) continue;
+    if (Math.abs(from.x + dir.x * t - c.x) < EPS && Math.abs(from.y + dir.y * t - c.y) < EPS && t < best) best = t;
+  }
+  const edge = rayBoundaryIntersection(from, dir, sheet);
+  if (edge && edge.t > EPS && edge.t < best) best = edge.t;
+  // A hinge may cross axials but must stop where it would start running along one.
+  for (const c of collinearAxials) {
+    const ex = c.b.x - c.a.x;
+    const ey = c.b.y - c.a.y;
+    if (Math.abs(ex * dir.y - ey * dir.x) > EPS) continue;
+    if (Math.abs((c.a.x - from.x) * dir.y - (c.a.y - from.y) * dir.x) > EPS) continue;
+    const ta = (c.a.x - from.x) * dir.x + (c.a.y - from.y) * dir.y;
+    const tb = (c.b.x - from.x) * dir.x + (c.b.y - from.y) * dir.y;
+    const hi = Math.max(ta, tb);
+    if (hi > EPS) best = Math.min(best, Math.max(Math.min(ta, tb), 0));
+  }
+  if (!Number.isFinite(best) || best < EPS) return null;
+  return { x: from.x + dir.x * best, y: from.y + dir.y * best };
+}
+
+function segmentIntersection(p1: GridPoint, p2: GridPoint, p3: GridPoint, p4: GridPoint): GridPoint | null {
+  const d1x = p2.x - p1.x;
+  const d1y = p2.y - p1.y;
+  const d2x = p4.x - p3.x;
+  const d2y = p4.y - p3.y;
+  const den = d1x * d2y - d1y * d2x;
+  if (Math.abs(den) < 1e-9) return null;
+  const t = ((p3.x - p1.x) * d2y - (p3.y - p1.y) * d2x) / den;
+  const s = ((p3.x - p1.x) * d1y - (p3.y - p1.y) * d1x) / den;
+  if (t < -1e-7 || t > 1 + 1e-7 || s < -1e-7 || s > 1 + 1e-7) return null;
+  return { x: p1.x + d1x * t, y: p1.y + d1y * t };
+}
+
+function pointOnSegmentStrict(p: GridPoint, a: GridPoint, b: GridPoint): boolean {
+  const cross = (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x);
+  if (Math.abs(cross) > 1e-7) return false;
+  const dot = (p.x - a.x) * (b.x - a.x) + (p.y - a.y) * (b.y - a.y);
+  const len2 = (b.x - a.x) ** 2 + (b.y - a.y) ** 2;
+  return dot > -1e-7 && dot < len2 + 1e-7;
+}
+
+function parseKey(k: string): GridPoint {
+  const [x, y] = k.split(",").map(Number);
+  return { x, y };
+}
