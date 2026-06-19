@@ -1,6 +1,6 @@
 import ear from "rabbit-ear";
 import { normalizeFold } from "./fold-utils.ts";
-import type { FOLDFormat, GlobalValidationBackend, ValidationConfig, ValidationResult } from "./types.ts";
+import type { EdgeAssignment, FOLDFormat, GlobalValidationBackend, TessellationMetadata, ValidationConfig, ValidationResult } from "./types.ts";
 
 const GEOMETRY_EPSILON = 1e-9;
 
@@ -287,6 +287,7 @@ function checkTessellationFoldProgramStructure(fold: FOLDFormat): void {
   if (metadata.minRenderedSpacingPx1024 <= 0) {
     throw new Error("minRenderedSpacingPx1024 must be positive");
   }
+  checkTessellationLineAlternation(fold, metadata);
   const labelPolicy = fold.label_policy;
   if (!labelPolicy?.trainingEligible) throw new Error("label_policy.trainingEligible must be true");
   if (
@@ -296,6 +297,58 @@ function checkTessellationFoldProgramStructure(fold: FOLDFormat): void {
   ) {
     throw new Error("label_policy must mark tessellation fold-program provenance");
   }
+}
+
+function checkTessellationLineAlternation(fold: FOLDFormat, metadata: TessellationMetadata): void {
+  const cols = metadata.repeatX;
+  const rows = metadata.repeatY;
+  const expectedEdges = (rows + 1) * cols + (cols + 1) * rows;
+  if (fold.edges_vertices.length !== expectedEdges || fold.edges_assignment.length !== expectedEdges) {
+    throw new Error(`orthogonal grid edge layout mismatch: expected ${expectedEdges} edges`);
+  }
+
+  const horizontalIndex = (y: number, x: number): number => y * cols + x;
+  const verticalOffset = (rows + 1) * cols;
+  const verticalIndex = (y: number, x: number): number => verticalOffset + y * (cols + 1) + x;
+
+  for (let y = 1; y < rows; y++) {
+    for (let x = 1; x < cols; x++) {
+      const left = fold.edges_assignment[horizontalIndex(y, x - 1)];
+      const right = fold.edges_assignment[horizontalIndex(y, x)];
+      const below = fold.edges_assignment[verticalIndex(y - 1, x)];
+      const above = fold.edges_assignment[verticalIndex(y, x)];
+      const assignments = [left, right, below, above];
+      if (!assignments.every(isMountainOrValley)) {
+        throw new Error(`interior grid vertex (${x}, ${y}) must have only M/V incident creases`);
+      }
+      const mountainCount = assignments.filter((assignment) => assignment === "M").length;
+      if (mountainCount !== 1 && mountainCount !== 3) {
+        throw new Error(`interior grid vertex (${x}, ${y}) must have a 3-to-1 M/V split`);
+      }
+
+      if (metadata.assignmentMode === "vertical-line-alternating") {
+        if (below !== above || above !== right || left !== oppositeAssignment(above)) {
+          throw new Error(`vertical-line assignment mismatch at grid vertex (${x}, ${y})`);
+        }
+      } else if (metadata.assignmentMode === "horizontal-line-alternating") {
+        if (left !== right || right !== above || below !== oppositeAssignment(above)) {
+          throw new Error(`horizontal-line assignment mismatch at grid vertex (${x}, ${y})`);
+        }
+      } else {
+        throw new Error(`unsupported tessellation assignment mode: ${String(metadata.assignmentMode)}`);
+      }
+    }
+  }
+}
+
+function isMountainOrValley(assignment: EdgeAssignment): boolean {
+  return assignment === "M" || assignment === "V";
+}
+
+function oppositeAssignment(assignment: EdgeAssignment): EdgeAssignment {
+  if (assignment === "M") return "V";
+  if (assignment === "V") return "M";
+  throw new Error(`assignment has no M/V opposite: ${assignment}`);
 }
 
 function checkLocalFlatFoldability(fold: FOLDFormat): void {

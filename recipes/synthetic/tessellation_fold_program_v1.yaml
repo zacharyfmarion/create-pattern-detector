@@ -37,7 +37,7 @@ tessellationSampler:
   maxRepeats: 48
 
 validation:
-  strictGlobal: false
+  strictGlobal: true
   globalBackend: rabbit-ear-solver
   minVertexDistance: 0.00001
   maxVertices: 4000
@@ -46,7 +46,7 @@ validation:
   requireTreeMaker: false
   requireRabbitEarFoldProgram: false
   requireTessellationFoldProgram: true
-  requireLocalFlatFoldability: false
+  requireLocalFlatFoldability: true
 
 renderVariants:
   - name: tessellation_assignment_clean

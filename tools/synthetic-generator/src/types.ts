@@ -88,7 +88,7 @@ export interface TessellationMetadata {
   diagonalCreaseLengthFraction: number;
   minRenderedSpacingPx1024: number;
   angleHistogram: Record<string, number>;
-  assignmentMode: "horizontal-alternating" | "vertical-alternating";
+  assignmentMode: "vertical-line-alternating" | "horizontal-line-alternating";
   verticalBias: boolean;
   generatorSteps: string[];
 }

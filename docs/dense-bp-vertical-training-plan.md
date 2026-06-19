@@ -452,8 +452,11 @@ evidence that is missing from the current synthetic mix. The first recipe is:
 - family: `tessellation-fold-program`
 - subfamily: `orthogonal-bp-grid`
 - active crease buckets: small through superdense, up to `2200`
-- validation: dense and tessellation-structure checks
+- validation: dense, tessellation-structure, local flat-foldability, and Rabbit
+  Ear global solver checks
 - label provenance: `tessellation-fold-program`
+- assignment convention: whole M/V crease lines alternate along one axis, with
+  connector segments preserving a 3-to-1 split at every interior grid junction
 
 This data should remain a standalone source release at:
 
@@ -471,3 +474,9 @@ It contains 12,000 TreeMaker samples, 2,000 Rabbit Ear samples, and 1,000
 tessellation samples. The next training experiment should use this as an
 explicit new dataset variable and compare against the promoted `MAX_EDGES=1200`
 model with the same close-pair decoder contract.
+
+Correction note: the first implementation used a segment-level parity pattern
+that passed initial Rabbit Ear spot checks but made vertical-heavy examples look
+like one-color ladders. The release was regenerated with line-level alternation
+and the recipe now requires every accepted tessellation row to pass both
+`local-flat-foldability` and `rabbit-ear-solver`.

@@ -34,7 +34,7 @@ function generateOrthogonalBpGrid(config: GenerationConfig, rng: SeededRandom): 
   const verticalBias = rng.next() < clamp01(sampler.verticalBiasProbability ?? 0.72);
   const candidate = chooseGridCandidate(rng, minActive, maxActive, sampler, verticalBias);
   const assignmentMode: TessellationMetadata["assignmentMode"] =
-    rng.next() < 0.5 ? "horizontal-alternating" : "vertical-alternating";
+    verticalBias || rng.next() < 0.5 ? "vertical-line-alternating" : "horizontal-line-alternating";
   const primary: EdgeAssignment = rng.next() < 0.5 ? "M" : "V";
   const secondary: EdgeAssignment = primary === "M" ? "V" : "M";
 
@@ -68,7 +68,7 @@ function generateOrthogonalBpGrid(config: GenerationConfig, rng: SeededRandom): 
     for (let x = 0; x < candidate.cols; x++) {
       const assignment = y === 0 || y === candidate.rows
         ? "B"
-        : horizontalAssignment(x, assignmentMode, primary, secondary);
+        : horizontalAssignment(x, y, assignmentMode, primary, secondary);
       addEdge(vertexIndex(x, y), vertexIndex(x + 1, y), assignment, 1 / candidate.cols, "0");
     }
   }
@@ -77,7 +77,7 @@ function generateOrthogonalBpGrid(config: GenerationConfig, rng: SeededRandom): 
     for (let x = 0; x <= candidate.cols; x++) {
       const assignment = x === 0 || x === candidate.cols
         ? "B"
-        : verticalAssignment(y, assignmentMode, primary, secondary);
+        : verticalAssignment(x, y, assignmentMode, primary, secondary);
       addEdge(vertexIndex(x, y), vertexIndex(x, y + 1), assignment, 1 / candidate.rows, "90");
     }
   }
@@ -110,7 +110,7 @@ function generateOrthogonalBpGrid(config: GenerationConfig, rng: SeededRandom): 
     trainingEligible: true,
     notes: [
       "Synthetic tessellation CP focused on dense horizontal and vertical crease evidence.",
-      "Interior grid assignments use a deterministic parity pattern; use primarily for dense line detection, not as a complete BP folding proof.",
+      "Interior grid assignments alternate full crease lines along one axis and connector segments preserve a 3-to-1 M/V split.",
     ],
   };
   const totalLength = edgeLengths.reduce((sum, value) => sum + value, 0);
@@ -226,22 +226,30 @@ function choosePreferredCandidates(candidates: GridCandidate[], verticalBias: bo
 
 function horizontalAssignment(
   x: number,
-  mode: TessellationMetadata["assignmentMode"],
-  primary: EdgeAssignment,
-  secondary: EdgeAssignment,
-): EdgeAssignment {
-  if (mode === "vertical-alternating") return primary;
-  return x % 2 === 0 ? primary : secondary;
-}
-
-function verticalAssignment(
   y: number,
   mode: TessellationMetadata["assignmentMode"],
   primary: EdgeAssignment,
   secondary: EdgeAssignment,
 ): EdgeAssignment {
-  if (mode === "horizontal-alternating") return primary;
-  return y % 2 === 0 ? primary : secondary;
+  return mode === "vertical-line-alternating"
+    ? alternatingAssignment(x, primary, secondary)
+    : alternatingAssignment(y, primary, secondary);
+}
+
+function verticalAssignment(
+  x: number,
+  y: number,
+  mode: TessellationMetadata["assignmentMode"],
+  primary: EdgeAssignment,
+  secondary: EdgeAssignment,
+): EdgeAssignment {
+  return mode === "vertical-line-alternating"
+    ? alternatingAssignment(x, primary, secondary)
+    : alternatingAssignment(y, primary, secondary);
+}
+
+function alternatingAssignment(index: number, primary: EdgeAssignment, secondary: EdgeAssignment): EdgeAssignment {
+  return index % 2 === 0 ? primary : secondary;
 }
 
 function activeCreaseCount(assignments: EdgeAssignment[]): number {

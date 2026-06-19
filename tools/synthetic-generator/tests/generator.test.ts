@@ -3,6 +3,7 @@ import ear from "rabbit-ear";
 import { availableFamilies, generateFold } from "../src/generators.ts";
 import { splitForIndex } from "../src/fold-utils.ts";
 import { loadRecipe } from "../src/recipe.ts";
+import { validateFold } from "../src/validate.ts";
 
 test("strict validation APIs are available", () => {
   expect(typeof ear.graph.square).toBe("function");
@@ -57,8 +58,9 @@ test("Tessellation fold-program recipe loads as a dense orthogonal supplement", 
   expect(recipe.name).toBe("tessellation_fold_program_v1");
   expect(recipe.families).toEqual({ "treemaker-tree": 0, "rabbit-ear-fold-program": 0, "tessellation-fold-program": 1 });
   expect(recipe.validation).toMatchObject({
-    strictGlobal: false,
+    strictGlobal: true,
     requireTessellationFoldProgram: true,
+    requireLocalFlatFoldability: true,
     requireTreeMaker: false,
   });
   expect(recipe.tessellationSampler?.subfamilyWeights).toEqual({ "orthogonal-bp-grid": 1 });
@@ -102,9 +104,39 @@ test("Tessellation fold-program generation is deterministic and vertical-heavy",
   expect(JSON.stringify(first)).toBe(JSON.stringify(second));
   expect(first.tessellation_metadata?.generator).toBe("tessellation-fold-program");
   expect(first.tessellation_metadata?.subfamily).toBe("orthogonal-bp-grid");
+  expect(first.tessellation_metadata?.assignmentMode).toBe("vertical-line-alternating");
   expect(first.tessellation_metadata?.activeCreaseCount).toBeGreaterThanOrEqual(180);
   expect(first.tessellation_metadata?.verticalCreaseLengthFraction).toBeGreaterThanOrEqual(0.58);
   expect(first.label_policy?.labelSource).toBe("tessellation-fold-program");
+});
+
+test("Tessellation fold-program generation passes Rabbit Ear flat-foldability checks", async () => {
+  const fold = generateFold({
+    id: "tessellation-flat-foldable-unit",
+    family: "tessellation-fold-program" as const,
+    seed: 13579,
+    numCreases: 120,
+    maxCreases: 220,
+    bucket: "small",
+    tessellationSampler: {
+      subfamilyWeights: { "orthogonal-bp-grid": 1 },
+      verticalBiasProbability: 1,
+      minRepeats: 6,
+      maxRepeats: 18,
+    },
+  });
+  const result = await validateFold(fold, {
+    strictGlobal: true,
+    globalBackend: "rabbit-ear-solver",
+    minVertexDistance: 1e-5,
+    maxVertices: 512,
+    maxEdges: 1024,
+    requireTessellationFoldProgram: true,
+    requireLocalFlatFoldability: true,
+  });
+  expect(result.valid).toBe(true);
+  expect(result.passed).toContain("local-flat-foldability");
+  expect(result.passed).toContain("rabbit-ear-solver");
 });
 
 test("deterministic split helper preserves recipe ratios for smoke counts", () => {

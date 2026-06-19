@@ -92,7 +92,7 @@ This PR keeps it focused on fold-only families:
 
 - `treemaker-tree`: primary external TreeMaker-derived CP generation.
 - `rabbit-ear-fold-program`: strict supplemental Rabbit Ear fold-operation generation.
-- `tessellation-fold-program`: deterministic BP/tessellation-style crease evidence, currently focused on dense orthogonal grids with vertical-heavy coverage.
+- `tessellation-fold-program`: deterministic BP/tessellation-style crease evidence, currently focused on dense Rabbit Ear-validated orthogonal grids with vertical-heavy coverage.
 
 Large generated releases live outside the repo:
 

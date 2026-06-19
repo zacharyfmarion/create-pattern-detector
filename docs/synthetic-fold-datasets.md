@@ -41,13 +41,16 @@ image-training phase.
   - Emits deterministic orthogonal BP/grid tessellation `.fold` samples.
   - Segments every horizontal/vertical intersection explicitly.
   - Oversamples vertical-heavy grids for dense vertical crease-line evidence.
+  - Alternates whole M/V crease lines along one axis, with connector segments
+    chosen so each interior junction has a 3-to-1 M/V split.
   - Writes `tessellation_metadata`, angle histograms, rendered spacing, and
     label provenance into each `.fold`.
 
 - `recipes/synthetic/tessellation_fold_program_v1.yaml`
   - Enables only `tessellation-fold-program`.
   - Defines small through superdense active-crease buckets.
-  - Requires dense and tessellation-specific validation.
+  - Requires dense, tessellation-specific, local flat-foldability, and Rabbit
+    Ear global solver validation.
 
 - `scripts/data/visualize_synthetic_folds.py`
   - Renders a generic contact sheet for any raw-manifest synthetic release.
@@ -207,6 +210,8 @@ Expected smoke properties:
 - `qa.json` has `familyCounts.tessellation-fold-program = 64`.
 - accepted rows include `tessellationMetadata`.
 - `counts.tessellationSubfamily.orthogonal-bp-grid` covers every accepted row.
+- manifest rows include both `local-flat-foldability` and `rabbit-ear-solver`
+  in `validation.passed`.
 - the fold report shows a meaningful vertical-heavy tail in
   `tessellation_vertical_crease_length_fraction`.
 - contact sheets visibly contain dense horizontal and vertical crease grids.
