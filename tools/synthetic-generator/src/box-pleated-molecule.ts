@@ -570,6 +570,11 @@ export function propagateHinges(
       const armDirs = new Set(
         junction.neighbors.map((n) => `${Math.sign(n.x - junction.x)},${Math.sign(n.y - junction.y)}`),
       );
+      // Gather every direction whose hinge resolves this junction, then prefer
+      // one that terminates on the paper edge over one ending in the interior:
+      // an edge-terminating hinge is simpler to give a valid M/V assignment (its
+      // far end is a boundary vertex, not a new interior junction to balance).
+      const candidates: Array<{ end: GridPoint; onEdge: boolean }> = [];
       for (const dir of HINGE_DIRS) {
         if (armDirs.has(`${dir.x},${dir.y}`)) continue;
         const end = hingeEndpoint(
@@ -582,22 +587,22 @@ export function propagateHinges(
           sheet,
         );
         if (!end || samePoint(end, junction)) continue;
-        const segmentId = segKey({ x: junction.x, y: junction.y }, end);
-        if (placed.has(segmentId)) continue;
-
-        // Accept only if it makes this junction valid.
+        if (placed.has(segKey({ x: junction.x, y: junction.y }, end))) continue;
         const candidate: OriSegment = { a: { x: junction.x, y: junction.y }, b: end };
         const probe = planarize([...all, candidate]);
         const refreshed = probe.get(key({ x: junction.x, y: junction.y }));
         if (refreshed && !isFailingJunction(junction.x, junction.y, refreshed, sheet)) {
-          placed.add(segmentId);
-          hinges.push(candidate);
-          all.push(candidate);
-          progressed = true;
-          break;
+          candidates.push({ end, onEdge: isOnPaperEdge(end, sheet) });
         }
       }
-      if (progressed) break;
+      if (candidates.length === 0) continue;
+      candidates.sort((a, b) => Number(b.onEdge) - Number(a.onEdge));
+      const candidate: OriSegment = { a: { x: junction.x, y: junction.y }, b: candidates[0].end };
+      placed.add(segKey(candidate.a, candidate.b));
+      hinges.push(candidate);
+      all.push(candidate);
+      progressed = true;
+      break;
     }
     if (!progressed) break;
   }
@@ -745,4 +750,8 @@ function pointOnSegmentStrict(p: GridPoint, a: GridPoint, b: GridPoint): boolean
 function parseKey(k: string): GridPoint {
   const [x, y] = k.split(",").map(Number);
   return { x, y };
+}
+
+function isOnPaperEdge(p: GridPoint, sheet: { width: number; height: number }): boolean {
+  return Math.abs(p.x) < EPS || Math.abs(p.y) < EPS || Math.abs(p.x - sheet.width) < EPS || Math.abs(p.y - sheet.height) < EPS;
 }
