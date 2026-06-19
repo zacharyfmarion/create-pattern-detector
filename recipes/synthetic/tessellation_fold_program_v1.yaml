@@ -1,0 +1,60 @@
+name: tessellation_fold_program_v1
+seed: 129170
+imageSize: 768
+padding: 42
+
+splits:
+  train: 0.85
+  val: 0.10
+  test: 0.05
+
+families:
+  tessellation-fold-program: 1.0
+
+complexityBuckets:
+  - name: small
+    minCreases: 120
+    maxCreases: 260
+    weight: 0.15
+  - name: medium
+    minCreases: 260
+    maxCreases: 650
+    weight: 0.35
+  - name: dense
+    minCreases: 650
+    maxCreases: 1300
+    weight: 0.35
+  - name: superdense
+    minCreases: 1300
+    maxCreases: 2200
+    weight: 0.15
+
+tessellationSampler:
+  subfamilyWeights:
+    orthogonal-bp-grid: 1.0
+  verticalBiasProbability: 0.75
+  minRepeats: 6
+  maxRepeats: 48
+
+validation:
+  strictGlobal: false
+  globalBackend: rabbit-ear-solver
+  minVertexDistance: 0.00001
+  maxVertices: 4000
+  maxEdges: 4000
+  requireDense: true
+  requireTreeMaker: false
+  requireRabbitEarFoldProgram: false
+  requireTessellationFoldProgram: true
+  requireLocalFlatFoldability: false
+
+renderVariants:
+  - name: tessellation_assignment_clean
+    assignmentVisibility: visible
+    count: 1
+  - name: tessellation_active_only
+    assignmentVisibility: active-only
+    count: 1
+  - name: monochrome_ink
+    assignmentVisibility: hidden
+    count: 1

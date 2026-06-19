@@ -136,7 +136,9 @@ Stop conditions:
 Question: if higher `MAX_EDGES` alone is not enough, does adding synthetic
 BP/tessellation-like data improve dense vertical recall?
 
-Only start this after Experiment A is evaluated.
+Status: implementation in progress after Experiment A showed useful but
+incomplete gains. Keep this as the next isolated variable: compare a
+tessellation-mix continuation against the promoted `MAX_EDGES=1200` checkpoint.
 
 Recommended generator family:
 
@@ -148,10 +150,11 @@ Initial subfamilies:
 
 - `orthogonal-bp-grid`
   - Directly targets dense real horizontal and vertical crease lines.
-  - Should oversample vertical crease length in some examples.
+  - Oversamples vertical crease length in vertical-heavy examples.
 - `miura-ori`
   - Known periodic tessellation/corrugation family.
   - Useful for repeated crease paths, scale variation, and non-BP controls.
+  - Not implemented in `tessellation_fold_program_v1`.
 
 Potential later subfamilies:
 
@@ -436,3 +439,35 @@ hypothesis. Raising to `MAX_EDGES=1200` improves BP recall and clean-15 strict
 topology over max700. The tradeoff is a modest increase in non-crease conflict
 and slightly lower clean assignment accuracy (`0.9875 -> 0.9855`). It is now
 promoted because the BP and strict-topology gains are larger than that tradeoff.
+
+### 2026-06-18: Tessellation Source Data Implementation
+
+Status: in progress.
+
+Implemented the first `tessellation-fold-program` subfamily,
+`orthogonal-bp-grid`, to target dense horizontal and vertical crease-line
+evidence that is missing from the current synthetic mix. The first recipe is:
+
+- `recipes/synthetic/tessellation_fold_program_v1.yaml`
+- family: `tessellation-fold-program`
+- subfamily: `orthogonal-bp-grid`
+- active crease buckets: small through superdense, up to `2200`
+- validation: dense and tessellation-structure checks
+- label provenance: `tessellation-fold-program`
+
+This data should remain a standalone source release at:
+
+```text
+/Users/zacharymarion/Documents/datasets/create-pattern-detector/synthetic/tessellation_fold_program_v1
+```
+
+The first mixed root with tessellations is:
+
+```text
+/Users/zacharymarion/Documents/datasets/create-pattern-detector/synthetic/cp_training_mix_v2_tessellation
+```
+
+It contains 12,000 TreeMaker samples, 2,000 Rabbit Ear samples, and 1,000
+tessellation samples. The next training experiment should use this as an
+explicit new dataset variable and compare against the promoted `MAX_EDGES=1200`
+model with the same close-pair decoder contract.

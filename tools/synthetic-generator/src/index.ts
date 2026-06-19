@@ -43,6 +43,9 @@ async function main(): Promise<void> {
   const treeMakerTopologyCounts: Record<string, number> = {};
   const rabbitEarAxiomCounts: Record<string, number> = {};
   const rabbitEarRequestedBucketCounts: Record<string, number> = {};
+  const tessellationSubfamilyCounts: Record<string, number> = {};
+  const tessellationVerticalFractions: number[] = [];
+  const tessellationSpacingPx1024: number[] = [];
   const acceptedTreeMetadata = (): NonNullable<RawManifestRow["treeMetadata"]>[] =>
     rows.map((row) => row.treeMetadata).filter((metadata): metadata is NonNullable<RawManifestRow["treeMetadata"]> => metadata !== undefined);
   const maxAttempts = args.maxAttempts ?? args.count * 40;
@@ -65,6 +68,7 @@ async function main(): Promise<void> {
       treeMakerSampler: family === "treemaker-tree"
         ? samplerForAcceptedTreeMakerMix(recipe.treeMakerSampler, acceptedTreeMetadata(), args.count)
         : recipe.treeMakerSampler,
+      tessellationSampler: recipe.tessellationSampler,
     };
 
     try {
@@ -79,6 +83,7 @@ async function main(): Promise<void> {
           treeMetadata: fold.tree_metadata,
           treeMakerMetadata: fold.treemaker_metadata,
           rabbitEarMetadata: fold.rabbit_ear_metadata,
+          tessellationMetadata: fold.tessellation_metadata,
         });
         continue;
       }
@@ -103,6 +108,7 @@ async function main(): Promise<void> {
         treeMetadata: fold.tree_metadata,
         treeMakerMetadata: fold.treemaker_metadata,
         rabbitEarMetadata: fold.rabbit_ear_metadata,
+        tessellationMetadata: fold.tessellation_metadata,
         labelPolicy: fold.label_policy,
         validation,
       };
@@ -124,6 +130,12 @@ async function main(): Promise<void> {
         }
         rabbitEarRequestedBucketCounts[fold.rabbit_ear_metadata.requestedBucket] =
           (rabbitEarRequestedBucketCounts[fold.rabbit_ear_metadata.requestedBucket] ?? 0) + 1;
+      }
+      if (fold.tessellation_metadata) {
+        tessellationSubfamilyCounts[fold.tessellation_metadata.subfamily] =
+          (tessellationSubfamilyCounts[fold.tessellation_metadata.subfamily] ?? 0) + 1;
+        tessellationVerticalFractions.push(fold.tessellation_metadata.verticalCreaseLengthFraction);
+        tessellationSpacingPx1024.push(fold.tessellation_metadata.minRenderedSpacingPx1024);
       }
       if (validation.metrics?.solverMs !== undefined) solverMsValues.push(validation.metrics.solverMs);
       if (validation.metrics?.faces !== undefined) faceCountValues.push(validation.metrics.faces);
@@ -159,6 +171,9 @@ async function main(): Promise<void> {
     treeMakerTopologyCounts,
     rabbitEarAxiomCounts,
     rabbitEarRequestedBucketCounts,
+    tessellationSubfamilyCounts,
+    tessellationVerticalCreaseLengthFraction: summarizeOrNull(tessellationVerticalFractions),
+    tessellationMinRenderedSpacingPx1024: summarizeOrNull(tessellationSpacingPx1024),
     solverMs: summarizeOrNull(solverMsValues),
     faces: summarizeOrNull(faceCountValues),
     rabbitEarStrictPassRate: recipe.validation.strictGlobal

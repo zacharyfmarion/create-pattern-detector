@@ -46,6 +46,9 @@ export async function validateFold(fold: FOLDFormat, config: ValidationConfig): 
   if (config.requireRabbitEarFoldProgram || normalized.rabbit_ear_metadata) {
     runCheck("rabbit-ear-fold-program-structure", passed, failed, errors, () => checkRabbitEarFoldProgramStructure(normalized));
   }
+  if (config.requireTessellationFoldProgram || normalized.tessellation_metadata) {
+    runCheck("tessellation-fold-program-structure", passed, failed, errors, () => checkTessellationFoldProgramStructure(normalized));
+  }
   if (config.requireLocalFlatFoldability !== false) {
     runCheck("local-flat-foldability", passed, failed, errors, () => checkLocalFlatFoldability(normalized));
   }
@@ -245,6 +248,53 @@ function checkRabbitEarFoldProgramStructure(fold: FOLDFormat): void {
     labelPolicy.assignmentSource !== "rabbit-ear-fold-program"
   ) {
     throw new Error("label_policy must mark Rabbit Ear fold-program provenance");
+  }
+}
+
+function checkTessellationFoldProgramStructure(fold: FOLDFormat): void {
+  const metadata = fold.tessellation_metadata;
+  if (!metadata) throw new Error("tessellation_metadata is required");
+  if (metadata.generator !== "tessellation-fold-program") {
+    throw new Error("tessellation_metadata.generator must be tessellation-fold-program");
+  }
+  if (metadata.subfamily !== "orthogonal-bp-grid") {
+    throw new Error(`unsupported tessellation subfamily: ${String(metadata.subfamily)}`);
+  }
+  if (metadata.repeatX < 3 || metadata.repeatY < 3) {
+    throw new Error("tessellation repeat counts must be at least 3");
+  }
+  if (!metadata.targetActiveCreaseRange || metadata.targetActiveCreaseRange.length !== 2) {
+    throw new Error("targetActiveCreaseRange is required");
+  }
+  const [minActive, maxActive] = metadata.targetActiveCreaseRange;
+  const activeCreases = fold.edges_assignment.filter((assignment) => assignment === "M" || assignment === "V").length;
+  if (activeCreases !== metadata.activeCreaseCount) {
+    throw new Error(`active crease count ${activeCreases} does not match metadata ${metadata.activeCreaseCount}`);
+  }
+  if (activeCreases < minActive || activeCreases > maxActive) {
+    throw new Error(`active crease count ${activeCreases} is outside requested range ${minActive}-${maxActive}`);
+  }
+  if ((metadata.angleHistogram["0"] ?? 0) <= 0 || (metadata.angleHistogram["90"] ?? 0) <= 0) {
+    throw new Error("orthogonal tessellation samples require horizontal and vertical angle coverage");
+  }
+  const fractionSum =
+    metadata.horizontalCreaseLengthFraction +
+    metadata.verticalCreaseLengthFraction +
+    metadata.diagonalCreaseLengthFraction;
+  if (Math.abs(fractionSum - 1) > 0.001) {
+    throw new Error(`crease length fractions must sum to 1, got ${fractionSum}`);
+  }
+  if (metadata.minRenderedSpacingPx1024 <= 0) {
+    throw new Error("minRenderedSpacingPx1024 must be positive");
+  }
+  const labelPolicy = fold.label_policy;
+  if (!labelPolicy?.trainingEligible) throw new Error("label_policy.trainingEligible must be true");
+  if (
+    labelPolicy.labelSource !== "tessellation-fold-program" ||
+    labelPolicy.geometrySource !== "tessellation-fold-program" ||
+    labelPolicy.assignmentSource !== "tessellation-fold-program"
+  ) {
+    throw new Error("label_policy must mark tessellation fold-program provenance");
   }
 }
 

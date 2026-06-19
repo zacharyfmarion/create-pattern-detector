@@ -148,6 +148,48 @@ test("Rabbit Ear fold-program validation rejects sparse outputs", async () => {
   expect(result.failed).toContain("rabbit-ear-fold-program-structure");
 });
 
+test("Tessellation fold-program validation rejects missing metadata", async () => {
+  const result = await validateFold(square(), {
+    ...validation,
+    requireTessellationFoldProgram: true,
+  });
+  expect(result.failed).toContain("tessellation-fold-program-structure");
+});
+
+test("Tessellation fold-program validation rejects wrong provenance", async () => {
+  const fold: FOLDFormat = {
+    ...square(),
+    tessellation_metadata: {
+      generator: "tessellation-fold-program",
+      subfamily: "orthogonal-bp-grid",
+      repeatX: 4,
+      repeatY: 4,
+      activeCreaseCount: 0,
+      targetActiveCreaseRange: [0, 4],
+      horizontalCreaseLengthFraction: 0.5,
+      verticalCreaseLengthFraction: 0.5,
+      diagonalCreaseLengthFraction: 0,
+      minRenderedSpacingPx1024: 256,
+      angleHistogram: { "0": 2, "90": 2 },
+      assignmentMode: "horizontal-alternating",
+      verticalBias: false,
+      generatorSteps: ["test"],
+    },
+    label_policy: {
+      labelSource: "rabbit-ear-fold-program",
+      geometrySource: "rabbit-ear-fold-program",
+      assignmentSource: "rabbit-ear-fold-program",
+      trainingEligible: true,
+      notes: [],
+    },
+  };
+  const result = await validateFold(fold, {
+    ...validation,
+    requireTessellationFoldProgram: true,
+  });
+  expect(result.failed).toContain("tessellation-fold-program-structure");
+});
+
 function square(): FOLDFormat {
   return {
     file_spec: 1.1,

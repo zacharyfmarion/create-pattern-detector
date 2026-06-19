@@ -88,25 +88,35 @@ generated contact sheets as the source of truth.
 ## Shared Synthetic Datasets
 
 The maintained synthetic generator lives under `tools/synthetic-generator/`.
-This PR keeps it focused on two fold-only families:
+This PR keeps it focused on fold-only families:
 
 - `treemaker-tree`: primary external TreeMaker-derived CP generation.
 - `rabbit-ear-fold-program`: strict supplemental Rabbit Ear fold-operation generation.
+- `tessellation-fold-program`: deterministic BP/tessellation-style crease evidence, currently focused on dense orthogonal grids with vertical-heavy coverage.
 
 Large generated releases live outside the repo:
 
 ```text
 /Users/zacharymarion/Documents/datasets/create-pattern-detector/synthetic/treemaker_tree_v1
 /Users/zacharymarion/Documents/datasets/create-pattern-detector/synthetic/rabbit_ear_fold_program_v1
+/Users/zacharymarion/Documents/datasets/create-pattern-detector/synthetic/tessellation_fold_program_v1
 /Users/zacharymarion/Documents/datasets/create-pattern-detector/synthetic/cp_training_mix_v1
+/Users/zacharymarion/Documents/datasets/create-pattern-detector/synthetic/cp_training_mix_v2_tessellation
 ```
 
-Future worktrees should link the mixed root when training:
+Future worktrees should link the current mixed root when training:
 
 ```bash
 scripts/data/link_shared_synthetic_data.sh cp_training_mix_v1
 PYTHONPATH=. python3.10 scripts/data/smoke_shared_synthetic_data.py --root data/generated/synthetic/cp_training_mix_v1
 ```
+
+Use `recipes/synthetic/tessellation_fold_program_v1.yaml` and
+`scripts/data/visualize_synthetic_folds.py` for the tessellation release. Do not
+mutate `cp_training_mix_v1`; build a new mixed release when tessellation samples
+are added to training. The first such external mix is
+`cp_training_mix_v2_tessellation` and should be compared against the promoted
+`MAX_EDGES=1200` baseline before becoming the default.
 
 See `docs/synthetic-fold-datasets.md` for generation, shard merge, folded-preview,
 and mix-building commands.

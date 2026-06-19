@@ -107,6 +107,12 @@ def analyze_sample(sample_id: str, row: dict[str, Any], fold: dict[str, Any], an
 
     tree = row.get("treeMetadata") or row.get("tree_metadata") or {}
     density = row.get("densityMetadata") or row.get("density_metadata") or {}
+    tessellation = (
+        row.get("tessellationMetadata")
+        or row.get("tessellation_metadata")
+        or fold.get("tessellation_metadata")
+        or {}
+    )
     return {
         "id": sample_id,
         "family": row.get("family"),
@@ -130,6 +136,16 @@ def analyze_sample(sample_id: str, row: dict[str, Any], fold: dict[str, Any], an
             "terminalCount": tree.get("terminalCount"),
             "nodeCount": tree.get("nodeCount"),
         },
+        "tessellation": {
+            "subfamily": tessellation.get("subfamily"),
+            "repeatX": tessellation.get("repeatX"),
+            "repeatY": tessellation.get("repeatY"),
+            "verticalCreaseLengthFraction": tessellation.get("verticalCreaseLengthFraction"),
+            "horizontalCreaseLengthFraction": tessellation.get("horizontalCreaseLengthFraction"),
+            "diagonalCreaseLengthFraction": tessellation.get("diagonalCreaseLengthFraction"),
+            "minRenderedSpacingPx1024": tessellation.get("minRenderedSpacingPx1024"),
+            "verticalBias": tessellation.get("verticalBias"),
+        },
     }
 
 
@@ -142,6 +158,8 @@ def build_report(samples: list[dict[str, Any]], skipped: list[dict[str, Any]], m
         "symmetryClass": Counter(sample["tree"].get("symmetryClass") for sample in samples),
         "symmetryVariant": Counter(sample["tree"].get("symmetryVariant") for sample in samples),
         "topology": Counter(sample["tree"].get("topology") for sample in samples),
+        "tessellationSubfamily": Counter(sample["tessellation"].get("subfamily") for sample in samples),
+        "tessellationVerticalBias": Counter(sample["tessellation"].get("verticalBias") for sample in samples),
     }
     merged_assignments = merge_counters(sample["assignments"] for sample in samples)
     merged_degree = merge_counters(sample["degree_histogram"] for sample in samples)
@@ -156,6 +174,16 @@ def build_report(samples: list[dict[str, Any]], skipped: list[dict[str, Any]], m
         "edges": summarize(sample["edges"] for sample in samples),
         "branch_depth": summarize(sample["tree"].get("branchDepth") for sample in samples if sample["tree"].get("branchDepth") is not None),
         "terminal_count": summarize(sample["tree"].get("terminalCount") for sample in samples if sample["tree"].get("terminalCount") is not None),
+        "tessellation_vertical_crease_length_fraction": summarize(
+            sample["tessellation"].get("verticalCreaseLengthFraction")
+            for sample in samples
+            if sample["tessellation"].get("verticalCreaseLengthFraction") is not None
+        ),
+        "tessellation_min_rendered_spacing_px_1024": summarize(
+            sample["tessellation"].get("minRenderedSpacingPx1024")
+            for sample in samples
+            if sample["tessellation"].get("minRenderedSpacingPx1024") is not None
+        ),
         "border_intersections": summarize(sample["border_intersections"] for sample in samples),
         "assignment_totals": clean_counter(merged_assignments),
         "degree_histogram": clean_counter(merged_degree),

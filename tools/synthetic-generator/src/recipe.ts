@@ -10,6 +10,7 @@ const DEFAULT_RECIPE: SyntheticRecipe = {
   families: {
     "treemaker-tree": 1,
     "rabbit-ear-fold-program": 0,
+    "tessellation-fold-program": 0,
   },
   complexityBuckets: [
     { name: "small", minCreases: 80, maxCreases: 180, weight: 0.35 },
@@ -67,6 +68,7 @@ function mergeRecipe(base: SyntheticRecipe, overrides: Partial<SyntheticRecipe>)
     complexityBuckets: overrides.complexityBuckets ?? base.complexityBuckets,
     renderVariants: overrides.renderVariants ?? base.renderVariants,
     treeMakerSampler: { ...(base.treeMakerSampler ?? {}), ...(overrides.treeMakerSampler ?? {}) },
+    tessellationSampler: { ...(base.tessellationSampler ?? {}), ...(overrides.tessellationSampler ?? {}) },
   };
 }
 

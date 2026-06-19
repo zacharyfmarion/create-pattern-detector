@@ -19,8 +19,8 @@ test("strict validation APIs are available", () => {
   expect(typeof ear.layer.solver).toBe("function");
 });
 
-test("synthetic generation exposes only TreeMaker and Rabbit Ear fold-program families", () => {
-  expect(availableFamilies()).toEqual(["treemaker-tree", "rabbit-ear-fold-program"]);
+test("synthetic generation exposes maintained fold-only families", () => {
+  expect(availableFamilies()).toEqual(["treemaker-tree", "rabbit-ear-fold-program", "tessellation-fold-program"]);
   for (const family of ["grid", "classic", "single-vertex", "dense-lattice"] as const) {
     expect(() =>
       generateFold({
@@ -37,19 +37,31 @@ test("synthetic generation exposes only TreeMaker and Rabbit Ear fold-program fa
 test("default recipe uses TreeMaker tree labels", async () => {
   const recipe = await loadRecipe();
   expect(recipe.name).toBe("treemaker_tree_v1");
-  expect(recipe.families).toEqual({ "treemaker-tree": 1, "rabbit-ear-fold-program": 0 });
+  expect(recipe.families).toEqual({ "treemaker-tree": 1, "rabbit-ear-fold-program": 0, "tessellation-fold-program": 0 });
   expect(recipe.validation.requireTreeMaker).toBe(true);
 });
 
 test("Rabbit Ear fold-program recipe loads as a supplemental strict family", async () => {
   const recipe = await loadRecipe("../../recipes/synthetic/rabbit_ear_fold_program_v1.yaml");
   expect(recipe.name).toBe("rabbit_ear_fold_program_v1");
-  expect(recipe.families).toEqual({ "treemaker-tree": 0, "rabbit-ear-fold-program": 1 });
+  expect(recipe.families).toEqual({ "treemaker-tree": 0, "rabbit-ear-fold-program": 1, "tessellation-fold-program": 0 });
   expect(recipe.validation).toMatchObject({
     strictGlobal: true,
     requireRabbitEarFoldProgram: true,
     requireTreeMaker: false,
   });
+});
+
+test("Tessellation fold-program recipe loads as a dense orthogonal supplement", async () => {
+  const recipe = await loadRecipe("../../recipes/synthetic/tessellation_fold_program_v1.yaml");
+  expect(recipe.name).toBe("tessellation_fold_program_v1");
+  expect(recipe.families).toEqual({ "treemaker-tree": 0, "rabbit-ear-fold-program": 0, "tessellation-fold-program": 1 });
+  expect(recipe.validation).toMatchObject({
+    strictGlobal: false,
+    requireTessellationFoldProgram: true,
+    requireTreeMaker: false,
+  });
+  expect(recipe.tessellationSampler?.subfamilyWeights).toEqual({ "orthogonal-bp-grid": 1 });
 });
 
 test("Rabbit Ear fold-program generation is deterministic by seed", () => {
@@ -68,6 +80,31 @@ test("Rabbit Ear fold-program generation is deterministic by seed", () => {
   expect(first.rabbit_ear_metadata?.appliedFoldCount).toBeGreaterThan(0);
   expect(first.rabbit_ear_metadata?.activeCreaseCount).toBeGreaterThanOrEqual(40);
   expect(first.label_policy?.labelSource).toBe("rabbit-ear-fold-program");
+});
+
+test("Tessellation fold-program generation is deterministic and vertical-heavy", () => {
+  const config = {
+    id: "tessellation-unit",
+    family: "tessellation-fold-program" as const,
+    seed: 24680,
+    numCreases: 180,
+    maxCreases: 360,
+    bucket: "small",
+    tessellationSampler: {
+      subfamilyWeights: { "orthogonal-bp-grid": 1 },
+      verticalBiasProbability: 1,
+      minRepeats: 6,
+      maxRepeats: 24,
+    },
+  };
+  const first = generateFold(config);
+  const second = generateFold(config);
+  expect(JSON.stringify(first)).toBe(JSON.stringify(second));
+  expect(first.tessellation_metadata?.generator).toBe("tessellation-fold-program");
+  expect(first.tessellation_metadata?.subfamily).toBe("orthogonal-bp-grid");
+  expect(first.tessellation_metadata?.activeCreaseCount).toBeGreaterThanOrEqual(180);
+  expect(first.tessellation_metadata?.verticalCreaseLengthFraction).toBeGreaterThanOrEqual(0.58);
+  expect(first.label_policy?.labelSource).toBe("tessellation-fold-program");
 });
 
 test("deterministic split helper preserves recipe ratios for smoke counts", () => {
