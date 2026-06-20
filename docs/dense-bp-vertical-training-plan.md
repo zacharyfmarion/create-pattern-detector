@@ -29,10 +29,10 @@ The baseline before Experiment A was:
 
 The current promoted model after the tessellation probe is:
 
-- Checkpoint manifest:
-  `artifacts/checkpoints/runpod-v3-no-guide-grid-close-pair-dense-edges-tess15-weighted-4090.json`
-- Checkpoint:
-  `checkpoints/runpod_v3_no_guide_grid_close_pair_dense_edges_tess15_weighted_probe_20260619/full/latest.pt`
+- Current pointer:
+  `artifacts/checkpoints/current-browser-model.json`
+- Resolve the checkpoint with:
+  `python scripts/checkpoint/current_checkpoint.py --field checkpoint`
 - Training edge filter: `maxEdges: 1200`
 - Init: superseded max1200 dense-edge model, no head reinitialization
 - Training sampler: `v3-tessellation-15pct`
@@ -80,7 +80,8 @@ Keep fixed:
   - `junction_focal_alpha=2.0`
   - `junction_focal_beta=4.0`
 - Init checkpoint for the first probe: superseded no-guide-grid close-pair R1
-- Init checkpoint for follow-up probes: current promoted tess15 weighted model
+- Init checkpoint for follow-up probes: current promoted model pointer
+  (`artifacts/checkpoints/current-browser-model.json`)
 - Do not reinitialize heads
 - Do not add tessellation data
 
@@ -101,10 +102,10 @@ The canonical launcher for dense-edge follow-up probes is:
 scripts/training/run_cpline_runpod_v3_no_guide_grid_close_pair_dense_edges_probe.sh
 ```
 
-It defaults to `MAX_EDGES=1200`, initializes from the current promoted tess15
-weighted checkpoint, leaves `REINIT_HEADS` empty, and verifies the radius-3
-close-pair configuration after preflight and after training. Set an explicit
-fresh `OUTPUT_ROOT` for any follow-up probe.
+It defaults to `MAX_EDGES=1200`, initializes from the current promoted model
+pointer, leaves `REINIT_HEADS` empty, and verifies the radius-3 close-pair
+configuration after preflight and after training. Set an explicit fresh
+`OUTPUT_ROOT` for any follow-up probe.
 
 Suggested cheap probe shape:
 
@@ -241,8 +242,8 @@ retired because they launched a non-promotable dense-head diagnostic with
 Before spending RunPod budget:
 
 1. Confirm the selected manifest exists on the pod.
-2. Confirm the selected checkpoint is the current promoted dense-edge/tess15
-   model.
+2. Confirm the selected checkpoint resolves through
+   `artifacts/checkpoints/current-browser-model.json`.
 3. Print the resolved `MAX_EDGES`.
 4. Print the resolved close-pair junction parameters.
 5. Print `train_family_sampling` and the selected train source counts from

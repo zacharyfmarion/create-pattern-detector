@@ -58,8 +58,12 @@ loading or exporting a model.
 Current downstream/browser model:
 
 ```text
-artifacts/checkpoints/runpod-v3-no-guide-grid-close-pair-dense-edges-tess15-weighted-4090.json
+artifacts/checkpoints/current-browser-model.json
 ```
+
+That pointer names the current checkpoint manifest. Prefer updating the pointer
+when promoting a replacement model instead of repeating the new model ID, path,
+or checksum across docs and scripts.
 
 Historical Python Phase 5 / V1 baseline:
 
@@ -156,10 +160,11 @@ metadata corrections.
 
 ## Loading A Checkpoint
 
-For the current downstream/browser model, load:
+For the current downstream/browser model, resolve the checkpoint through the
+tracked pointer:
 
-```text
-checkpoints/runpod_v3_no_guide_grid_close_pair_dense_edges_tess15_weighted_probe_20260619/full/latest.pt
+```bash
+python scripts/checkpoint/current_checkpoint.py --field checkpoint
 ```
 
 Use the config stored inside the checkpoint to construct the model. Important

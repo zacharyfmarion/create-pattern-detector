@@ -1,0 +1,7 @@
+{
+  "schemaVersion": 1,
+  "schema": "create-pattern-detector/current-checkpoint-pointer/v1",
+  "role": "current-downstream-browser-model",
+  "checkpointManifest": "artifacts/checkpoints/runpod-v3-no-guide-grid-close-pair-dense-edges-tess15-weighted-4090.json",
+  "updatedAt": "2026-06-19"
+}

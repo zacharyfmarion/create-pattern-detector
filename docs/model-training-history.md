@@ -5,18 +5,25 @@ exports. Read this before using, replacing, exporting, or retraining a model.
 
 ## Current Model
 
-The current downstream/browser model is the V3 no-guide-grid close-pair
-dense-edge 15% tessellation weighted checkpoint:
+The tracked source of truth for the current downstream/browser model is:
 
 ```text
-artifacts/checkpoints/runpod-v3-no-guide-grid-close-pair-dense-edges-tess15-weighted-4090.json
-checkpoints/runpod_v3_no_guide_grid_close_pair_dense_edges_tess15_weighted_probe_20260619/full/latest.pt
+artifacts/checkpoints/current-browser-model.json
 ```
 
-It warm-started from the previous dense-edge max1200 checkpoint, kept all
-heads, preserved the `max_edges=1200` training envelope, added the corrected
-15% tessellation mix with `TRAIN_FAMILY_SAMPLING=v3-tessellation-15pct`, and
-preserved the close-pair radius-3 junction-offset recipe.
+That pointer currently resolves to the V3 no-guide-grid close-pair dense-edge
+15% tessellation weighted checkpoint. It warm-started from the previous
+dense-edge max1200 checkpoint, kept all heads, preserved the `max_edges=1200`
+training envelope, added the corrected 15% tessellation mix with
+`TRAIN_FAMILY_SAMPLING=v3-tessellation-15pct`, and preserved the close-pair
+radius-3 junction-offset recipe.
+
+Use the helper when a command needs the current path:
+
+```bash
+python scripts/checkpoint/current_checkpoint.py --field checkpoint
+python scripts/checkpoint/current_checkpoint.py --field checkpoint-manifest
+```
 In `tree-maker-rust` / Ori Studio, the stable product default path is:
 
 ```text
@@ -31,7 +38,9 @@ apps/web/public/models/cp-detector-v3-tess15-weighted-20260619/manifest.json
 apps/web/public/models/cp-detector-v3-tess15-weighted-20260619/model.onnx
 ```
 
-Important settings:
+Important settings are recorded in the checkpoint manifest resolved by the
+pointer. Operational defaults should read that manifest or the pointer rather
+than copying the current path or checksum into another file. As of this update:
 
 - PyTorch checkpoint SHA-256:
   `0827adc76d7d33b67e7121f912ef06378649b62dae59340cc2a1ab7e0d39988d`
@@ -203,8 +212,8 @@ That script sets and verifies the R1 close-pair parameters
 `run_cpline_runpod_v3_no_guide_grid_{probe,full}.sh` names intentionally fail
 with an "Are you sure?" message unless explicitly acknowledged.
 
-For controlled dense-edge follow-up probes from the current promoted tess15
-weighted model, use:
+For controlled dense-edge follow-up probes from the current promoted model
+pointer, use:
 
 ```bash
 scripts/training/run_cpline_runpod_v3_no_guide_grid_close_pair_dense_edges_probe.sh
@@ -222,10 +231,11 @@ dense-edge base exposure while adding 12% orthogonal BP-grid and 3% Miura
 tessellations. Do not use `natural` or plain `balanced` sampling for that mix
 unless intentionally running a sampler ablation.
 
-The corrected tessellation run is registered as the current promoted model at:
+The corrected tessellation run is registered in the current promoted model
+pointer:
 
 ```text
-artifacts/checkpoints/runpod-v3-no-guide-grid-close-pair-dense-edges-tess15-weighted-4090.json
+artifacts/checkpoints/current-browser-model.json
 ```
 
 It improves BP orthogonal effective recall from `0.6746` to `0.7547` and

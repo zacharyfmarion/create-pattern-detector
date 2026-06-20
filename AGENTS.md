@@ -147,11 +147,11 @@ throwaway worktree.
 
 Before replacing, exporting, or using a checkpoint, read
 `docs/model-training-history.md` first, then `docs/checkpoint-management.md`.
-The current downstream/browser model is the corrected V3 no-guide-grid
-close-pair dense-edge 15% tessellation run registered at
-`artifacts/checkpoints/runpod-v3-no-guide-grid-close-pair-dense-edges-tess15-weighted-4090.json`.
-It is exported in `tree-maker-rust` under the stable `cp-detector-v3` product
-path and the versioned `cp-detector-v3-tess15-weighted-20260619` path.
+The tracked source of truth for the current downstream/browser model is
+`artifacts/checkpoints/current-browser-model.json`, which points at the current
+checkpoint manifest. Do not duplicate the current checkpoint path, model ID, or
+ONNX SHA in new docs or scripts; use that pointer or
+`scripts/checkpoint/current_checkpoint.py`.
 
 Do not confuse the previous V3 close-pair R1 checkpoint, the no-guide-grid R1,
 max700 dense-edge, or max1200 dense-edge checkpoints that this run superseded,
@@ -199,14 +199,15 @@ These canonical launchers set and verify the required R1 close-pair recipe:
 retired and fail with an "Are you sure?" message because they previously
 launched a dense-head diagnostic with `junction_offset_radius_px=0.0`.
 
-For dense BP follow-up probes from the current promoted tess15 weighted model,
+For dense BP follow-up probes from the current promoted model pointer,
 use:
 
 ```bash
 scripts/training/run_cpline_runpod_v3_no_guide_grid_close_pair_dense_edges_probe.sh
 ```
 
-It defaults to the promoted `MAX_EDGES=1200` checkpoint and verifies the same
+It resolves the promoted `MAX_EDGES=1200` checkpoint through
+`artifacts/checkpoints/current-browser-model.json` and verifies the same
 radius-3 close-pair recipe. It refuses to write into an existing `OUTPUT_ROOT`
 unless `ALLOW_EXISTING_OUTPUT_ROOT=1` is set, so use a fresh explicit
 `OUTPUT_ROOT` for new probes.
