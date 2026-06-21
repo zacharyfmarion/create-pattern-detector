@@ -1,6 +1,8 @@
 import { runBpStudioLayout, type BpStudioLayoutContour, type BpStudioLayoutGraphics, type BpStudioLayoutLine } from "./bp-studio-layout.ts";
 import { solveWithBpStudioOptimizer } from "./bp-studio-optimizer.ts";
 import { SeededRandom } from "./random.ts";
+import { fillBoxPleatedGaps, type GapRect, type OccupiedPolygon } from "./box-pleated-gap-fill.ts";
+import type { OriSegment } from "./ori-parser.ts";
 import type { BpOptimizerHierarchy, BpOptimizerRequest, BpOptimizerResult } from "./bp-studio-optimizer.ts";
 
 export type BoxPleatedPackingSymmetry = "vertical" | "horizontal" | "none";
@@ -255,6 +257,41 @@ async function generateTightBoxPleatedPacking(config: BoxPleatedPackingConfig): 
 
 export function validateBoxPleatedPacking(packing: BoxPleatedPacking): string[] {
   return validatePacking(packing);
+}
+
+export interface PackingGapFill {
+  /** New filler flaps (sheet coordinates) that consume the empty paper. */
+  flaps: GapRect[];
+  /** Straight-skeleton ridge creases for the filler flaps. */
+  ridges: OriSegment[];
+  /** True when all empty paper was filled (the packing is complete, rule #4). */
+  complete: boolean;
+  /** Empty regions that could not be filled (the packing should be rejected). */
+  unresolved: GapRect[];
+}
+
+/**
+ * Fill the empty paper of a BP Studio packing with filler flaps so it consumes
+ * all paper (ODS polygon-packing rule #4). Flap, river, and stretch-device
+ * contours are treated as occupied; the remaining empty rectangles are tiled
+ * with valid flaps. A packing with an unfillable void (e.g. a 1-wide fully
+ * interior strip) is reported incomplete and should be rejected.
+ */
+export function fillPackingGaps(packing: BoxPleatedPacking): PackingGapFill {
+  const occupied: OccupiedPolygon[] = [];
+  for (const object of packing.layout.objects) {
+    if (object.kind === "root") continue;
+    for (const contour of object.contours) {
+      occupied.push({ outer: contour.outer, inner: contour.inner });
+    }
+  }
+  const result = fillBoxPleatedGaps(packing.sheet, occupied);
+  return {
+    flaps: result.flaps,
+    ridges: result.ridges,
+    complete: result.resolved,
+    unresolved: result.unresolved,
+  };
 }
 
 export function renderBoxPleatedPackingSvg(
