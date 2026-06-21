@@ -125,19 +125,74 @@ asymmetric 8-leaf no-stretch yield to ~12% and leaned on the 96-attempt rejectio
 cap. Per-sample banded seeding restores ~100% first-attempt yield across 4-12
 leaves.
 
+## Crease Construction Pipeline
+
+Hand-authored Oriedita packings (paper boundary + ridge skeleton; blue packing
+outlines are annotation only) are turned into fully labeled crease patterns by a
+deterministic pipeline, validated against author ground truth and a second
+independent oracle.
+
+- `ori-parser.ts` - split an Oriedita `.ori` into fixtures `{sheet, boundary,
+  ridges, packing}`.
+- `box-pleated-molecule.ts` - the molecule geometry:
+  - **Flap centers**: a ridge endpoint that lies on no hinge (or the convergence
+    end). Rivers (non-solid packing regions) are excluded.
+  - **Axials / edge-axials**: contours launched from flap centers, reflecting
+    across ridges (ODS Fig 13.26) and terminating at ridges or the paper edge.
+    Edge-axials run along the paper boundary (not folds, but level-0 sources).
+  - **Axial+n pleats**: iterate the offset rule - seed one unit off an axial in
+    empty paper, march with the axial rules - until the molecule is full.
+  - **Hinges**: resolve interior junctions that fail Kawasaki/even-degree, one
+    edge-biased hinge at a time, re-checking after each.
+- `box-pleated-assignment.ts` - M/V assignment: axial-family by pleat-level
+  parity (outermost = mountain); ridges by center-out alternation; hinges seeded
+  to satisfy Maekawa; a ridge-crossing hinge repair and a min-conflicts flip
+  repair drive interior Maekawa conflicts to zero.
+- `box-pleated-foldcheck.ts` - global flat-foldability via rabbit-ear's layer
+  solver (cross-validated against the treemaker-rust flat folder). Local
+  validity (Kawasaki + Maekawa) does not imply global foldability; several
+  fixtures assign Maekawa-valid but are not globally foldable. This is a known
+  open gap and is currently a measurement, not a hard gate.
+
+## Gap Filling (consuming all paper, ODS rule #4)
+
+A valid packing must use every bit of paper; BP Studio's optimizer leaves
+rectangular voids. `box-pleated-gap-fill.ts` + `box-pleated-flap-tiler.ts` fill
+them:
+
+- Find connected empty regions and tile each exactly with flap rectangles.
+- A flap is valid iff its **reflected "full" rectangle** (mirrored across its
+  paper-boundary-coincident sides) has an even shorter side, so its
+  straight-skeleton ridge nodes land on integer grid points. Placing flaps
+  directly in the region keeps each flap's center on the paper.
+- An exact top-left-anchored backtracker tiles arbitrary cell-sets (handles
+  non-rectangular regions). A cheap reject (interior region with odd area) plus a
+  node budget keep unsolvable regions from exhausting the search.
+- `fillPackingGaps(packing)` returns the filler flaps/ridges, `complete`, and any
+  `unresolved` voids so incomplete packings are rejected.
+
+Known genuine failure cases (correctly rejected, not bugs):
+- A **1-wide interior strip** whose long sides are both interior. A 1-wide flap's
+  skeleton spine is at the half-grid centerline; only reflecting across a long
+  side on the paper edge snaps it onto the grid, so an interior 1-wide strip is
+  unfillable as a flap.
+- A **fully-interior odd-by-odd** void: no boundary to reflect against, and odd
+  area cannot be tiled by even-area flaps.
+
+These voids are artifacts of the stretched (non-grid) tight BP packings; on a
+clean grid packing they would not appear. Over a 50-packing tight stress run
+roughly 40-45% are complete; most rejections are these genuine cases.
+
 ## Next Stages
 
-1. Replace the temporary random sampler with a tree/symmetry sampler designed
+1. **Pythagorean stretches**: the tight optimizer emits stretch-device gussets
+   (off-grid). Their crease construction is well defined but not yet folded into
+   the axial/pleat/hinge/MV pipeline - the main blocker for BP packings as the CP
+   source.
+2. Close the global flat-foldability gap (make M/V assignment layer-aware).
+3. Convert filled packings to `.fold` export for training mixes.
+4. Replace the temporary random sampler with a tree/symmetry sampler designed
    around target flap counts, branch-depth distributions, and rejection rates.
-2. Decide whether to vendor a pinned BP Studio core snapshot, invoke a local
-   clone as an external tool, or port the minimum required core modules.
-3. Convert BP Studio layout graphics into crease-pattern data:
-   - hinge contours as auxiliary or valley candidates;
-   - ridge creases as mountain candidates;
-   - stretch-device axis-parallel lines as valley candidates;
-   - explicit provenance for every generated crease.
-4. Add foldability QA and `.fold` export before adding the family to training
-   mixes.
 
 ## Commands
 
