@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { canLoadBpStudioOptimizer } from "../src/bp-studio-optimizer.ts";
+import { resolveBpStudioRoot } from "../src/bp-studio-root.ts";
 import {
   generateBoxPleatedPacking,
   renderBoxPleatedPackingSvg,
@@ -10,7 +11,7 @@ import {
   renderBoxPleatedCreaseScaffoldSvg,
 } from "../src/box-pleated-scaffold.ts";
 
-const BP_STUDIO_ROOT = process.env.BP_STUDIO_ROOT ?? "/tmp/bp-studio-source";
+const BP_STUDIO_ROOT = resolveBpStudioRoot();
 const bpOptimizerAvailable = await canLoadBpStudioOptimizer(BP_STUDIO_ROOT);
 const bpTest = bpOptimizerAvailable ? test : test.skip;
 

@@ -1,6 +1,7 @@
 import { access } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { resolveBpStudioRoot } from "./bp-studio-root.ts";
 
 export interface BpOptimizerFlapRequest {
   id: number;
@@ -60,14 +61,13 @@ interface RawOptimizerModule {
   default(options: { print?: (message: string) => void; checkInterrupt?: () => boolean }): Promise<RawOptimizerInstance>;
 }
 
-const DEFAULT_BP_STUDIO_ROOT = "/tmp/bp-studio-source";
 const UINT_MAX = 4294967295;
 
 export async function solveWithBpStudioOptimizer(
   request: BpOptimizerRequest,
   options: BpOptimizerOptions = {},
 ): Promise<BpOptimizerResult> {
-  const root = options.bpStudioRoot ?? process.env.BP_STUDIO_ROOT ?? DEFAULT_BP_STUDIO_ROOT;
+  const root = resolveBpStudioRoot(options.bpStudioRoot);
   const modulePath = await resolveOptimizerModule(root);
   const module = await import(pathToFileURL(modulePath).href) as RawOptimizerModule;
   const instance = await module.default({
@@ -97,7 +97,7 @@ export async function solveWithBpStudioOptimizer(
 
 export async function canLoadBpStudioOptimizer(bpStudioRoot?: string): Promise<boolean> {
   try {
-    await resolveOptimizerModule(bpStudioRoot ?? process.env.BP_STUDIO_ROOT ?? DEFAULT_BP_STUDIO_ROOT);
+    await resolveOptimizerModule(resolveBpStudioRoot(bpStudioRoot));
     return true;
   } catch {
     return false;

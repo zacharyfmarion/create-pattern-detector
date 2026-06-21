@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { resolveBpStudioRoot } from "./bp-studio-root.ts";
 
 import type { BoxPleatedBounds } from "./box-pleated-packing.ts";
 
@@ -32,7 +33,6 @@ export interface BpStudioLayoutResult {
   graphics: Record<string, BpStudioLayoutGraphics>;
 }
 
-const DEFAULT_BP_STUDIO_ROOT = "/tmp/bp-studio-source";
 
 const HEADLESS_BP_STUDIO_LAYOUT_SCRIPT = `
 const input = await new Response(Bun.stdin.stream()).json();
@@ -53,7 +53,7 @@ console.log(JSON.stringify({
 `;
 
 export async function runBpStudioLayout(input: BpStudioLayoutInput): Promise<BpStudioLayoutResult> {
-  const root = input.bpStudioRoot ?? process.env.BP_STUDIO_ROOT ?? DEFAULT_BP_STUDIO_ROOT;
+  const root = resolveBpStudioRoot(input.bpStudioRoot);
   const proc = Bun.spawn({
     cmd: ["bun", "--eval", HEADLESS_BP_STUDIO_LAYOUT_SCRIPT],
     cwd: root,

@@ -115,7 +115,7 @@ function parseArgs(argv: string[]): CliArgs {
     else if (arg === "--show-contours") args.showContours = true;
     else if (arg === "--scaffold") args.scaffold = true;
     else if (arg === "--help" || arg === "-h") {
-      console.log("Usage: bun run box-pleated-preview -- --count 8 --out /tmp/box-pleated-packings --bp-studio-root /tmp/bp-studio-source [--tight [--restarts 16]] [--no-stretches] [--show-contours] [--scaffold]");
+      console.log("Usage: bun run box-pleated-preview -- --count 8 --out /tmp/box-pleated-packings [--bp-studio-root <clone>] [--tight [--restarts 16]] [--no-stretches] [--show-contours] [--scaffold]");
       process.exit(0);
     } else {
       throw new Error(`Unknown argument: ${arg}`);
