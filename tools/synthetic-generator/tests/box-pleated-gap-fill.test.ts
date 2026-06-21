@@ -89,3 +89,27 @@ test("flap ridges of an even-shorter rectangle land on grid (spine nodes integer
     expect(Number.isInteger(n.y)).toBe(true);
   }
 });
+
+test("non-rectangular (L-shaped) empty region is tiled directly", () => {
+  // L-shape: occupy the top-right quadrant of an 8x8 sheet, leaving an L gap.
+  const res = fillBoxPleatedGaps({ width: 8, height: 8 }, [rectPoly(4, 0, 8, 4)]);
+  expect(res.resolved).toBe(true);
+  expect(area(res.flaps)).toBe(48); // 8x8 - 4x4
+});
+
+test("an unsolvable interior odd void rejects instantly (no exponential search)", () => {
+  // Frame a 9x9 interior void (odd area). Must reject fast, not hang.
+  const pad = 2;
+  const W = 9 + 2 * pad;
+  const H = 9 + 2 * pad;
+  const occupied = [
+    rectPoly(0, 0, W, pad),
+    rectPoly(0, H - pad, W, H),
+    rectPoly(0, 0, pad, H),
+    rectPoly(W - pad, 0, W, H),
+  ];
+  const start = Date.now();
+  const res = fillBoxPleatedGaps({ width: W, height: H }, occupied);
+  expect(Date.now() - start).toBeLessThan(500);
+  expect(res.resolved).toBe(false);
+});

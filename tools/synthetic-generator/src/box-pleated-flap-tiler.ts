@@ -1,11 +1,17 @@
 // Flap-tiling solver for the gap-filling packing problem.
 //
-// Tile a W x H region (each side labeled paper-boundary or interior) exactly
-// with valid flap rectangles. A flap is valid when the straight skeleton of its
-// "full" rectangle - the flap reflected across its boundary-coincident sides -
-// has its nodes on integer grid points, i.e. min(fullW, fullH) is even. Placing
-// flaps directly in the region (rather than reflecting and slicing) keeps every
-// flap's center on the paper by construction.
+// Tile an empty region exactly with valid flap rectangles. A flap is valid when
+// the straight skeleton of its "full" rectangle - the flap reflected across its
+// paper-boundary-coincident sides - has its nodes on integer grid points, i.e.
+// min(fullW, fullH) is even. Placing flaps directly in the region (rather than
+// reflecting and slicing) keeps every flap's center on the paper.
+//
+// Two entry points share one backtracker:
+//   - tileRegion: a W x H rectangle with each side labeled paper-boundary or
+//     interior (used by the region fixtures/tests).
+//   - tileEmptyCells: an arbitrary cell-set within a sheet, where any flap side
+//     coinciding with the sheet edge is a paper boundary (used on real packings,
+//     handling non-rectangular empty regions directly).
 //
 // Regions are small, so an exact top-left-anchored backtracking tiler suffices.
 
@@ -19,30 +25,81 @@ export interface TilingResult {
   solved: boolean;
 }
 
+interface FreeSides {
+  left: boolean;
+  right: boolean;
+  top: boolean;
+  bottom: boolean;
+}
+
+/** Which sides of a flap rectangle coincide with the paper boundary. */
+type FreeSidesFn = (r: GapRect) => FreeSides;
+
 const EPS = 1e-9;
 
 export function tileRegion(W: number, H: number, edges: RegionEdges): TilingResult {
   const occupied: boolean[][] = Array.from({ length: H }, () => new Array<boolean>(W).fill(false));
-  const flaps = solve(occupied, W, H, edges);
+  const freeFn: FreeSidesFn = (r) => ({
+    left: r.x0 === 0 && edges.left,
+    right: r.x1 === W && edges.right,
+    top: r.y0 === 0 && edges.top,
+    bottom: r.y1 === H && edges.bottom,
+  });
+  return tile(occupied, W, H, freeFn);
+}
+
+/**
+ * Tile the empty cells of a sheet (cells marked false in `occupied`) with valid
+ * flaps. Handles non-rectangular empty regions directly. A flap side on the
+ * sheet edge is a paper boundary (free); a side abutting an occupied cell is
+ * interior.
+ */
+// Proving a region untileable can require exhausting the backtracker's whole
+// search space, so we cap the number of placements explored. Hitting the cap
+// reports the region as unsolved (the packing is then rejected) rather than
+// hanging. Solvable regions are found well within this budget.
+const MAX_NODES = 200_000;
+
+export function tileEmptyCells(occupied: boolean[][], W: number, H: number): TilingResult {
+  const grid = occupied.map((row) => row.slice());
+  const freeFn: FreeSidesFn = (r) => ({
+    left: r.x0 === 0,
+    right: r.x1 === W,
+    top: r.y0 === 0,
+    bottom: r.y1 === H,
+  });
+
+  // Necessary condition: a fully-interior region (no cell on a sheet edge) can
+  // only be tiled by even-area flaps, so an odd total area is untileable. Cheap
+  // reject avoids exhausting the backtracker on the common odd-interior void.
+  if (!touchesSheetEdge(grid, W, H) && emptyArea(grid, W, H) % 2 === 1) {
+    return { flaps: [], ridges: [], solved: false };
+  }
+  return tile(grid, W, H, freeFn);
+}
+
+function tile(occupied: boolean[][], W: number, H: number, freeFn: FreeSidesFn): TilingResult {
+  const flaps = solve(occupied, W, H, freeFn, { nodes: 0 });
   if (!flaps) return { flaps: [], ridges: [], solved: false };
-  const ridges = flaps.flatMap((f) => croppedFlapRidges(f, W, H, edges));
+  const ridges = flaps.flatMap((f) => croppedFlapRidges(f, freeFn));
   return { flaps, ridges, solved: true };
 }
 
-/** Backtracking exact tiling. Returns the flap list, or null if untileable. */
-function solve(occupied: boolean[][], W: number, H: number, edges: RegionEdges): GapRect[] | null {
+/** Backtracking exact tiling. Returns the flap list, or null if untileable / budget exhausted. */
+function solve(occupied: boolean[][], W: number, H: number, freeFn: FreeSidesFn, budget: { nodes: number }): GapRect[] | null {
   const anchor = firstEmpty(occupied, W, H);
   if (!anchor) return [];
   const [cx, cy] = anchor;
-  // Try larger flaps first (fewer pieces). The top-left-most empty cell must be
-  // the top-left corner of some flap, so anchor there.
+  // The top-left-most empty cell must be the top-left corner of some flap, so
+  // anchor there. Try larger flaps first (fewer pieces).
   for (let x1 = W; x1 > cx; x1--) {
     for (let y1 = H; y1 > cy; y1--) {
       const rect: GapRect = { x0: cx, y0: cy, x1, y1 };
       if (!rectEmpty(occupied, rect)) continue;
-      if (!flapValid(rect, W, H, edges)) continue;
+      if (!flapValid(rect, freeFn)) continue;
+      if (++budget.nodes > MAX_NODES) return null;
       setRect(occupied, rect, true);
-      const rest = solve(occupied, W, H, edges);
+      const rest = solve(occupied, W, H, freeFn, budget);
       if (rest) return [rect, ...rest];
       setRect(occupied, rect, false);
     }
@@ -50,30 +107,33 @@ function solve(occupied: boolean[][], W: number, H: number, edges: RegionEdges):
   return null;
 }
 
+function emptyArea(occupied: boolean[][], W: number, H: number): number {
+  let n = 0;
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (!occupied[y][x]) n++;
+  return n;
+}
+
+function touchesSheetEdge(occupied: boolean[][], W: number, H: number): boolean {
+  for (let x = 0; x < W; x++) if (!occupied[0][x] || !occupied[H - 1][x]) return true;
+  for (let y = 0; y < H; y++) if (!occupied[y][0] || !occupied[y][W - 1]) return true;
+  return false;
+}
+
 /** A flap is valid iff its reflected "full" rectangle has an even shorter side. */
-export function flapValid(r: GapRect, W: number, H: number, edges: RegionEdges): boolean {
+function flapValid(r: GapRect, freeFn: FreeSidesFn): boolean {
   const w = r.x1 - r.x0;
   const h = r.y1 - r.y0;
-  const free = freeSides(r, W, H, edges);
+  const free = freeFn(r);
   const fullW = free.left || free.right ? 2 * w : w;
   const fullH = free.top || free.bottom ? 2 * h : h;
   return Math.min(fullW, fullH) % 2 === 0;
 }
 
-function freeSides(r: GapRect, W: number, H: number, edges: RegionEdges) {
-  return {
-    left: r.x0 === 0 && edges.left,
-    right: r.x1 === W && edges.right,
-    top: r.y0 === 0 && edges.top,
-    bottom: r.y1 === H && edges.bottom,
-  };
-}
-
 /** Ridge creases of a placed flap: skeleton of the reflected full rect, cropped to the flap. */
-function croppedFlapRidges(r: GapRect, W: number, H: number, edges: RegionEdges): OriSegment[] {
+function croppedFlapRidges(r: GapRect, freeFn: FreeSidesFn): OriSegment[] {
   const w = r.x1 - r.x0;
   const h = r.y1 - r.y0;
-  const free = freeSides(r, W, H, edges);
+  const free = freeFn(r);
   const full: GapRect = {
     x0: free.left ? r.x0 - w : r.x0,
     x1: free.right ? r.x1 + w : r.x1,

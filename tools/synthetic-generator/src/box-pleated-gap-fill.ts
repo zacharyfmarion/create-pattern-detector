@@ -21,8 +21,7 @@
 // false; callers reject such packings.
 
 import type { GridPoint, OriSegment } from "./ori-parser.ts";
-import type { RegionEdges } from "./box-pleated-region-fixtures.ts";
-import { tileRegion } from "./box-pleated-flap-tiler.ts";
+import { tileEmptyCells } from "./box-pleated-flap-tiler.ts";
 
 export interface GapRect {
   x0: number;
@@ -62,32 +61,17 @@ export function fillBoxPleatedGaps(
   const ridges: OriSegment[] = [];
   const unresolved: GapRect[] = [];
   for (const region of regions) {
-    const bbox = boundingRect(region);
-    // Only solid rectangular regions are tileable by axis-aligned flaps.
-    const solid = region.length === (bbox.x1 - bbox.x0) * (bbox.y1 - bbox.y0);
-    // A region side is a free paper boundary when it lies on the sheet edge.
-    const edges: RegionEdges = {
-      left: bbox.x0 === 0,
-      right: bbox.x1 === W,
-      top: bbox.y0 === 0,
-      bottom: bbox.y1 === H,
-    };
-    const rw = bbox.x1 - bbox.x0;
-    const rh = bbox.y1 - bbox.y0;
-    const tiling = solid ? tileRegion(rw, rh, edges) : { flaps: [], ridges: [], solved: false };
+    // Tile this region's actual cells (in sheet coordinates), so non-rectangular
+    // empty regions are handled directly and flap free-sides come from the sheet
+    // edge. Mark everything occupied except this region's cells.
+    const grid: boolean[][] = Array.from({ length: H }, () => new Array<boolean>(W).fill(true));
+    for (const [x, y] of region) grid[y][x] = false;
+    const tiling = tileEmptyCells(grid, W, H);
     if (tiling.solved) {
-      // Translate region-local coordinates back to the sheet.
-      for (const f of tiling.flaps) {
-        flaps.push({ x0: f.x0 + bbox.x0, y0: f.y0 + bbox.y0, x1: f.x1 + bbox.x0, y1: f.y1 + bbox.y0 });
-      }
-      for (const r of tiling.ridges) {
-        ridges.push({
-          a: { x: r.a.x + bbox.x0, y: r.a.y + bbox.y0 },
-          b: { x: r.b.x + bbox.x0, y: r.b.y + bbox.y0 },
-        });
-      }
+      flaps.push(...tiling.flaps);
+      ridges.push(...tiling.ridges);
     } else {
-      unresolved.push(bbox);
+      unresolved.push(boundingRect(region));
     }
   }
 
