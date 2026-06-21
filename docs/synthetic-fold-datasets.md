@@ -18,6 +18,11 @@ No image augmentation is part of this step. The goal here is diverse, validated
 `.fold` graph data. Rendering style/noise augmentation belongs to the later
 image-training phase.
 
+Box-pleated uniaxial data is being developed separately from the current
+fold-only releases. See
+`implementations-plans/box-pleated-synthetic-data.md` for the BP Studio-derived
+packing plan and current preview-only implementation.
+
 ## What Was Added
 
 - `tools/synthetic-generator/src/rabbit-ear-fold-program.ts`
