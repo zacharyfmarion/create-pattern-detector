@@ -21,6 +21,8 @@
 // false; callers reject such packings.
 
 import type { GridPoint, OriSegment } from "./ori-parser.ts";
+import type { RegionEdges } from "./box-pleated-region-fixtures.ts";
+import { tileRegion } from "./box-pleated-flap-tiler.ts";
 
 export interface GapRect {
   x0: number;
@@ -47,19 +49,9 @@ export interface GapFillResult {
 
 const EPS = 1e-9;
 
-export interface GapFillOptions {
-  /**
-   * Allow flaps whose center rests on the paper edge to absorb odd parity (the
-   * edge-crop case): an odd region touching the boundary is reflected across the
-   * edge into an even rectangle, decomposed, and cropped back to the paper.
-   */
-  edgeCrop?: boolean;
-}
-
 export function fillBoxPleatedGaps(
   sheet: { width: number; height: number },
   occupied: OccupiedPolygon[],
-  options: GapFillOptions = {},
 ): GapFillResult {
   const W = Math.round(sheet.width);
   const H = Math.round(sheet.height);
@@ -71,80 +63,35 @@ export function fillBoxPleatedGaps(
   const unresolved: GapRect[] = [];
   for (const region of regions) {
     const bbox = boundingRect(region);
-    // Only solid rectangular regions are fillable by axis-aligned flaps.
+    // Only solid rectangular regions are tileable by axis-aligned flaps.
     const solid = region.length === (bbox.x1 - bbox.x0) * (bbox.y1 - bbox.y0);
-    const filled = solid ? fillRect(bbox, W, H, options.edgeCrop ?? false) : null;
-    if (filled) {
-      flaps.push(...filled.flaps);
-      ridges.push(...filled.ridges);
+    // A region side is a free paper boundary when it lies on the sheet edge.
+    const edges: RegionEdges = {
+      left: bbox.x0 === 0,
+      right: bbox.x1 === W,
+      top: bbox.y0 === 0,
+      bottom: bbox.y1 === H,
+    };
+    const rw = bbox.x1 - bbox.x0;
+    const rh = bbox.y1 - bbox.y0;
+    const tiling = solid ? tileRegion(rw, rh, edges) : { flaps: [], ridges: [], solved: false };
+    if (tiling.solved) {
+      // Translate region-local coordinates back to the sheet.
+      for (const f of tiling.flaps) {
+        flaps.push({ x0: f.x0 + bbox.x0, y0: f.y0 + bbox.y0, x1: f.x1 + bbox.x0, y1: f.y1 + bbox.y0 });
+      }
+      for (const r of tiling.ridges) {
+        ridges.push({
+          a: { x: r.a.x + bbox.x0, y: r.a.y + bbox.y0 },
+          b: { x: r.b.x + bbox.x0, y: r.b.y + bbox.y0 },
+        });
+      }
     } else {
       unresolved.push(bbox);
     }
   }
 
   return { flaps, ridges, resolved: unresolved.length === 0, unresolved };
-}
-
-/** Fill one rectangular gap. Tries interior flaps, then edge-crop if allowed. */
-function fillRect(r: GapRect, W: number, H: number, edgeCrop: boolean): { flaps: GapRect[]; ridges: OriSegment[] } | null {
-  const interior = decomposeRect(r);
-  if (interior) return { flaps: interior, ridges: interior.flatMap(flapRidges) };
-  if (!edgeCrop) return null;
-
-  // Reflect across a touched edge when the perpendicular dimension is odd, so
-  // that dimension doubles to an even length. A dimension that stays odd is fine
-  // as long as the other becomes even - decomposeRect then resolves it by
-  // slicing. We only fail if both dimensions remain odd.
-  const w = r.x1 - r.x0;
-  const h = r.y1 - r.y0;
-  let ext = { ...r };
-  if (w % 2 === 1) {
-    if (r.x0 === 0) ext = { ...ext, x0: -r.x1 };
-    else if (r.x1 === W) ext = { ...ext, x1: 2 * W - r.x0 };
-  }
-  if (h % 2 === 1) {
-    if (r.y0 === 0) ext = { ...ext, y0: -r.y1 };
-    else if (r.y1 === H) ext = { ...ext, y1: 2 * H - r.y0 };
-  }
-
-  const pieces = decomposeRect(ext);
-  if (!pieces) return null;
-
-  // Crop each (possibly out-of-paper) flap and its ridges back to the sheet.
-  const flaps: GapRect[] = [];
-  const ridges: OriSegment[] = [];
-  for (const piece of pieces) {
-    const clipped = clampRect(piece, W, H);
-    if (!clipped) continue;
-    flaps.push(clipped);
-    for (const ridge of flapRidges(piece)) {
-      const seg = clipToSheet(ridge, W, H);
-      // Drop ridge pieces that lie on the paper boundary (non-folds).
-      if (seg && !onSheetBoundary(seg, W, H)) ridges.push(seg);
-    }
-  }
-  return { flaps, ridges };
-}
-
-/** Decompose an empty rectangle into valid (even-shorter-side) flaps, or null. */
-function decomposeRect(r: GapRect): GapRect[] | null {
-  const w = r.x1 - r.x0;
-  const h = r.y1 - r.y0;
-  const shorter = Math.min(w, h);
-  const longer = Math.max(w, h);
-  if (shorter % 2 === 0) return [r]; // already a valid flap
-  if (longer % 2 === 0) {
-    // Slice the even (longer) dimension into width-2 strips; each strip has an
-    // even shorter side and is a valid flap.
-    const strips: GapRect[] = [];
-    if (w === longer) {
-      for (let x = r.x0; x < r.x1; x += 2) strips.push({ x0: x, y0: r.y0, x1: x + 2, y1: r.y1 });
-    } else {
-      for (let y = r.y0; y < r.y1; y += 2) strips.push({ x0: r.x0, y0: y, x1: r.x1, y1: y + 2 });
-    }
-    return strips;
-  }
-  return null; // both odd - interior-unsolvable
 }
 
 /** Straight-skeleton ridge creases of a rectangular flap. */
@@ -186,52 +133,6 @@ export function flapRidges(r: GapRect): OriSegment[] {
 }
 
 // ---------------------------------------------------------------------------
-
-function clampRect(r: GapRect, W: number, H: number): GapRect | null {
-  const x0 = Math.max(r.x0, 0);
-  const y0 = Math.max(r.y0, 0);
-  const x1 = Math.min(r.x1, W);
-  const y1 = Math.min(r.y1, H);
-  if (x1 - x0 <= 0 || y1 - y0 <= 0) return null;
-  return { x0, y0, x1, y1 };
-}
-
-/** Clip a segment to the sheet rectangle (Liang-Barsky), or null if outside. */
-function clipToSheet(seg: OriSegment, W: number, H: number): OriSegment | null {
-  let t0 = 0;
-  let t1 = 1;
-  const dx = seg.b.x - seg.a.x;
-  const dy = seg.b.y - seg.a.y;
-  const p = [-dx, dx, -dy, dy];
-  const q = [seg.a.x - 0, W - seg.a.x, seg.a.y - 0, H - seg.a.y];
-  for (let i = 0; i < 4; i++) {
-    if (Math.abs(p[i]) < EPS) {
-      if (q[i] < 0) return null;
-    } else {
-      const r = q[i] / p[i];
-      if (p[i] < 0) {
-        if (r > t1) return null;
-        if (r > t0) t0 = r;
-      } else {
-        if (r < t0) return null;
-        if (r < t1) t1 = r;
-      }
-    }
-  }
-  if (t1 - t0 < EPS) return null;
-  return {
-    a: { x: seg.a.x + t0 * dx, y: seg.a.y + t0 * dy },
-    b: { x: seg.a.x + t1 * dx, y: seg.a.y + t1 * dy },
-  };
-}
-
-function onSheetBoundary(seg: OriSegment, W: number, H: number): boolean {
-  const onX = (v: number): boolean => Math.abs(v) < EPS || Math.abs(v - W) < EPS;
-  const onY = (v: number): boolean => Math.abs(v) < EPS || Math.abs(v - H) < EPS;
-  const vertical = Math.abs(seg.a.x - seg.b.x) < EPS;
-  const horizontal = Math.abs(seg.a.y - seg.b.y) < EPS;
-  return (vertical && onX(seg.a.x)) || (horizontal && onY(seg.a.y));
-}
 
 function emptyGrid(W: number, H: number, occupied: OccupiedPolygon[]): boolean[][] {
   const grid: boolean[][] = Array.from({ length: H }, () => new Array<boolean>(W).fill(true));

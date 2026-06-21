@@ -20,25 +20,47 @@ test("an even-shorter-side gap becomes a single flap", () => {
   expect(res.flaps[0]).toEqual({ x0: 0, y0: 2, x1: 8, y1: 6 });
 });
 
-test("an odd-by-even gap is sliced into even width-2 flaps", () => {
-  // Whole 7x10 sheet empty: shorter=7 (odd), longer=10 (even) -> five 7x2 flaps.
-  const res = fillBoxPleatedGaps({ width: 7, height: 10 }, []);
+// Build a sheet with an occupied frame so the central WxH gap has all-interior
+// sides (no side coincides with the paper edge).
+function interiorGap(w: number, h: number): { sheet: { width: number; height: number }; occupied: OccupiedPolygon[]; gap: GapRect } {
+  const pad = 2;
+  const W = w + 2 * pad;
+  const H = h + 2 * pad;
+  const occupied = [
+    rectPoly(0, 0, W, pad),
+    rectPoly(0, H - pad, W, H),
+    rectPoly(0, 0, pad, H),
+    rectPoly(W - pad, 0, W, H),
+  ];
+  return { sheet: { width: W, height: H }, occupied, gap: { x0: pad, y0: pad, x1: pad + w, y1: pad + h } };
+}
+
+test("an interior odd-by-even gap tiles into even-shorter-side flaps", () => {
+  // Interior 7x10: shorter=7 (odd), longer=10 (even). The tiler splits the even
+  // dimension so every flap has an even shorter side, fully covering the gap.
+  const { sheet, occupied } = interiorGap(7, 10);
+  const res = fillBoxPleatedGaps(sheet, occupied);
   expect(res.resolved).toBe(true);
-  expect(res.flaps).toHaveLength(5);
   for (const f of res.flaps) {
-    expect(f.x1 - f.x0).toBe(7);
-    expect(f.y1 - f.y0).toBe(2); // even shorter side
+    const shorter = Math.min(f.x1 - f.x0, f.y1 - f.y0);
+    expect(shorter % 2).toBe(0);
   }
-  expect(area(res.flaps)).toBe(70); // fully covered
+  expect(area(res.flaps)).toBe(70); // fully covered, no overlap
 });
 
 test("a both-odd interior gap is reported as unresolved", () => {
-  // 5x5 empty: both sides odd -> not fillable by interior flaps.
-  const res = fillBoxPleatedGaps({ width: 5, height: 5 }, []);
+  // Interior 5x5: both sides odd and no boundary to crop against -> unsolvable.
+  const { sheet, occupied, gap } = interiorGap(5, 5);
+  const res = fillBoxPleatedGaps(sheet, occupied);
   expect(res.resolved).toBe(false);
-  expect(res.unresolved).toHaveLength(1);
-  expect(res.unresolved[0]).toEqual({ x0: 0, y0: 0, x1: 5, y1: 5 });
+  expect(res.unresolved).toEqual([gap]);
   expect(res.flaps).toHaveLength(0);
+});
+
+test("a both-odd gap in a paper corner is solved by a corner flap", () => {
+  // 5x5 occupying the whole sheet: all sides are paper boundary -> corner flap.
+  const res = fillBoxPleatedGaps({ width: 5, height: 5 }, []);
+  expect(res.resolved).toBe(true);
 });
 
 test("multiple disjoint gaps are each filled", () => {
