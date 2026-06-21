@@ -4,6 +4,7 @@ import subprocess
 import sys
 
 import numpy as np
+import pytest
 import torch
 from torch.utils.data import DataLoader
 
@@ -76,6 +77,33 @@ def boundary_contact_cp() -> CreasePattern:
             dtype=np.int64,
         ),
         assignments=np.array([2, 2, 2, 2, 2, 0, 1], dtype=np.int8),
+    )
+
+
+def orthogonal_grid_cp() -> CreasePattern:
+    return CreasePattern(
+        vertices=np.array(
+            [
+                [0.0, 0.0],
+                [1.0, 0.0],
+                [1.0, 1.0],
+                [0.0, 1.0],
+                [0.25, 0.0],
+                [0.25, 1.0],
+                [0.50, 0.0],
+                [0.50, 1.0],
+                [0.0, 0.25],
+                [1.0, 0.25],
+                [0.0, 0.50],
+                [1.0, 0.50],
+            ],
+            dtype=np.float32,
+        ),
+        edges=np.array(
+            [[0, 1], [1, 2], [2, 3], [3, 0], [4, 5], [6, 7], [8, 9], [10, 11]],
+            dtype=np.int64,
+        ),
+        assignments=np.array([2, 2, 2, 2, 0, 1, 0, 1], dtype=np.int8),
     )
 
 
@@ -389,6 +417,26 @@ def test_v2_replay_corrective_mix_preserves_old_profiles_and_v2_stress_cases():
     assert profile_weights["v2-dark-combined"] > profile_weights["v2-dark-text"]
 
 
+def test_v3_no_guide_grid_replay_mix_excludes_guide_grid_profiles():
+    entries = AUGMENT_MIXES["v3-no-guide-grid-replay"]
+    profiles = [profile for profile, _, _ in entries]
+    profile_weights: dict[str, float] = {}
+    for profile, weight, _ in entries:
+        profile_weights[profile] = profile_weights.get(profile, 0.0) + weight
+
+    assert abs(sum(weight for _, weight, _ in entries) - 1.0) < 1e-6
+    assert all("guide-grid" not in profile for profile in profiles)
+    assert "v2-combined" not in profile_weights
+    assert "v2-dark-combined" not in profile_weights
+    assert "v2-combined-no-grid" in profile_weights
+    assert "v2-dark-combined-no-grid" in profile_weights
+    assert "v2-text" in profile_weights
+    assert "v2-watermark" in profile_weights
+    assert "v2-dashed" in profile_weights
+    assert "v2-faint" in profile_weights
+    assert "v2-ambiguous-mv" in profile_weights
+
+
 def test_augment_mix_sampler_handles_all_registered_mixes_repeatedly():
     rng = np.random.default_rng(123)
     for entries in AUGMENT_MIXES.values():
@@ -529,6 +577,154 @@ def test_v2_dark_faint_keeps_minimum_readable_contrast():
     background = np.array(sample.metadata["params"]["background"], dtype=np.float32).mean()
 
     assert float(grayscale[target].mean()) - float(background) > 20.0
+
+
+def test_v2_combined_no_grid_keeps_combined_artifacts_without_guide_grid():
+    sample = render_cpline_sample(
+        simple_mv_cp(),
+        image_size=160,
+        padding=10,
+        line_width=2,
+        augment_profile="v2-combined-no-grid",
+        seed=19,
+    )
+    metadata = sample.metadata["v2_augmentation"]
+
+    assert metadata["issue_profile"] == "v2-combined-no-grid"
+    assert "guide_grid" not in metadata["modes"]
+    assert {"dashed", "ambiguous_mv", "faint", "watermark", "text"} <= set(metadata["modes"])
+    assert np.count_nonzero(sample.v2_non_crease_mask) > 0
+    assert np.count_nonzero(sample.v2_line_style == V2_LINE_STYLE_IDS["dashed"]) > 0
+    assert 0 not in sample.v2_observed_assignment
+    assert 1 not in sample.v2_observed_assignment
+
+
+def test_v2_combined_no_grid_keeps_orthogonal_real_creases_positive():
+    clean = render_cpline_sample(
+        orthogonal_grid_cp(),
+        image_size=160,
+        padding=10,
+        line_width=2,
+        augment_profile="clean",
+    )
+    no_grid = render_cpline_sample(
+        orthogonal_grid_cp(),
+        image_size=160,
+        padding=10,
+        line_width=2,
+        augment_profile="v2-combined-no-grid",
+        seed=23,
+    )
+    real_crease_pixels = clean.line_prob > 0.5
+
+    assert np.count_nonzero(real_crease_pixels) > 0
+    assert np.all(no_grid.v2_target_line_mask[real_crease_pixels] > 0.0)
+    assert np.count_nonzero(no_grid.v2_non_crease_mask[real_crease_pixels]) == 0
+    assert "guide_grid" not in no_grid.metadata["v2_augmentation"]["modes"]
+
+
+def test_runpod_v2_launcher_forwards_close_pair_knobs():
+    script = open(
+        "scripts/training/run_cpline_runpod_v2_continuation.sh",
+        encoding="utf-8",
+    ).read()
+
+    assert '--junction-sigma-px "$JUNCTION_SIGMA_PX"' in script
+    assert '--junction-offset-radius-px "$JUNCTION_OFFSET_RADIUS_PX"' in script
+    assert '--junction-offset-weight "$JUNCTION_OFFSET_WEIGHT"' in script
+    assert '--junction-focal-alpha "$JUNCTION_FOCAL_ALPHA"' in script
+    assert '--junction-focal-beta "$JUNCTION_FOCAL_BETA"' in script
+
+
+def test_runpod_v2_launcher_rejects_bad_close_pair_offset_config(tmp_path):
+    env = {
+        **os.environ,
+        "PYTHON": sys.executable,
+        "OUTPUT_ROOT": str(tmp_path / "bad"),
+        "RUN_WARMUP": "0",
+        "RUN_FULL": "0",
+        "REQUIRE_CLOSE_PAIR_OFFSETS": "1",
+        "JUNCTION_SIGMA_PX": "1.5",
+        "JUNCTION_OFFSET_RADIUS_PX": "0.0",
+        "JUNCTION_OFFSET_WEIGHT": "0.5",
+        "JUNCTION_FOCAL_ALPHA": "2.0",
+        "JUNCTION_FOCAL_BETA": "4.0",
+        "REINIT_HEADS": "non_crease_head",
+    }
+
+    result = subprocess.run(
+        ["bash", "scripts/training/run_cpline_runpod_v2_continuation.sh"],
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 2
+    assert "JUNCTION_OFFSET_RADIUS_PX must be 3" in result.stderr
+
+
+def test_no_guide_grid_close_pair_launcher_accepts_guarded_dry_run(tmp_path):
+    env = {
+        **os.environ,
+        "PYTHON": sys.executable,
+        "OUTPUT_ROOT": str(tmp_path / "dry"),
+        "RUN_PREFLIGHT": "0",
+        "RUN_WARMUP": "0",
+        "RUN_FULL": "0",
+    }
+
+    subprocess.run(
+        [
+            "bash",
+            "scripts/training/run_cpline_runpod_v3_no_guide_grid_close_pair_full.sh",
+        ],
+        env=env,
+        check=True,
+    )
+
+
+def test_retired_no_guide_grid_script_requires_are_you_sure():
+    result = subprocess.run(
+        ["bash", "scripts/training/run_cpline_runpod_v3_no_guide_grid_full.sh"],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 2
+    assert "Are you sure?" in result.stderr
+    assert "run_cpline_runpod_v3_no_guide_grid_close_pair_full.sh" in result.stderr
+
+
+def test_verify_cpline_run_config_script_checks_expected_values(tmp_path):
+    run_config = tmp_path / "run_config.json"
+    run_config.write_text(
+        json.dumps(
+            {
+                "augment_profile": "v3-no-guide-grid-replay",
+                "junction_offset_radius_px": 3.0,
+                "loaded_checkpoint": "/workspace/checkpoints/r1_close_pair_warmstart/latest.pt",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    subprocess.run(
+        [
+            sys.executable,
+            "scripts/training/verify_cpline_run_config.py",
+            "--run-config",
+            str(run_config),
+            "--expect-str",
+            "augment_profile=v3-no-guide-grid-replay",
+            "--expect-float",
+            "junction_offset_radius_px=3.0",
+            "--expect-suffix",
+            "loaded_checkpoint=checkpoints/r1_close_pair_warmstart/latest.pt",
+        ],
+        check=True,
+    )
 
 
 def test_v2_issue_mix_samples_combined_profile():
@@ -713,6 +909,125 @@ def test_cpline_dataset_balanced_family_sampling_oversamples_small_family():
     }
 
     assert family_counts == {"treemaker-tree": 4, "rabbit-ear-fold-program": 4}
+
+
+def test_cpline_dataset_tessellation_15pct_sampling_preserves_base_mix():
+    records = (
+        [
+            {
+                "id": f"tree-{idx}",
+                "foldPath": f"tree-{idx}.fold",
+                "split": "train",
+                "family": "treemaker-tree",
+                "sourceDataset": "cp_training_mix_v1",
+                "edges": 8,
+            }
+            for idx in range(100)
+        ]
+        + [
+            {
+                "id": f"rabbit-{idx}",
+                "foldPath": f"rabbit-{idx}.fold",
+                "split": "train",
+                "family": "rabbit-ear-fold-program",
+                "sourceDataset": "cp_training_mix_v1",
+                "edges": 8,
+            }
+            for idx in range(100)
+        ]
+        + [
+            {
+                "id": f"bp-{idx}",
+                "foldPath": f"bp-{idx}.fold",
+                "split": "train",
+                "family": "tessellation-fold-program",
+                "sourceDataset": "tessellation_orthogonal_bp_grid_v2_15pct",
+                "edges": 8,
+            }
+            for idx in range(100)
+        ]
+        + [
+            {
+                "id": f"miura-{idx}",
+                "foldPath": f"miura-{idx}.fold",
+                "split": "train",
+                "family": "tessellation-fold-program",
+                "sourceDataset": "tessellation_miura_ori_v2_15pct",
+                "edges": 8,
+            }
+            for idx in range(100)
+        ]
+    )
+
+    selected = select_records(
+        records,
+        split="train",
+        limit=200,
+        max_edges=20,
+        seed=7,
+        family_sampling="v3-tessellation-15pct",
+    )
+    source_counts = {
+        source: sum(record["sourceDataset"] == source for record in selected)
+        for source in {
+            "cp_training_mix_v1",
+            "tessellation_orthogonal_bp_grid_v2_15pct",
+            "tessellation_miura_ori_v2_15pct",
+        }
+    }
+    family_counts = {
+        family: sum(record["family"] == family for record in selected)
+        for family in {
+            "treemaker-tree",
+            "rabbit-ear-fold-program",
+            "tessellation-fold-program",
+        }
+    }
+
+    assert family_counts == {
+        "treemaker-tree": 85,
+        "rabbit-ear-fold-program": 85,
+        "tessellation-fold-program": 30,
+    }
+    assert source_counts == {
+        "cp_training_mix_v1": 170,
+        "tessellation_orthogonal_bp_grid_v2_15pct": 24,
+        "tessellation_miura_ori_v2_15pct": 6,
+    }
+
+
+def test_cpline_dataset_tessellation_15pct_sampling_requires_tess_groups():
+    records = [
+        {
+            "id": f"tree-{idx}",
+            "foldPath": f"tree-{idx}.fold",
+            "split": "train",
+            "family": "treemaker-tree",
+            "sourceDataset": "cp_training_mix_v1",
+            "edges": 8,
+        }
+        for idx in range(100)
+    ] + [
+        {
+            "id": f"rabbit-{idx}",
+            "foldPath": f"rabbit-{idx}.fold",
+            "split": "train",
+            "family": "rabbit-ear-fold-program",
+            "sourceDataset": "cp_training_mix_v1",
+            "edges": 8,
+        }
+        for idx in range(100)
+    ]
+
+    with pytest.raises(ValueError, match="tessellation_orthogonal_bp_grid_v2_15pct"):
+        select_records(
+            records,
+            split="train",
+            limit=200,
+            max_edges=20,
+            seed=7,
+            family_sampling="v3-tessellation-15pct",
+        )
 
 
 def test_cpline_augmentation_visualization_script_smoke(tmp_path):

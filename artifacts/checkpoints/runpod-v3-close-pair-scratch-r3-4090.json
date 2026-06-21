@@ -1,0 +1,83 @@
+{
+  "schemaVersion": 1,
+  "id": "runpod-v3-close-pair-scratch-r3-4090",
+  "status": "ablation",
+  "phase": "v3-close-pair",
+  "registeredAt": "2026-06-10",
+  "description": "R3 clean from-scratch close-pair ablation for the sigma-1.5 heatmap, penalty-reduced focal loss, and CenterNet-style radius-3 nearest-vertex offset recipe. It trained without an init checkpoint for 5000 steps and landed statistically identical to the promoted R1 warm-start model, refuting the hypothesis that warm-start initialization was the close-pair ceiling. Kept as an important ablation, not as the default model.",
+  "checkpoint": {
+    "gitTracked": false,
+    "relativePath": "checkpoints/r3_close_pair_scratch/latest.pt",
+    "originalRunpodPath": "/workspace/create-pattern-detector/checkpoints/r3_close_pair_scratch/latest.pt",
+    "sha256": "96381dea8d3cdefccc3589f1d4f58e3788f83e8e3dd7c9f3271ad91d9bf2325d",
+    "sizeBytes": 139559136
+  },
+  "model": {
+    "class": "CPLineNet",
+    "backbone": "hrnet_w18",
+    "hiddenChannels": 128,
+    "imageSize": 1024,
+    "v2Heads": true,
+    "junctionOffsetClamp": 1.0
+  },
+  "training": {
+    "device": "cuda",
+    "gpu": "RTX 4090",
+    "dataset": "cp_training_mix_v1",
+    "manifest": "data/generated/synthetic/cp_training_mix_v1/raw-manifest.jsonl",
+    "trainSamples": 5202,
+    "valSamples": 638,
+    "maxEdges": 300,
+    "batchSize": 1,
+    "maxSteps": 5000,
+    "seed": 31,
+    "augmentProfile": "v2-replay-corrective",
+    "evalAugmentProfile": "v2-replay-corrective",
+    "initCheckpoint": null,
+    "loadedCheckpoint": null,
+    "learningRate": 0.0003,
+    "junctionSigmaPx": 1.5,
+    "junctionOffsetRadiusPx": 3.0,
+    "junctionOffsetWeight": 0.5,
+    "junctionFocalAlpha": 2.0,
+    "junctionFocalBeta": 4.0,
+    "trainFamilySampling": "balanced",
+    "batchnormMode": "batch-stats",
+    "elapsedSeconds": 21090.24554784037,
+    "firstTrainLoss": 2650.2802734375,
+    "lastTrainLoss": 0.7562050223350525
+  },
+  "inference": {
+    "batchnormMode": "batch-stats",
+    "vectorizerThreshold": 0.65,
+    "junctionOffsetRadiusPx": 3.0,
+    "notes": "R3 uses the same radius-normalized junction_offset semantics as R1 and must be decoded with offset-vote clustering. It is an ablation export, not the default browser model.",
+    "downstreamOnnxManifest": "tree-maker-rust/apps/web/public/models/cp-detector-v3-r3-scratch/manifest.json",
+    "downstreamOnnxSha256": "cb3a9145c7579e2af2ffed7f810d3c1b9dfd4b448231ca525639cf7498b079a8"
+  },
+  "evaluation": {
+    "source": "artifacts/eval_r3.json",
+    "script": "scripts/evals/eval_close_pairs.py",
+    "valCount": 64,
+    "closePairs": 279,
+    "pairResolutionClusters": 0.215,
+    "pairResolutionBaselinePeaks": 0.054,
+    "junctionRecallClusters": 0.971,
+    "junctionPrecisionClusters": 0.994,
+    "strictTopology": {
+      "harness": "tree-maker-rust compare_exact_solve_benchmark --candidate-source junction-first-v1 --skip-exact-solve --strict-vertex-tolerance-px 4",
+      "denseCache": "clean-1024-s15-browser-onnx-v3-r3-scratch",
+      "edgeF1": 0.952,
+      "exactTopologySamples": "4/15",
+      "missingEdges": 144,
+      "extraEdges": 109,
+      "mergedEdges": 71,
+      "promotedModelEdgeF1": 0.953
+    }
+  },
+  "relatedDocs": [
+    "docs/model-training-history.md",
+    "docs/v2-close-pair-junction-recovery.md",
+    "docs/checkpoint-management.md"
+  ]
+}

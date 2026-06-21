@@ -3,8 +3,8 @@
 This repo does not commit model weights. Checkpoints are large, machine-local
 artifacts under the ignored `checkpoints/` directory. The repo commits small
 checkpoint manifests under `artifacts/checkpoints/` so future agents can tell
-which local file is the current best checkpoint, how it was trained, and how to
-verify it.
+which local file each important checkpoint refers to, how it was trained, and
+how to verify it.
 
 ## What Gets Committed
 
@@ -49,18 +49,59 @@ Each real training run should write:
 Short smoke runs can omit logs, but should still write `run_config.json` and
 `summary.json`.
 
-## Blessed Checkpoints
+## Current Checkpoint Roles
 
-A blessed checkpoint is the one downstream phases should load by default. It
-must have a manifest in `artifacts/checkpoints/`.
+The promoted model and the historical baselines are tracked in
+`docs/model-training-history.md`. Use that page as the first stop before
+loading or exporting a model.
 
-Current blessed checkpoint:
+Current downstream/browser model:
+
+```text
+artifacts/checkpoints/current-browser-model.json
+```
+
+That pointer names the current checkpoint manifest. Prefer updating the pointer
+when promoting a replacement model instead of repeating the new model ID, path,
+or checksum across docs and scripts.
+
+Historical Python Phase 5 / V1 baseline:
 
 ```text
 artifacts/checkpoints/phase3-v1-cpline.json
 ```
 
-The manifest records:
+Important non-promoted ablation:
+
+```text
+artifacts/checkpoints/runpod-v3-close-pair-scratch-r3-4090.json
+```
+
+Previous promoted close-pair model, retained for comparison:
+
+```text
+artifacts/checkpoints/runpod-v3-close-pair-warmstart-4090.json
+```
+
+Previous promoted no-guide-grid close-pair model, retained for comparison:
+
+```text
+artifacts/checkpoints/runpod-v3-no-guide-grid-close-pair-full-r1-4090.json
+```
+
+Previous promoted dense-edge model, retained for comparison:
+
+```text
+artifacts/checkpoints/runpod-v3-no-guide-grid-close-pair-dense-edges-max700-4090.json
+```
+
+Previous promoted max1200 dense-edge model, retained for comparison:
+
+```text
+artifacts/checkpoints/runpod-v3-no-guide-grid-close-pair-dense-edges-max1200-l40s.json
+```
+
+Each manifest records:
 
 - Local relative path under `checkpoints/`.
 - Original RunPod path, if applicable.
@@ -74,9 +115,28 @@ The manifest records:
 The manifest does not make the weight file portable by itself. It is a registry
 entry for the local/shared artifact.
 
+## Local Artifact Persistence
+
+Do not treat a temporary Codex worktree as the only durable copy of a promoted
+model. Before calling a model promoted:
+
+1. Copy the ignored checkpoint run directory into the canonical local checkout
+   under `/Users/zacharymarion/Documents/code/create-pattern-detector`, using
+   the same `checkpoints/...` relative path recorded in the manifest.
+2. Verify the copied `latest.pt` SHA-256 against the checkpoint manifest.
+3. Copy the ONNX export into the canonical `tree-maker-rust` checkout under both
+   the stable product directory and the versioned export directory.
+4. Verify the ONNX SHA-256 against the checkpoint manifest and product model
+   manifest.
+
+This still is not a substitute for a real remote artifact store. If model
+weights need to be portable across machines or open-source consumers, publish
+the `.pt`/ONNX files to a release or object store and add that URI to the
+checkpoint manifest.
+
 ## Registering A New Checkpoint
 
-Before replacing a blessed checkpoint:
+Before replacing or promoting a checkpoint:
 
 1. Run the relevant validation/eval suite.
 2. Confirm the new checkpoint improves the intended metric without regressing
@@ -89,9 +149,10 @@ Before replacing a blessed checkpoint:
    ```
 
 4. Create or update a manifest under `artifacts/checkpoints/`.
-5. Include enough eval numbers that another agent can understand why it is
-   blessed.
-6. Link the manifest from the relevant phase-status doc or roadmap section.
+5. Include enough eval numbers that another agent can understand why it was
+   promoted or kept as an important ablation.
+6. Update `docs/model-training-history.md`.
+7. Link the manifest from the relevant phase-status doc or roadmap section.
 
 Prefer creating a new manifest id when a checkpoint changes the supported input
 envelope or model architecture. Updating an existing manifest is okay for small
@@ -99,7 +160,32 @@ metadata corrections.
 
 ## Loading A Checkpoint
 
-For Phase 3 V1 CPLineNet, load:
+For the current downstream/browser model, resolve the checkpoint through the
+tracked pointer:
+
+```bash
+python scripts/checkpoint/current_checkpoint.py --field checkpoint
+```
+
+Use the config stored inside the checkpoint to construct the model. Important
+settings:
+
+- `CPLineNet`
+- `backbone=hrnet_w18`
+- `hidden_channels=128`
+- `image_size=1024`
+- `v2_heads=true`
+- `junction_offset_radius_px=3.0`
+- `augment_profile=v3-no-guide-grid-replay`
+- `max_edges=1200` during the promoted continuation run
+- `train_family_sampling=v3-tessellation-15pct`
+
+Use `batch-stats` BatchNorm behavior for validation/vectorization. Browser ONNX
+exports should use explicit per-image BatchNorm ops and record
+`junction_offset_radius_px` in the model manifest so downstream decoders use
+offset-vote clustering.
+
+For the older Phase 3 V1 Python/CLI baseline, load:
 
 ```text
 checkpoints/runpod_phase3_curriculum/stage-balanced/latest.pt

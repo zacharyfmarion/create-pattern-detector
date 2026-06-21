@@ -76,28 +76,57 @@ The script refuses to replace a non-empty `data/output/scraped` directory unless
 
 Keep raw dataset files, crops, manifests, and generated reports out of git. Commit small code, docs, config examples, tests, and deterministic fixture manifests instead.
 
+## Box-Pleat Native Eval
+
+For the box-pleat/grid-line-suppression diagnostic, use
+`docs/evals/box-pleat-native-v1.md` and
+`eval_specs/box_pleat_native_v1.json`. The eval set is intentionally
+re-derived from the native converted-FOLD corpus and verified with
+path-independent canonical FOLD fingerprints; do not commit local path lists or
+generated contact sheets as the source of truth.
+
 ## Shared Synthetic Datasets
 
 The maintained synthetic generator lives under `tools/synthetic-generator/`.
-This PR keeps it focused on two fold-only families:
+This PR keeps it focused on fold-only families:
 
 - `treemaker-tree`: primary external TreeMaker-derived CP generation.
 - `rabbit-ear-fold-program`: strict supplemental Rabbit Ear fold-operation generation.
+- `tessellation-fold-program`: deterministic BP/tessellation-style crease evidence, currently focused on dense Rabbit Ear-validated orthogonal grids with vertical-heavy coverage.
 
 Large generated releases live outside the repo:
 
 ```text
 /Users/zacharymarion/Documents/datasets/create-pattern-detector/synthetic/treemaker_tree_v1
 /Users/zacharymarion/Documents/datasets/create-pattern-detector/synthetic/rabbit_ear_fold_program_v1
+/Users/zacharymarion/Documents/datasets/create-pattern-detector/synthetic/tessellation_orthogonal_bp_grid_v2_15pct
+/Users/zacharymarion/Documents/datasets/create-pattern-detector/synthetic/tessellation_miura_ori_v2_15pct
 /Users/zacharymarion/Documents/datasets/create-pattern-detector/synthetic/cp_training_mix_v1
+/Users/zacharymarion/Documents/datasets/create-pattern-detector/synthetic/cp_training_mix_v3_tessellation_15pct
 ```
 
-Future worktrees should link the mixed root when training:
+Future worktrees should link the current mixed root when training:
 
 ```bash
 scripts/data/link_shared_synthetic_data.sh cp_training_mix_v1
 PYTHONPATH=. python3.10 scripts/data/smoke_shared_synthetic_data.py --root data/generated/synthetic/cp_training_mix_v1
 ```
+
+Use `recipes/synthetic/tessellation_fold_program_v1.yaml` and
+`scripts/data/visualize_synthetic_folds.py` for the tessellation release. Do not
+mutate `cp_training_mix_v1`; build a new mixed release when tessellation samples
+are added to training. The current 15% tessellation experiment mix is
+`cp_training_mix_v3_tessellation_15pct`.
+
+When training on `cp_training_mix_v3_tessellation_15pct`, do not use natural or
+plain balanced family sampling. Use `TRAIN_FAMILY_SAMPLING=v3-tessellation-15pct`
+or the dedicated tessellation launcher. The preset preserves the old dense-edge
+base exposure while adding tessellations:
+
+- `42.5%` `treemaker-tree`
+- `42.5%` `rabbit-ear-fold-program`
+- `12%` `tessellation_orthogonal_bp_grid_v2_15pct`
+- `3%` `tessellation_miura_ori_v2_15pct`
 
 See `docs/synthetic-fold-datasets.md` for generation, shard merge, folded-preview,
 and mix-building commands.
@@ -108,9 +137,33 @@ Do not commit model weights. Keep `.pt` and related checkpoint files under the
 ignored `checkpoints/` tree, and register blessed or important runs with small
 JSON manifests under `artifacts/checkpoints/`.
 
-Before replacing or using the Phase 3 checkpoint, read
-`docs/checkpoint-management.md`. The current blessed Phase 3 V1 CPLineNet
-manifest is `artifacts/checkpoints/phase3-v1-cpline.json`.
+Do not leave a promoted model only inside a temporary Codex worktree. After
+promotion, mirror the ignored checkpoint run directory into the canonical local
+checkout under `/Users/zacharymarion/Documents/code/create-pattern-detector`
+using the same `checkpoints/...` relative path recorded in the manifest, then
+verify the SHA-256. Downstream ONNX exports should likewise live in the
+canonical `tree-maker-rust/apps/web/public/models/` tree, not only in a
+throwaway worktree.
+
+Before replacing, exporting, or using a checkpoint, read
+`docs/model-training-history.md` first, then `docs/checkpoint-management.md`.
+The tracked source of truth for the current downstream/browser model is
+`artifacts/checkpoints/current-browser-model.json`, which points at the current
+checkpoint manifest. Do not duplicate the current checkpoint path, model ID, or
+ONNX SHA in new docs or scripts; use that pointer or
+`scripts/checkpoint/current_checkpoint.py`.
+
+Do not confuse the previous V3 close-pair R1 checkpoint, the no-guide-grid R1,
+max700 dense-edge, or max1200 dense-edge checkpoints that this run superseded,
+or the later R3 from-scratch run with the promoted model. The previous
+close-pair R1 is retained at
+`artifacts/checkpoints/runpod-v3-close-pair-warmstart-4090.json`; R3 is
+registered as an ablation at
+`artifacts/checkpoints/runpod-v3-close-pair-scratch-r3-4090.json` because it
+landed statistically identical to R1 and was not promoted.
+
+The older blessed Phase 3 V1 Python/CLI baseline remains registered at
+`artifacts/checkpoints/phase3-v1-cpline.json`.
 
 ## RunPod Phase 3
 
@@ -122,3 +175,52 @@ checks, curriculum launch, monitoring, and teardown commands. Use
 Before launching more Phase 3 GPU work, read `docs/phase-3-v1-status.md`.
 Phase 3 V1 is complete for readable 1024px crease patterns; the remaining dense
 Rabbit Ear/tiny-fold tail is tracked as V2 and should not block Phase 4 work.
+
+## No-Guide-Grid Training Safety
+
+For any no-guide-grid training intended to stay compatible with the current V3
+close-pair product decoder, use only:
+
+```bash
+scripts/training/run_cpline_runpod_v3_no_guide_grid_close_pair_full.sh
+```
+
+or the short probe variant:
+
+```bash
+scripts/training/run_cpline_runpod_v3_no_guide_grid_close_pair_probe.sh
+```
+
+These canonical launchers set and verify the required R1 close-pair recipe:
+`junction_sigma_px=1.5`, `junction_offset_radius_px=3.0`,
+`junction_offset_weight=0.5`, `junction_focal_alpha=2.0`, and
+`junction_focal_beta=4.0`. The older
+`run_cpline_runpod_v3_no_guide_grid_{probe,full}.sh` names are intentionally
+retired and fail with an "Are you sure?" message because they previously
+launched a dense-head diagnostic with `junction_offset_radius_px=0.0`.
+
+For dense BP follow-up probes from the current promoted model pointer,
+use:
+
+```bash
+scripts/training/run_cpline_runpod_v3_no_guide_grid_close_pair_dense_edges_probe.sh
+```
+
+It resolves the promoted `MAX_EDGES=1200` checkpoint through
+`artifacts/checkpoints/current-browser-model.json` and verifies the same
+radius-3 close-pair recipe. It refuses to write into an existing `OUTPUT_ROOT`
+unless `ALLOW_EXISTING_OUTPUT_ROOT=1` is set, so use a fresh explicit
+`OUTPUT_ROOT` for new probes.
+
+For the 15% tessellation BP-data experiment, use:
+
+```bash
+scripts/training/run_cpline_runpod_v3_no_guide_grid_close_pair_dense_edges_tess15_probe.sh
+```
+
+That launcher defaults to
+`data/generated/synthetic/cp_training_mix_v3_tessellation_15pct/raw-manifest.jsonl`
+and `TRAIN_FAMILY_SAMPLING=v3-tessellation-15pct`. The generic dense-edge
+launcher also auto-selects this sampler for that manifest and fails with an
+"Are you sure?" message if a non-default tessellation sampler is used without
+`ALLOW_NONDEFAULT_TESS15_SAMPLING=1`.

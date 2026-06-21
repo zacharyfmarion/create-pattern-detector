@@ -1,0 +1,83 @@
+name: tessellation_orthogonal_bp_grid_v2
+seed: 20260619
+imageSize: 768
+padding: 42
+
+splits:
+  train: 0.85
+  val: 0.10
+  test: 0.05
+
+families:
+  tessellation-fold-program: 1.0
+
+complexityBuckets:
+  - name: small
+    minCreases: 120
+    maxCreases: 260
+    weight: 0.15
+  - name: medium
+    minCreases: 260
+    maxCreases: 650
+    weight: 0.35
+  - name: dense
+    minCreases: 650
+    maxCreases: 1300
+    weight: 0.35
+  - name: superdense
+    minCreases: 1300
+    maxCreases: 2200
+    weight: 0.15
+
+tessellationSampler:
+  subfamilyWeights:
+    orthogonal-bp-grid: 1.0
+  verticalBiasProbability: 0.75
+  minRepeats: 6
+  maxRepeats: 48
+  gridSizes: [8, 10, 12, 15, 16, 18, 20, 24, 30, 32, 36, 40, 45, 48]
+  pleatIntervalPairs:
+    - horizontal: 1
+      vertical: 1
+      weight: 1.4
+    - horizontal: 1
+      vertical: 2
+      weight: 1.2
+    - horizontal: 2
+      vertical: 1
+      weight: 1.2
+    - horizontal: 1
+      vertical: 3
+      weight: 0.9
+    - horizontal: 3
+      vertical: 1
+      weight: 0.9
+    - horizontal: 2
+      vertical: 3
+      weight: 0.6
+    - horizontal: 3
+      vertical: 2
+      weight: 0.6
+
+validation:
+  strictGlobal: true
+  globalBackend: rabbit-ear-solver
+  minVertexDistance: 0.00001
+  maxVertices: 4000
+  maxEdges: 4000
+  requireDense: true
+  requireTreeMaker: false
+  requireRabbitEarFoldProgram: false
+  requireTessellationFoldProgram: true
+  requireLocalFlatFoldability: true
+
+renderVariants:
+  - name: tessellation_assignment_clean
+    assignmentVisibility: visible
+    count: 1
+  - name: tessellation_active_only
+    assignmentVisibility: active-only
+    count: 1
+  - name: monochrome_ink
+    assignmentVisibility: hidden
+    count: 1

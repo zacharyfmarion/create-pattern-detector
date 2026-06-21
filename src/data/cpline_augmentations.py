@@ -18,7 +18,8 @@ import numpy as np
 from src.data.fold_parser import CreasePattern, transform_coords
 from src.data.v2_augmentations import (
     V2_AUGMENT_PROFILES,
-    V2_DARK_AUGMENT_PROFILES,
+    V2_COMBINED_ISSUE_PROFILES,
+    V2_HISTORICAL_LIGHT_AUGMENT_PROFILES,
     apply_v2_augmentation,
     default_v2_targets,
     is_v2_dark_profile,
@@ -66,9 +67,31 @@ V2_AUGMENT_MIX = (
 V2_DARK_AUGMENT_MIX = tuple(
     (profile, weight, None)
     for profile, weight in zip(
-        V2_DARK_AUGMENT_PROFILES,
+        tuple(
+            f"v2-dark-{profile.removeprefix('v2-')}"
+            for profile in V2_HISTORICAL_LIGHT_AUGMENT_PROFILES
+        ),
         (0.14, 0.14, 0.14, 0.16, 0.14, 0.14, 0.14),
         strict=True,
+    )
+)
+V2_NO_GUIDE_GRID_AUGMENT_MIX = (
+    ("v2-text", 0.16, None),
+    ("v2-watermark", 0.16, None),
+    ("v2-dashed", 0.18, None),
+    ("v2-faint", 0.16, None),
+    ("v2-ambiguous-mv", 0.16, None),
+    ("v2-combined-no-grid", 0.18, None),
+)
+V2_DARK_NO_GUIDE_GRID_AUGMENT_MIX = tuple(
+    (f"v2-dark-{profile.removeprefix('v2-')}", weight, style_variant)
+    for profile, weight, style_variant in V2_NO_GUIDE_GRID_AUGMENT_MIX
+)
+V2_ALL_NO_GUIDE_GRID_AUGMENT_MIX = tuple(
+    (profile, weight * 0.5, style_variant)
+    for profile, weight, style_variant in (
+        *V2_NO_GUIDE_GRID_AUGMENT_MIX,
+        *V2_DARK_NO_GUIDE_GRID_AUGMENT_MIX,
     )
 )
 V2_ALL_AUGMENT_MIX = tuple(
@@ -76,16 +99,36 @@ V2_ALL_AUGMENT_MIX = tuple(
     for profile, weight, style_variant in (*V2_AUGMENT_MIX, *V2_DARK_AUGMENT_MIX)
 )
 V2_REPLAY_CORRECTIVE_MIX = (
-    *((profile, weight * 0.40, style_variant) for profile, weight, style_variant in AUGMENT_MIXES["stage-balanced"]),
+    *(
+        (profile, weight * 0.40, style_variant)
+        for profile, weight, style_variant in AUGMENT_MIXES["stage-balanced"]
+    ),
     ("line-style", 0.25, None),
-    *((profile, weight * 0.25, style_variant) for profile, weight, style_variant in V2_ALL_AUGMENT_MIX),
+    *(
+        (profile, weight * 0.25, style_variant)
+        for profile, weight, style_variant in V2_ALL_AUGMENT_MIX
+    ),
     ("v2-combined", 0.05, None),
     ("v2-dark-combined", 0.05, None),
+)
+V3_NO_GUIDE_GRID_REPLAY_MIX = (
+    *(
+        (profile, weight * 0.40, style_variant)
+        for profile, weight, style_variant in AUGMENT_MIXES["stage-balanced"]
+    ),
+    ("line-style", 0.25, None),
+    *(
+        (profile, weight * 0.25, style_variant)
+        for profile, weight, style_variant in V2_ALL_NO_GUIDE_GRID_AUGMENT_MIX
+    ),
+    ("v2-combined-no-grid", 0.05, None),
+    ("v2-dark-combined-no-grid", 0.05, None),
 )
 AUGMENT_MIXES["v2-issue-mix"] = V2_AUGMENT_MIX
 AUGMENT_MIXES["v2-dark-issue-mix"] = V2_DARK_AUGMENT_MIX
 AUGMENT_MIXES["v2-all-issue-mix"] = V2_ALL_AUGMENT_MIX
 AUGMENT_MIXES["v2-replay-corrective"] = V2_REPLAY_CORRECTIVE_MIX
+AUGMENT_MIXES["v3-no-guide-grid-replay"] = V3_NO_GUIDE_GRID_REPLAY_MIX
 MIXED_PROFILE_ENTRIES = AUGMENT_MIXES["stage-balanced"]
 MIXED_AUGMENT_PROFILES = tuple(AUGMENT_MIXES) + ("mixed",)
 AUGMENT_PROFILES = (
@@ -103,7 +146,9 @@ SQUARE_SYMMETRIES = (
     "transpose",
     "anti-transpose",
 )
-NON_IDENTITY_SQUARE_SYMMETRIES = tuple(symmetry for symmetry in SQUARE_SYMMETRIES if symmetry != "identity")
+NON_IDENTITY_SQUARE_SYMMETRIES = tuple(
+    symmetry for symmetry in SQUARE_SYMMETRIES if symmetry != "identity"
+)
 DARK_MODE_STYLE_VARIANTS = (
     "dark-default",
     "dark-muted",
@@ -218,9 +263,7 @@ def render_augmented_cpline_sample(
 
     target_line_width = int(params["target_line_width"])
     junction_sigma = (
-        junction_sigma_px
-        if junction_sigma_px is not None
-        else max(1.0, 2.5 * image_size / 768)
+        junction_sigma_px if junction_sigma_px is not None else max(1.0, 2.5 * image_size / 768)
     )
     rendered = render_vectorizer_evidence_from_pixels(
         pixel_vertices=transformed_vertices,
@@ -247,9 +290,11 @@ def render_augmented_cpline_sample(
     )
     assignment = rendered.evidence.assignment_labels.astype(np.int64) - 1
     assignment[rendered.evidence.assignment_labels == 0] = -100
-    v2_non_crease_mask, v2_target_line_mask, v2_line_style, v2_observed_assignment = default_v2_targets(
-        line_prob=rendered.evidence.line_prob,
-        assignment=assignment,
+    v2_non_crease_mask, v2_target_line_mask, v2_line_style, v2_observed_assignment = (
+        default_v2_targets(
+            line_prob=rendered.evidence.line_prob,
+            assignment=assignment,
+        )
     )
     v2_boundary = build_v2_boundary_targets(
         vertices=rendered.pixel_vertices,
@@ -396,7 +441,7 @@ def _sample_render_params(
                 style_variant=style_variant,
             )
         issue_profile = v2_issue_profile(profile)
-        if issue_profile in {"v2-ambiguous-mv", "v2-combined"}:
+        if issue_profile == "v2-ambiguous-mv" or issue_profile in V2_COMBINED_ISSUE_PROFILES:
             params["assignment_target_mode"] = "mv_to_unassigned"
         return params
     if profile == "square-symmetry":
@@ -404,7 +449,9 @@ def _sample_render_params(
     if profile == "line-style":
         _apply_line_style_params(params, rng, line_width=line_width)
     elif profile == "dark-mode":
-        _apply_dark_mode_params(params, rng, image_size=image_size, line_width=line_width, style_variant=style_variant)
+        _apply_dark_mode_params(
+            params, rng, image_size=image_size, line_width=line_width, style_variant=style_variant
+        )
     elif profile == "print-light":
         _apply_line_style_params(params, rng, line_width=line_width, mild=True)
         params.update(
@@ -488,7 +535,12 @@ def _apply_line_style_params(
     if palette_kind == "monochrome":
         shade = int(rng.integers(20, 95))
         unassigned = int(rng.integers(80, 170))
-        palette = {0: (shade, shade, shade), 1: (shade, shade, shade), 2: (0, 0, 0), 3: (unassigned, unassigned, unassigned)}
+        palette = {
+            0: (shade, shade, shade),
+            1: (shade, shade, shade),
+            2: (0, 0, 0),
+            3: (unassigned, unassigned, unassigned),
+        }
         params["assignment_target_mode"] = "mv_to_unassigned"
     elif palette_kind == "muted":
         palette = {
@@ -646,6 +698,7 @@ def _render_input_image_from_pixels(
     if alpha >= 0.999:
         return overlay
     return cv2.addWeighted(overlay, alpha, image, 1.0 - alpha, 0.0).astype(np.uint8)
+
 
 def _apply_photometric_effects(
     image: np.ndarray,

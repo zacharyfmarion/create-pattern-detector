@@ -31,7 +31,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 
 from src.data.cpline_augmentations import AUGMENT_PROFILES, normalize_augment_profile
-from src.data.cpline_dataset import CplineFoldDataset, cpline_collate
+from src.data.cpline_dataset import CplineFoldDataset, SUPPORTED_FAMILY_SAMPLING, cpline_collate
 from src.models import CPLineNet
 from src.models.batchnorm import BATCHNORM_MODES, model_eval_with_batchnorm_mode
 from src.models.losses import CPLineLoss, CPLineLossConfig
@@ -60,9 +60,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-edges", type=int, default=250)
     parser.add_argument(
         "--train-family-sampling",
-        choices=["natural", "balanced"],
+        choices=sorted(SUPPORTED_FAMILY_SAMPLING),
         default="natural",
-        help="Record sampling for the training split. Balanced gives each manifest family an equal share.",
+        help=(
+            "Record sampling for the training split. Balanced gives each manifest "
+            "family an equal share; v3-tessellation-15pct preserves the dense-edge "
+            "base mix while adding 15% tessellations."
+        ),
     )
     parser.add_argument("--max-steps", type=int, default=120)
     parser.add_argument("--batch-size", type=int, default=2)
@@ -505,9 +509,9 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
             if head is None or not isinstance(head, torch.nn.Module):
                 raise ValueError(f"Unknown CPLineNet head for --reinit-heads: {head_name!r}")
             head.apply(
-                lambda module: module.reset_parameters()
-                if hasattr(module, "reset_parameters")
-                else None
+                lambda module: (
+                    module.reset_parameters() if hasattr(module, "reset_parameters") else None
+                )
             )
             print(f"Re-initialized head after checkpoint load: {head_name}")
     criterion = CPLineLoss(
@@ -579,6 +583,8 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         "render_noise": args.render_noise,
         "max_edges": args.max_edges,
         "train_family_sampling": args.train_family_sampling,
+        "train_selection_summary": train_dataset.selection_summary,
+        "val_selection_summary": val_dataset.selection_summary,
         "lr": args.lr,
         "line_hard_negative_weight": args.line_hard_negative_weight,
         "line_hard_negative_ratio": args.line_hard_negative_ratio,

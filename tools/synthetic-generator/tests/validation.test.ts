@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { generateFold } from "../src/generators.ts";
 import type { FOLDFormat, ValidationConfig } from "../src/types.ts";
 import { validateFold } from "../src/validate.ts";
 
@@ -146,6 +147,87 @@ test("Rabbit Ear fold-program validation rejects sparse outputs", async () => {
     requireRabbitEarFoldProgram: true,
   });
   expect(result.failed).toContain("rabbit-ear-fold-program-structure");
+});
+
+test("Tessellation fold-program validation rejects missing metadata", async () => {
+  const result = await validateFold(square(), {
+    ...validation,
+    requireTessellationFoldProgram: true,
+  });
+  expect(result.failed).toContain("tessellation-fold-program-structure");
+});
+
+test("Tessellation fold-program validation rejects wrong provenance", async () => {
+  const fold: FOLDFormat = {
+    ...square(),
+    tessellation_metadata: {
+      generator: "tessellation-fold-program",
+      subfamily: "orthogonal-bp-grid",
+      coordinateMode: "regular-grid-intervals",
+      gridSizeX: 4,
+      gridSizeY: 4,
+      horizontalPleatInterval: 1,
+      verticalPleatInterval: 1,
+      repeatX: 4,
+      repeatY: 4,
+      activeCreaseCount: 0,
+      targetActiveCreaseRange: [0, 4],
+      horizontalCreaseLengthFraction: 0.5,
+      verticalCreaseLengthFraction: 0.5,
+      diagonalCreaseLengthFraction: 0,
+      minRenderedSpacingPx1024: 256,
+      angleHistogram: { "0": 2, "90": 2 },
+      assignmentMode: "vertical-line-alternating",
+      verticalBias: false,
+      generatorSteps: ["test"],
+    },
+    label_policy: {
+      labelSource: "rabbit-ear-fold-program",
+      geometrySource: "rabbit-ear-fold-program",
+      assignmentSource: "rabbit-ear-fold-program",
+      trainingEligible: true,
+      notes: [],
+    },
+  };
+  const result = await validateFold(fold, {
+    ...validation,
+    requireTessellationFoldProgram: true,
+  });
+  expect(result.failed).toContain("tessellation-fold-program-structure");
+});
+
+test("Tessellation fold-program validation rejects broken line alternation", async () => {
+  const fold = generateFold({
+    id: "broken-tessellation",
+    family: "tessellation-fold-program",
+    seed: 13579,
+    numCreases: 120,
+    maxCreases: 220,
+    bucket: "small",
+    tessellationSampler: {
+      subfamilyWeights: { "orthogonal-bp-grid": 1 },
+      verticalBiasProbability: 1,
+      minRepeats: 6,
+      maxRepeats: 18,
+    },
+  });
+  const metadata = fold.tessellation_metadata;
+  if (!metadata) throw new Error("expected tessellation metadata");
+  const cols = metadata.repeatX;
+  const horizontalIndex = 1 * cols + 0;
+  const verticalOffset = (metadata.repeatY + 1) * cols;
+  const aboveVerticalIndex = verticalOffset + 1 * (cols + 1) + 1;
+  fold.edges_assignment[horizontalIndex] = fold.edges_assignment[aboveVerticalIndex];
+
+  const result = await validateFold(fold, {
+    ...validation,
+    maxVertices: 512,
+    maxEdges: 1024,
+    requireTessellationFoldProgram: true,
+    requireLocalFlatFoldability: false,
+  });
+  expect(result.failed).toContain("tessellation-fold-program-structure");
+  expect(result.errors.join("\n")).toContain("3-to-1 M/V split");
 });
 
 function square(): FOLDFormat {

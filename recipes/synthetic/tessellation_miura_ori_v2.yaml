@@ -1,0 +1,62 @@
+name: tessellation_miura_ori_v2
+seed: 20260620
+imageSize: 768
+padding: 42
+
+splits:
+  train: 0.85
+  val: 0.10
+  test: 0.05
+
+families:
+  tessellation-fold-program: 1.0
+
+complexityBuckets:
+  - name: small
+    minCreases: 120
+    maxCreases: 260
+    weight: 0.15
+  - name: medium
+    minCreases: 260
+    maxCreases: 650
+    weight: 0.35
+  - name: dense
+    minCreases: 650
+    maxCreases: 1300
+    weight: 0.35
+  - name: superdense
+    minCreases: 1300
+    maxCreases: 2200
+    weight: 0.15
+
+tessellationSampler:
+  subfamilyWeights:
+    miura-ori: 1.0
+  minRepeats: 6
+  maxRepeats: 48
+  miuraSkewFactors: [0.24, 0.33, 0.45, 0.58]
+  miuraMinCellAspectRatio: 0.5
+  miuraMaxCellAspectRatio: 3.0
+
+validation:
+  strictGlobal: true
+  globalBackend: rabbit-ear-solver
+  minVertexDistance: 0.00001
+  maxVertices: 4000
+  maxEdges: 4000
+  requireDense: true
+  requireTreeMaker: false
+  requireRabbitEarFoldProgram: false
+  requireTessellationFoldProgram: true
+  requireLocalFlatFoldability: true
+
+renderVariants:
+  - name: tessellation_assignment_clean
+    assignmentVisibility: visible
+    count: 1
+  - name: tessellation_active_only
+    assignmentVisibility: active-only
+    count: 1
+  - name: monochrome_ink
+    assignmentVisibility: hidden
+    count: 1

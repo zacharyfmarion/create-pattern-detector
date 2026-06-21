@@ -1,0 +1,128 @@
+{
+  "schemaVersion": 1,
+  "id": "runpod-v3-no-guide-grid-close-pair-dense-edges-tess15-weighted-4090",
+  "status": "promoted",
+  "phase": "v3-no-guide-grid-close-pair-dense-edges-tessellation",
+  "registeredAt": "2026-06-19",
+  "description": "Current promoted V3 browser/default checkpoint. Corrected 15% tessellation BP-data probe. Warm-started from the max1200 dense-edge checkpoint, preserved the close-pair radius-3 junction-offset recipe, and used the explicit v3-tessellation-15pct sampler so the base exposure remained balanced TreeMaker/Rabbit Ear while adding 12% orthogonal BP-grid and 3% Miura tessellations. The earlier natural-sampler tessellation run is a non-promotable ablation because it also reduced Rabbit Ear exposure.",
+  "checkpoint": {
+    "gitTracked": false,
+    "relativePath": "checkpoints/runpod_v3_no_guide_grid_close_pair_dense_edges_tess15_weighted_probe_20260619/full/latest.pt",
+    "originalRunpodPath": "/workspace/create-pattern-detector/checkpoints/runpod_v3_no_guide_grid_close_pair_dense_edges_tess15_weighted_probe_20260619/full/latest.pt",
+    "sha256": "0827adc76d7d33b67e7121f912ef06378649b62dae59340cc2a1ab7e0d39988d",
+    "sizeBytes": 138748576
+  },
+  "model": {
+    "class": "CPLineNet",
+    "backbone": "hrnet_w18",
+    "hiddenChannels": 128,
+    "imageSize": 1024,
+    "v2Heads": true,
+    "junctionOffsetClamp": 1.0
+  },
+  "training": {
+    "device": "cuda",
+    "gpu": "NVIDIA GeForce RTX 4090",
+    "runpodPodId": "rtljlswig1uksp",
+    "dataset": "cp_training_mix_v3_tessellation_15pct",
+    "manifest": "data/generated/synthetic/cp_training_mix_v3_tessellation_15pct/raw-manifest.jsonl",
+    "trainSamples": 2048,
+    "valSamples": 256,
+    "maxEdges": 1200,
+    "batchSize": 1,
+    "maxSteps": 1500,
+    "seed": 31,
+    "augmentProfile": "v3-no-guide-grid-replay",
+    "evalAugmentProfile": "v3-no-guide-grid-replay",
+    "initCheckpoint": "checkpoints/runpod_v3_no_guide_grid_close_pair_dense_edges_max1200_probe_20260618/full/latest.pt",
+    "loadedCheckpoint": "/workspace/create-pattern-detector/checkpoints/runpod_v3_no_guide_grid_close_pair_dense_edges_max1200_probe_20260618/full/latest.pt",
+    "reinitHeads": "",
+    "learningRate": 0.00005,
+    "junctionSigmaPx": 1.5,
+    "junctionOffsetRadiusPx": 3.0,
+    "junctionOffsetWeight": 0.5,
+    "junctionFocalAlpha": 2.0,
+    "junctionFocalBeta": 4.0,
+    "trainFamilySampling": "v3-tessellation-15pct",
+    "trainSelectionSummary": {
+      "families": {
+        "rabbit-ear-fold-program": 870,
+        "tessellation-fold-program": 308,
+        "treemaker-tree": 870
+      },
+      "sourceDatasets": {
+        "cp_training_mix_v1": 1740,
+        "tessellation_miura_ori_v2_15pct": 62,
+        "tessellation_orthogonal_bp_grid_v2_15pct": 246
+      }
+    },
+    "batchnormMode": "batch-stats",
+    "skipGraphEval": true,
+    "skipFinalEval": true,
+    "elapsedSeconds": 3323.2346324548125,
+    "firstTrainLoss": 0.49838966131210327,
+    "lastTrainLoss": 0.4448782205581665,
+    "estimatedRunpodCostUsd": 0.82
+  },
+  "inference": {
+    "batchnormMode": "batch-stats",
+    "vectorizerThreshold": 0.65,
+    "junctionOffsetRadiusPx": 3.0,
+    "notes": "junction_offset remains radius-normalized and must be decoded with radius-3 offset-vote clustering. Browser ONNX export uses explicit per-image BatchNorm ops. This model is promoted because it improves BP horizontal/vertical dense evidence while preserving clean-15 strict topology within measurement noise.",
+    "downstreamVersionedOnnxManifest": "tree-maker-rust/apps/web/public/models/cp-detector-v3-tess15-weighted-20260619/manifest.json",
+    "downstreamOnnxSha256": "b425cfd6caecde93caa92f0e8952040f5bada0345c5387a222d1fb915e283742"
+  },
+  "evaluation": {
+    "boxPleatDense": {
+      "harness": "tree-maker-rust scripts/cp-detect/evaluate-box-pleat-dense-cache.py",
+      "denseCache": "box-pleat-native-v1-tess15-weighted-probe-20260619-browser-onnx",
+      "report": "tree-maker-rust/artifacts/cp-detect-correctness/reports/box-pleat-native-v1-tess15-weighted-probe-20260619-dense-heads",
+      "sampleCount": 179,
+      "orthogonalRawRecall": 0.7581590298444661,
+      "orthogonalEffectiveRecall": 0.754700771928518,
+      "orthogonalNonCreaseConflict": 0.026618799697492167,
+      "diagonalRawRecall": 0.8989388058409395,
+      "diagonalEffectiveRecall": 0.8950207510320324,
+      "allCreaseEffectiveRecall": 0.7854374203180289,
+      "previousPromotedOrthogonalEffectiveRecall": 0.6746376711917329,
+      "previousPromotedOrthogonalNonCreaseConflict": 0.028509172611249415
+    },
+    "boxPleatAngleBuckets": {
+      "report": "tree-maker-rust/artifacts/cp-detect-correctness/reports/box-pleat-native-v1-angle-buckets-tess15-weighted-probe-20260619",
+      "sampleCount": 179,
+      "allHorizontalEffectiveRecall": 0.7528574376653031,
+      "allVerticalEffectiveRecall": 0.7633503152904765,
+      "allDiagonal45Or135EffectiveRecall": 0.8801375379209908,
+      "denseTopQuartileHorizontalEffectiveRecall": 0.5577971840066375,
+      "denseTopQuartileVerticalEffectiveRecall": 0.531066746317886,
+      "denseTopQuartileDiagonal45Or135EffectiveRecall": 0.8464888836035048,
+      "veryDenseHorizontalEffectiveRecall": 0.5238229235753278,
+      "veryDenseVerticalEffectiveRecall": 0.48745262499259,
+      "veryDenseDiagonal45Or135EffectiveRecall": 0.8389017949872405
+    },
+    "cleanStrictTopology": {
+      "harness": "tree-maker-rust compare_exact_solve_benchmark --candidate-source junction-first-v1 --junction-first-offset-cluster-radius-px 3 --skip-exact-solve --skip-flat-folder --strict-vertex-tolerance-px 4",
+      "denseCache": "clean-1024-s15-browser-onnx-v3-tess15-weighted-probe-20260619",
+      "report": "tree-maker-rust/artifacts/cp-detect-correctness/reports/clean-1024-s15-strict-v3-tess15-weighted-probe-20260619",
+      "edgeF1": 0.9650877524061144,
+      "exactTopologySamples": "4/15",
+      "exactTopologyAndAssignmentSamples": "3/15",
+      "missingEdges": 108,
+      "extraEdges": 77,
+      "mergedEdges": 55,
+      "splitEdges": 16,
+      "vertexF1": 0.9881305637982196,
+      "assignmentAccuracy": 0.9851388345717638,
+      "previousPromotedEdgeF1": 0.965465182109832,
+      "previousPromotedMissingEdges": 107,
+      "previousPromotedExtraEdges": 76,
+      "previousPromotedMergedEdges": 60
+    }
+  },
+  "relatedDocs": [
+    "docs/model-training-history.md",
+    "docs/evals/box-pleat-native-v1.md",
+    "docs/checkpoint-management.md",
+    "docs/dense-bp-vertical-training-plan.md"
+  ]
+}

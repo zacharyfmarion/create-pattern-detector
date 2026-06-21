@@ -1,5 +1,9 @@
 # V2 Checkpoint Metrics
 
+This page is historical for the V2 replay-correction round. For the current
+promoted downstream/browser model and the later close-pair R1/R3 comparison, see
+`docs/model-training-history.md`.
+
 This page records V2 checkpoint comparisons that should be kept in git. The
 large plots, contact sheets, and per-sample visualizations remain under ignored
 `visualizations/` directories.
@@ -10,7 +14,7 @@ Machine-readable snapshot:
 artifacts/evaluations/v2-checkpoint-comparison-20260522.json
 ```
 
-Current V2 candidate checkpoint:
+Historical V2 replay-correction candidate checkpoint:
 
 ```text
 artifacts/checkpoints/runpod-v2-replay-correction-full-4000ada.json
@@ -66,7 +70,7 @@ the prior checkpoints without rerunning those prior checkpoints.
 
 Interpretation:
 
-- `V2 replay full` is the current best balanced checkpoint.
+- `V2 replay full` was the best balanced checkpoint in this V2 replay screen.
 - It restores most of the old-profile `line-style` regression introduced by the
   issue-only V2 curriculum.
 - It improves over `V2 issue-only` by `+0.114` edge precision, `+0.042` edge

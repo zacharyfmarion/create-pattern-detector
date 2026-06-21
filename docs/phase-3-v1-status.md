@@ -41,7 +41,7 @@ The Phase 3 branch now includes:
 - Posthoc graph evaluation through `PlanarGraphBuilder`.
 - Boundary metrics, per-family graph summaries, and clearer graph visualization.
 
-The best current checkpoint is good on the readable clean slice:
+The best Phase 3 V1 checkpoint is good on the readable clean slice:
 
 | Slice | Samples | Edge recall | Edge precision | Border recall | Assignment accuracy |
 | --- | ---: | ---: | ---: | ---: | ---: |

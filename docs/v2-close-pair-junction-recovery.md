@@ -1,5 +1,9 @@
 # V2 Close-Pair Junction Recovery (label + loss + decoder plan)
 
+Current model summary and checkpoint/ONNX provenance now live in
+`docs/model-training-history.md`. This plan records the close-pair experiment
+that promoted R1 and kept R3 as a non-promoted from-scratch ablation.
+
 Status: Proposed implementation plan, 2026-06-09.
 Owner branch: `codex/v2-roadmap-border-repair` (V2 heads live here only).
 Downstream consumer: `tree-maker-rust` `junction-first-v1` candidate strategy

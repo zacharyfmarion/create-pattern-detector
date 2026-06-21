@@ -3,12 +3,16 @@
 This document covers fold-only synthetic dataset generation for the current
 training corpus.
 
-The production mix is TreeMaker-primary, with a small strict Rabbit Ear
+The current production mix is TreeMaker-primary, with a small strict Rabbit Ear
 fold-program supplement:
 
 ```text
 12,000 TreeMaker samples + 2,000 Rabbit Ear samples = 14,000 fold-only samples
 ```
+
+The tessellation release is a newer source dataset for dense BP/orthogonal line
+coverage. Keep it as its own release until building an explicitly versioned
+next training mix; do not mutate `cp_training_mix_v1`.
 
 No image augmentation is part of this step. The goal here is diverse, validated
 `.fold` graph data. Rendering style/noise augmentation belongs to the later
@@ -33,6 +37,26 @@ image-training phase.
   - Symlinks source `.fold` and metadata files instead of copying them.
   - Merges raw manifests and preserves source provenance.
 
+- `tools/synthetic-generator/src/tessellation-fold-program.ts`
+  - Emits deterministic orthogonal BP/grid tessellation `.fold` samples.
+  - Segments every horizontal/vertical intersection explicitly.
+  - Oversamples vertical-heavy grids for dense vertical crease-line evidence.
+  - Alternates whole M/V crease lines along one axis, with connector segments
+    chosen so each interior junction has a 3-to-1 M/V split.
+  - Writes `tessellation_metadata`, angle histograms, rendered spacing, and
+    label provenance into each `.fold`.
+
+- `recipes/synthetic/tessellation_fold_program_v1.yaml`
+  - Enables only `tessellation-fold-program`.
+  - Defines small through superdense active-crease buckets.
+  - Requires dense, tessellation-specific, local flat-foldability, and Rabbit
+    Ear global solver validation.
+
+- `scripts/data/visualize_synthetic_folds.py`
+  - Renders a generic contact sheet for any raw-manifest synthetic release.
+  - Shows tessellation repeat counts, vertical length fraction, and minimum
+    rendered spacing when available.
+
 - `implementations-plans/rabbit-ear-fold-program-supplement.md`
   - Records the supplement decision, validation contract, and release checks.
 
@@ -43,7 +67,9 @@ Shared datasets live outside the git worktree:
 ```text
 /Users/zacharymarion/Documents/datasets/create-pattern-detector/synthetic/treemaker_tree_v1
 /Users/zacharymarion/Documents/datasets/create-pattern-detector/synthetic/rabbit_ear_fold_program_v1
+/Users/zacharymarion/Documents/datasets/create-pattern-detector/synthetic/tessellation_fold_program_v1
 /Users/zacharymarion/Documents/datasets/create-pattern-detector/synthetic/cp_training_mix_v1
+/Users/zacharymarion/Documents/datasets/create-pattern-detector/synthetic/cp_training_mix_v2_tessellation
 ```
 
 Future worktrees should access them through ignored symlinks:
@@ -51,7 +77,9 @@ Future worktrees should access them through ignored symlinks:
 ```bash
 scripts/data/link_shared_synthetic_data.sh treemaker_tree_v1
 scripts/data/link_shared_synthetic_data.sh rabbit_ear_fold_program_v1
+scripts/data/link_shared_synthetic_data.sh tessellation_fold_program_v1
 scripts/data/link_shared_synthetic_data.sh cp_training_mix_v1
+scripts/data/link_shared_synthetic_data.sh cp_training_mix_v2_tessellation
 ```
 
 The mixed root is the recommended default for training setup once both source
@@ -140,6 +168,54 @@ Expected smoke properties:
 - accepted rows include `rabbitEarMetadata`.
 - folded preview emits finite folded coordinates for the checked rows.
 
+## Tessellation Smoke
+
+Run a small deterministic smoke before generating or mixing a tessellation
+release:
+
+```bash
+rm -rf /tmp/tessellation_fold_program_v1_smoke
+
+bun run --cwd tools/synthetic-generator generate -- \
+  --recipe ../../recipes/synthetic/tessellation_fold_program_v1.yaml \
+  --count 64 \
+  --out /tmp/tessellation_fold_program_v1_smoke \
+  --max-attempts 1000
+```
+
+Create a fold distribution report and contact sheet:
+
+```bash
+python3.10 scripts/data/synthetic_fold_report.py \
+  --root /tmp/tessellation_fold_program_v1_smoke
+
+python3.10 scripts/data/visualize_synthetic_folds.py \
+  --root /tmp/tessellation_fold_program_v1_smoke \
+  --family tessellation-fold-program \
+  --sort vertical-fraction-desc \
+  --limit 24
+```
+
+Label smoke:
+
+```bash
+PYTHONPATH=. python3.10 scripts/data/smoke_shared_synthetic_data.py \
+  --root /tmp/tessellation_fold_program_v1_smoke \
+  --samples-per-split 2 \
+  --image-size 128
+```
+
+Expected smoke properties:
+
+- `qa.json` has `familyCounts.tessellation-fold-program = 64`.
+- accepted rows include `tessellationMetadata`.
+- `counts.tessellationSubfamily.orthogonal-bp-grid` covers every accepted row.
+- manifest rows include both `local-flat-foldability` and `rabbit-ear-solver`
+  in `validation.passed`.
+- the fold report shows a meaningful vertical-heavy tail in
+  `tessellation_vertical_crease_length_fraction`.
+- contact sheets visibly contain dense horizontal and vertical crease grids.
+
 ## Generate The Rabbit Ear Release
 
 Generate the 2,000-sample supplement outside the repo. A simple shard layout is
@@ -198,6 +274,72 @@ PYTHONPATH=. python3.10 scripts/data/smoke_shared_synthetic_data.py \
   --image-size 128
 ```
 
+## Generate The Tessellation Release
+
+Generate the tessellation source release outside the repo. For the first BP
+vertical-recall experiments, keep this as a separate source dataset and build a
+new mixed root from it rather than editing `cp_training_mix_v1` in place.
+
+```bash
+export CP_DATA_ROOT=/Users/zacharymarion/Documents/datasets/create-pattern-detector
+export TESS_RELEASE=$CP_DATA_ROOT/synthetic/tessellation_fold_program_v1
+export TESS_SHARDS=$CP_DATA_ROOT/synthetic/.shards/tessellation_fold_program_v1
+
+rm -rf "$TESS_SHARDS"
+mkdir -p "$TESS_SHARDS"
+```
+
+Generate 4 shards of 250 accepted samples:
+
+```bash
+for shard in 0 1 2 3; do
+  seed=$((12917000 + shard))
+  printf -v shard_name "shard-%03d" "$shard"
+
+  bun run --cwd tools/synthetic-generator generate -- \
+    --recipe ../../recipes/synthetic/tessellation_fold_program_v1.yaml \
+    --seed "$seed" \
+    --count 250 \
+    --out "$TESS_SHARDS/$shard_name" \
+    --max-attempts 2500
+done
+```
+
+Merge the shards into the durable release root:
+
+```bash
+rm -rf "$TESS_RELEASE.build"
+
+python3.10 scripts/data/merge_synthetic_fold_shards.py \
+  --out "$TESS_RELEASE.build" \
+  --recompute-splits \
+  "$TESS_SHARDS"/shard-*
+
+python3.10 scripts/data/synthetic_fold_report.py \
+  --root "$TESS_RELEASE.build"
+
+python3.10 scripts/data/visualize_synthetic_folds.py \
+  --root "$TESS_RELEASE.build" \
+  --family tessellation-fold-program \
+  --sort vertical-fraction-desc \
+  --limit 32 \
+  --out "$TESS_RELEASE.build/qa/tessellation-contact-sheet.png"
+
+rm -rf "$TESS_RELEASE"
+mv "$TESS_RELEASE.build" "$TESS_RELEASE"
+```
+
+Link and smoke the release:
+
+```bash
+scripts/data/link_shared_synthetic_data.sh tessellation_fold_program_v1
+
+PYTHONPATH=. python3.10 scripts/data/smoke_shared_synthetic_data.py \
+  --root data/generated/synthetic/tessellation_fold_program_v1 \
+  --samples-per-split 2 \
+  --image-size 128
+```
+
 ## Build The Mixed Training Root
 
 Build the 14k fold-only training mix from the two external roots:
@@ -231,6 +373,47 @@ PYTHONPATH=. python3.10 scripts/data/smoke_shared_synthetic_data.py \
   --samples-per-split 2 \
   --image-size 128
 ```
+
+To test tessellation data, build a new versioned mixed root. Do not overwrite
+`cp_training_mix_v1`:
+
+```bash
+export CP_DATA_ROOT=/Users/zacharymarion/Documents/datasets/create-pattern-detector
+export MIX_RELEASE=$CP_DATA_ROOT/synthetic/cp_training_mix_v2_tessellation
+
+rm -rf "$MIX_RELEASE.build"
+
+python3.10 scripts/data/build_synthetic_training_mix.py \
+  --out "$MIX_RELEASE.build" \
+  --recompute-splits \
+  "$CP_DATA_ROOT/synthetic/treemaker_tree_v1" \
+  "$CP_DATA_ROOT/synthetic/rabbit_ear_fold_program_v1" \
+  "$CP_DATA_ROOT/synthetic/tessellation_fold_program_v1"
+
+python3.10 scripts/data/synthetic_fold_report.py \
+  --root "$MIX_RELEASE.build"
+
+python3.10 scripts/data/visualize_synthetic_folds.py \
+  --root "$MIX_RELEASE.build" \
+  --family tessellation-fold-program \
+  --sort vertical-fraction-desc \
+  --limit 32 \
+  --out "$MIX_RELEASE.build/qa/tessellation-contact-sheet.png"
+
+rm -rf "$MIX_RELEASE"
+mv "$MIX_RELEASE.build" "$MIX_RELEASE"
+```
+
+The first external release built this way is:
+
+```text
+/Users/zacharymarion/Documents/datasets/create-pattern-detector/synthetic/cp_training_mix_v2_tessellation
+```
+
+It contains 12,000 TreeMaker samples, 2,000 Rabbit Ear samples, and 1,000
+tessellation samples. Training comparisons should name this mixed root
+explicitly and compare against the promoted `MAX_EDGES=1200` model, not against
+older no-guide-grid baselines.
 
 ## Outputs
 
@@ -282,10 +465,16 @@ Important fold distribution fields:
 
 - `counts.family`: TreeMaker vs Rabbit Ear share.
 - `counts.bucket`: complexity bucket distribution.
+- `counts.tessellationSubfamily`: tessellation subfamily share.
+- `counts.tessellationVerticalBias`: requested vertical-heavy coverage.
 - `vertices` and `edges`: graph size distribution.
 - `assignment_totals`: M/V/B/U/F totals.
 - `angle_histogram`: broad orientation diversity.
 - `degree_histogram`: graph junction complexity.
+- `tessellation_vertical_crease_length_fraction`: active crease
+  length share carried by vertical grid lines.
+- `tessellation_min_rendered_spacing_px_1024`: tightest expected
+  rendered line spacing at 1024px.
 
 For the intended production mix:
 

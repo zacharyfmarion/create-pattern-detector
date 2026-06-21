@@ -1,0 +1,50 @@
+{
+  "name": "box_pleat_native_v1",
+  "version": 1,
+  "status": "candidate-source-of-truth",
+  "description": "Deterministic first-pass box-pleat candidate eval set derived from the native scraped converted-FOLD corpus.",
+  "finder": {
+    "script": "scripts/data/find_box_pleat_candidates.py",
+    "algorithm": "box_pleat_geometry_v1",
+    "input": {
+      "dataset": "scraped/native converted FOLD corpus",
+      "root_arg": "--fold-root",
+      "default_root": "data/output/scraped/native/converted_fold",
+      "glob": "**/*.fold"
+    },
+    "parameters": {
+      "angle_tolerance_deg": 10.0,
+      "frame_step_deg": 0.5,
+      "coord_tolerance_frac": 0.003,
+      "min_segments_per_line": 2
+    },
+    "selection": {
+      "candidate_tiers": [
+        "strong",
+        "review",
+        "review-name-prior"
+      ],
+      "contact_sheet_review_count": 80
+    }
+  },
+  "expected": {
+    "algorithm": "box_pleat_geometry_v1",
+    "parsed_count": 640,
+    "error_count": 0,
+    "tier_counts": {
+      "review": 74,
+      "review-name-prior": 1,
+      "strong": 104,
+      "weak": 461
+    },
+    "candidate_tiers": [
+      "strong",
+      "review",
+      "review-name-prior"
+    ],
+    "candidate_count": 179,
+    "all_inputs_canonical_sha256": "5dbc791e8ba7ac7e5cab138cc53434ef5ede7b219ad385fbb225496c4b648c39",
+    "selected_canonical_sha256": "c1dd5513036a466168dc58bf5b1f93aa27618e91e27de8fdbf900f247608887f",
+    "selected_ranked_features_sha256": "57d93c93753803bfd295a823ae2da3e6844abd589e3bc5adb955e6db1d90bc4a"
+  }
+}

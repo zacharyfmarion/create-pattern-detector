@@ -4,6 +4,7 @@ export type TreeMakerSymmetryClass = "diagonal" | "middle-axis" | "asymmetric";
 export type TreeMakerSymmetryVariant = "main-diagonal" | "anti-diagonal" | "vertical" | "horizontal" | "none";
 export type TreeMakerTopology = "radial-star" | "hubbed-limbs" | "spine-chain" | "branched-hybrid";
 export type RabbitEarFoldProgramAxiom = "axiom1" | "axiom2" | "axiom3" | "axiom4" | "axiom7";
+export type TessellationSubfamily = "orthogonal-bp-grid" | "miura-ori";
 export type TreeMakerCreaseKind =
   | "BORDER"
   | "AXIAL"
@@ -75,10 +76,34 @@ export interface RabbitEarFoldProgramMetadata {
   requestedBucket: string;
 }
 
+export interface TessellationMetadata {
+  generator: "tessellation-fold-program";
+  subfamily: TessellationSubfamily;
+  coordinateMode: "regular-grid-intervals" | "miura-square-zigzag-grid";
+  gridSizeX?: number;
+  gridSizeY?: number;
+  horizontalPleatInterval?: number;
+  verticalPleatInterval?: number;
+  miuraSkewFactor?: number;
+  miuraCellAspectRatio?: number;
+  repeatX: number;
+  repeatY: number;
+  activeCreaseCount: number;
+  targetActiveCreaseRange: [number, number];
+  horizontalCreaseLengthFraction: number;
+  verticalCreaseLengthFraction: number;
+  diagonalCreaseLengthFraction: number;
+  minRenderedSpacingPx1024: number;
+  angleHistogram: Record<string, number>;
+  assignmentMode: "vertical-line-alternating" | "horizontal-line-alternating" | "miura-column-alternating";
+  verticalBias: boolean;
+  generatorSteps: string[];
+}
+
 export interface LabelPolicy {
-  labelSource: "treemaker-external" | "rabbit-ear-fold-program";
-  geometrySource: "treemaker-external" | "rabbit-ear-fold-program";
-  assignmentSource: "treemaker-external" | "rabbit-ear-fold-program";
+  labelSource: "treemaker-external" | "rabbit-ear-fold-program" | "tessellation-fold-program";
+  geometrySource: "treemaker-external" | "rabbit-ear-fold-program" | "tessellation-fold-program";
+  assignmentSource: "treemaker-external" | "rabbit-ear-fold-program" | "tessellation-fold-program";
   trainingEligible: boolean;
   notes: string[];
 }
@@ -96,6 +121,7 @@ export interface FOLDFormat {
   tree_metadata?: TreeMetadata;
   treemaker_metadata?: TreeMakerMetadata;
   rabbit_ear_metadata?: RabbitEarFoldProgramMetadata;
+  tessellation_metadata?: TessellationMetadata;
   edges_treemakerKind?: TreeMakerCreaseKind[];
   label_policy?: LabelPolicy;
   faces_vertices?: number[][];
@@ -106,6 +132,7 @@ export interface FOLDFormat {
 export const GENERATOR_FAMILIES = [
   "treemaker-tree",
   "rabbit-ear-fold-program",
+  "tessellation-fold-program",
 ] as const;
 export type GeneratorFamily = (typeof GENERATOR_FAMILIES)[number];
 export type GlobalValidationBackend = "rabbit-ear-solver" | "fold-cli";
@@ -127,6 +154,7 @@ export interface ValidationConfig {
   requireDense?: boolean;
   requireTreeMaker?: boolean;
   requireRabbitEarFoldProgram?: boolean;
+  requireTessellationFoldProgram?: boolean;
   requireLocalFlatFoldability?: boolean;
 }
 
@@ -147,6 +175,7 @@ export interface SyntheticRecipe {
   validation: ValidationConfig;
   renderVariants: RenderVariantConfig[];
   treeMakerSampler?: TreeMakerSamplerConfig;
+  tessellationSampler?: TessellationSamplerConfig;
 }
 
 export interface GenerationConfig {
@@ -158,6 +187,7 @@ export interface GenerationConfig {
   bucket: string;
   dense?: boolean;
   treeMakerSampler?: TreeMakerSamplerConfig;
+  tessellationSampler?: TessellationSamplerConfig;
 }
 
 export interface TreeMakerSamplerConfig {
@@ -174,6 +204,24 @@ export interface TreeMakerAcceptedMixConfig {
   symmetryWeights?: Partial<Record<TreeMakerSymmetryClass, number>>;
   archetypeWeights?: Partial<Record<TreeMakerArchetype, number>>;
   topologyWeights?: Partial<Record<TreeMakerTopology, number>>;
+}
+
+export interface TessellationSamplerConfig {
+  subfamilyWeights?: Partial<Record<TessellationSubfamily, number>>;
+  verticalBiasProbability?: number;
+  minRepeats?: number;
+  maxRepeats?: number;
+  gridSizes?: number[];
+  pleatIntervalPairs?: Array<{
+    horizontal: number;
+    vertical: number;
+    weight?: number;
+  }>;
+  miuraCols?: number[];
+  miuraRows?: number[];
+  miuraSkewFactors?: number[];
+  miuraMinCellAspectRatio?: number;
+  miuraMaxCellAspectRatio?: number;
 }
 
 export interface ValidationResult {
@@ -202,6 +250,7 @@ export interface RawManifestRow {
   treeMetadata?: TreeMetadata;
   treeMakerMetadata?: TreeMakerMetadata;
   rabbitEarMetadata?: RabbitEarFoldProgramMetadata;
+  tessellationMetadata?: TessellationMetadata;
   labelPolicy?: LabelPolicy;
   validation: ValidationResult;
 }
