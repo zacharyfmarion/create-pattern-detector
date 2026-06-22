@@ -54,7 +54,18 @@ export function fillBoxPleatedGaps(
 ): GapFillResult {
   const W = Math.round(sheet.width);
   const H = Math.round(sheet.height);
-  const empty = emptyGrid(W, H, occupied);
+  return fillEmptyGrid(W, H, emptyGrid(W, H, occupied));
+}
+
+/** Tile a pre-computed empty grid (true = empty cell) with filler flaps. */
+export function fillBoxPleatedGapsFromGrid(
+  sheet: { width: number; height: number },
+  empty: boolean[][],
+): GapFillResult {
+  return fillEmptyGrid(Math.round(sheet.width), Math.round(sheet.height), empty);
+}
+
+function fillEmptyGrid(W: number, H: number, empty: boolean[][]): GapFillResult {
   const regions = connectedRegions(empty, W, H);
 
   const flaps: GapRect[] = [];
@@ -170,7 +181,7 @@ function boundingRect(cells: Array<[number, number]>): GapRect {
   return { x0, y0, x1, y1 };
 }
 
-function insidePolygon(p: GridPoint, poly: OccupiedPolygon): boolean {
+export function insidePolygon(p: GridPoint, poly: OccupiedPolygon): boolean {
   if (!pointInRing(p, poly.outer)) return false;
   for (const hole of poly.inner ?? []) {
     if (pointInRing(p, hole)) return false;

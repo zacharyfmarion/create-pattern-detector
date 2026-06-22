@@ -1,8 +1,15 @@
 import { runBpStudioLayout, type BpStudioLayoutContour, type BpStudioLayoutGraphics, type BpStudioLayoutLine } from "./bp-studio-layout.ts";
 import { solveWithBpStudioOptimizer } from "./bp-studio-optimizer.ts";
 import { SeededRandom } from "./random.ts";
-import { fillBoxPleatedGaps, type GapRect, type OccupiedPolygon } from "./box-pleated-gap-fill.ts";
+import {
+  fillBoxPleatedGapsFromGrid,
+  insidePolygon,
+  type GapRect,
+  type OccupiedPolygon,
+} from "./box-pleated-gap-fill.ts";
 import type { OriSegment } from "./ori-parser.ts";
+
+const EPS = 1e-9;
 import type { BpOptimizerHierarchy, BpOptimizerRequest, BpOptimizerResult } from "./bp-studio-optimizer.ts";
 
 export type BoxPleatedPackingSymmetry = "vertical" | "horizontal" | "none";
@@ -272,26 +279,127 @@ export interface PackingGapFill {
 
 /**
  * Fill the empty paper of a BP Studio packing with filler flaps so it consumes
- * all paper (ODS polygon-packing rule #4). Flap, river, and stretch-device
- * contours are treated as occupied; the remaining empty rectangles are tiled
- * with valid flaps. A packing with an unfillable void (e.g. a 1-wide fully
- * interior strip) is reported incomplete and should be rejected.
+ * all paper (ODS polygon-packing rule #4). The empty regions ("holes") come from
+ * findPackingHoles - the gaps between facing flaps that exceed their river width.
+ * Each hole is tiled with valid flaps; a hole that cannot be tiled (e.g. a 1-wide
+ * fully interior strip) is reported incomplete and the packing is rejected.
  */
 export function fillPackingGaps(packing: BoxPleatedPacking): PackingGapFill {
-  const occupied: OccupiedPolygon[] = [];
+  const W = Math.round(packing.sheet.width);
+  const H = Math.round(packing.sheet.height);
+  const holes = findPackingHoles(packing);
+  const stretches: OccupiedPolygon[] = [];
   for (const object of packing.layout.objects) {
-    if (object.kind === "root") continue;
-    for (const contour of object.contours) {
-      occupied.push({ outer: contour.outer, inner: contour.inner });
+    if (object.kind !== "stretch-device") continue;
+    for (const contour of object.contours) stretches.push({ outer: contour.outer, inner: contour.inner });
+  }
+  // A cell is empty when its centre lies inside a hole rectangle and is not
+  // covered by a stretch device (the stretch's axials fill its own area).
+  const empty: boolean[][] = Array.from({ length: H }, () => new Array<boolean>(W).fill(false));
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const c = { x: x + 0.5, y: y + 0.5 };
+      const inHole = holes.some((r) => c.x > r.x0 && c.x < r.x1 && c.y > r.y0 && c.y < r.y1);
+      if (inHole && !stretches.some((s) => insidePolygon(c, s))) empty[y][x] = true;
     }
   }
-  const result = fillBoxPleatedGaps(packing.sheet, occupied);
+  const result = fillBoxPleatedGapsFromGrid(packing.sheet, empty);
   return {
     flaps: result.flaps,
     ridges: result.ridges,
     complete: result.resolved,
     unresolved: result.unresolved,
   };
+}
+
+/**
+ * Find the empty regions ("holes") of a packing. Each flap occupies an L-infinity
+ * square (the flap tip +/- its length). Two flaps that face each other - their
+ * squares overlap along one axis and are disjoint along the other - leave an
+ * axis-aligned slab between their facing edges. That slab is filled by the river
+ * running between them (width = sum of internal tree-edge lengths on their path,
+ * split evenly to keep the river constant width); any gap beyond the river width
+ * is a hole. Sibling flaps share a hub and have no river between them, so their
+ * whole gap is a hole. Holes are returned clipped to the paper.
+ */
+export function findPackingHoles(packing: BoxPleatedPacking): GapRect[] {
+  const W = Math.round(packing.sheet.width);
+  const H = Math.round(packing.sheet.height);
+  const flaps = packing.flaps;
+
+  const adj = new Map<number, Array<{ to: number; len: number }>>();
+  for (const node of packing.tree.nodes) adj.set(node.id, []);
+  for (const edge of packing.tree.edges) {
+    adj.get(edge.from)?.push({ to: edge.to, len: edge.length });
+    adj.get(edge.to)?.push({ to: edge.from, len: edge.length });
+  }
+  const isLeaf = (id: number): boolean => (adj.get(id)?.length ?? 0) === 1;
+  // River width between two leaves = sum of internal-internal edge lengths on the
+  // tree path; leaf edges (the flaps themselves) do not contribute.
+  const riverWidth = (a: number, b: number): number => {
+    const prev = new Map<number, [number, number]>();
+    const queue: number[] = [a];
+    const seen = new Set<number>([a]);
+    while (queue.length) {
+      const u = queue.shift()!;
+      if (u === b) break;
+      for (const e of adj.get(u) ?? []) {
+        if (!seen.has(e.to)) {
+          seen.add(e.to);
+          prev.set(e.to, [u, e.len]);
+          queue.push(e.to);
+        }
+      }
+    }
+    let width = 0;
+    let cur = b;
+    while (cur !== a) {
+      const entry = prev.get(cur);
+      if (!entry) break;
+      const [pu, len] = entry;
+      if (!isLeaf(pu) && !isLeaf(cur)) width += len;
+      cur = pu;
+    }
+    return width;
+  };
+
+  const box = (f: BoxPleatedFlap) => ({
+    x0: f.x - f.radius,
+    x1: f.x + f.radius,
+    y0: f.y - f.radius,
+    y1: f.y + f.radius,
+  });
+  const holes: GapRect[] = [];
+  const clipPush = (rect: GapRect): void => {
+    const x0 = Math.max(0, rect.x0);
+    const y0 = Math.max(0, rect.y0);
+    const x1 = Math.min(W, rect.x1);
+    const y1 = Math.min(H, rect.y1);
+    if (x1 - x0 > EPS && y1 - y0 > EPS) holes.push({ x0, y0, x1, y1 });
+  };
+
+  for (let i = 0; i < flaps.length; i++) {
+    for (let j = i + 1; j < flaps.length; j++) {
+      const a = box(flaps[i]);
+      const b = box(flaps[j]);
+      const n = riverWidth(flaps[i].id, flaps[j].id);
+      // Facing vertically: x-extents overlap, y-extents disjoint.
+      const ox0 = Math.max(a.x0, b.x0);
+      const ox1 = Math.min(a.x1, b.x1);
+      if (ox1 - ox0 > EPS) {
+        const [lo, hi] = a.y1 <= b.y0 + EPS ? [a.y1, b.y0] : b.y1 <= a.y0 + EPS ? [b.y1, a.y0] : [NaN, NaN];
+        if (!Number.isNaN(lo) && hi - lo - n > EPS) clipPush({ x0: ox0, x1: ox1, y0: lo + n / 2, y1: hi - n / 2 });
+      }
+      // Facing horizontally: y-extents overlap, x-extents disjoint.
+      const oy0 = Math.max(a.y0, b.y0);
+      const oy1 = Math.min(a.y1, b.y1);
+      if (oy1 - oy0 > EPS) {
+        const [lo, hi] = a.x1 <= b.x0 + EPS ? [a.x1, b.x0] : b.x1 <= a.x0 + EPS ? [b.x1, a.x0] : [NaN, NaN];
+        if (!Number.isNaN(lo) && hi - lo - n > EPS) clipPush({ x0: lo + n / 2, x1: hi - n / 2, y0: oy0, y1: oy1 });
+      }
+    }
+  }
+  return holes;
 }
 
 export function renderBoxPleatedPackingSvg(
