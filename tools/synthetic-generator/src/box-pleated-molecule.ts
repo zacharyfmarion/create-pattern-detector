@@ -413,15 +413,17 @@ function marchRay(
 ): RayHit | null {
   let best: { t: number; hit: RayHit } | null = null;
 
-  // Ridge intersections (reflect, or terminate at a multi-ridge junction).
+  // Ridge intersections. Reflect over a straight ridge (even one stored as
+  // several collinear segments); terminate only at a true junction where ridges
+  // of different directions meet.
   for (const r of ridges) {
     const inter = raySegmentIntersection(from, dir, r.a, r.b);
     if (!inter || inter.t <= EPS) continue;
     if (inter.collinear) continue; // leaving along this ridge - no crossing.
-    const atJunction = isRidgeEndpoint(inter.point, ridges);
-    const hit: RayHit = atJunction
-      ? { point: inter.point, type: "junction" }
-      : { point: inter.point, type: "ridge", ridgeDir: unit({ x: r.b.x - r.a.x, y: r.b.y - r.a.y }) };
+    const ridgeDir = straightRidgeDirAt(inter.point, ridges);
+    const hit: RayHit = ridgeDir
+      ? { point: inter.point, type: "ridge", ridgeDir }
+      : { point: inter.point, type: "junction" };
     if (!best || inter.t < best.t - EPS) best = { t: inter.t, hit };
   }
 
@@ -500,11 +502,24 @@ function rayBoundaryIntersection(
   return candidates[0] ?? null;
 }
 
-function isRidgeEndpoint(point: GridPoint, ridges: OriSegment[]): boolean {
+/**
+ * If `point` lies on a single straight ridge line - even one BP stored as
+ * several collinear segments meeting end-to-end - return that line's direction
+ * (the axial reflects over it). Return null at a true junction, where ridges of
+ * two or more distinct directions meet (a corner, a flap-center X, a T), so the
+ * axial terminates there. This lets an axial reflect at an interior grid point
+ * of a straight ridge that merely happens to be split into segments.
+ */
+function straightRidgeDirAt(point: GridPoint, ridges: OriSegment[]): GridPoint | null {
+  const lineDirs: GridPoint[] = [];
   for (const r of ridges) {
-    if (samePoint(point, r.a) || samePoint(point, r.b)) return true;
+    if (!pointOnSegment(point, r)) continue;
+    const d = unit({ x: r.b.x - r.a.x, y: r.b.y - r.a.y });
+    if (d.x === 0 && d.y === 0) continue;
+    // Treat a direction and its opposite as the same (undirected) line.
+    if (!lineDirs.some((e) => Math.abs(e.x * d.y - e.y * d.x) < EPS)) lineDirs.push(d);
   }
-  return false;
+  return lineDirs.length === 1 ? lineDirs[0] : null;
 }
 
 function unit(v: GridPoint): GridPoint {
