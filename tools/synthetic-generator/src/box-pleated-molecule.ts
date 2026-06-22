@@ -72,6 +72,9 @@ export function propagateAxials(
   const offGrid: GridPoint[] = [];
   let reflections = 0;
 
+  const insideSheet = (p: GridPoint): boolean =>
+    p.x >= -EPS && p.y >= -EPS && p.x <= sheet.width + EPS && p.y <= sheet.height + EPS;
+
   for (const seed of seeds) {
     for (const dir of AXIS_DIRS) {
       let from = seed;
@@ -87,6 +90,14 @@ export function propagateAxials(
           offGrid.push(hit.point);
           addSegment(all, seen, from, hit.point);
           break;
+        }
+        // A corner/edge flap's center can lie outside the paper. Its axial is
+        // seeded there and marches IN; the paper edge it first meets is an entry,
+        // not a termination - drop the off-paper stub and keep marching inside so
+        // the crease starts at the paper edge rather than overhanging it.
+        if (hit.type === "boundary" && !insideSheet(from)) {
+          from = point;
+          continue;
         }
         addSegment(all, seen, from, point);
         if (hit.type === "boundary") break;

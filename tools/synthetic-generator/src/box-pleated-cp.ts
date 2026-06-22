@@ -87,9 +87,16 @@ export function buildPackingCP(packing: BoxPleatedPacking): PackingCP {
     return true;
   });
 
-  const ax = propagateAxials(ridges, sheet, seeds);
-  const fam = propagateAxialFamilyWithLevels(ridges, sheet, ax.axials, ax.edgeAxials);
-  const axialFamily = [...ax.axials, ...ax.edgeAxials, ...fam.pleats];
+  const rawAx = propagateAxials(ridges, sheet, seeds);
+  const fam = propagateAxialFamilyWithLevels(ridges, sheet, rawAx.axials, rawAx.edgeAxials);
+
+  // A corner/edge flap's center can lie outside the paper, so a crease seeded
+  // there overhangs the edge; clip every crease to the paper so they all
+  // terminate at the boundary.
+  const axials = clipAll(rawAx.axials, W, H);
+  const edgeAxials = clipAll(rawAx.edgeAxials, W, H);
+  const pleats = clipAll(fam.pleats, W, H);
+  const axialFamily = [...axials, ...edgeAxials, ...pleats];
 
   const boundary: OriSegment[] = [
     seg({ x: 0, y: 0 }, { x: W, y: 0 }),
@@ -98,24 +105,32 @@ export function buildPackingCP(packing: BoxPleatedPacking): PackingCP {
     seg({ x: 0, y: H }, { x: 0, y: 0 }),
   ];
   const hr = propagateHinges(ridges, axialFamily, seeds, sheet, [...boundary, ...ridges, ...axialFamily]);
+  const hinges = clipAll(hr.hinges, W, H);
 
-  const offGrid = offGridJunctions([...ridges, ...ax.axials, ...ax.edgeAxials, ...fam.pleats]);
-  const adj = planarize([...boundary, ...ridges, ...axialFamily, ...hr.hinges]);
+  const offGrid = offGridJunctions([...ridges, ...axialFamily]);
+  const adj = planarize([...boundary, ...ridges, ...axialFamily, ...hinges]);
   const failing = failingJunctions(adj, sheet).map((f) => ({ x: f.x, y: f.y }));
 
   return {
     sheet,
     ridges,
-    axials: ax.axials,
-    edgeAxials: ax.edgeAxials,
-    pleats: fam.pleats,
-    hinges: hr.hinges,
+    axials,
+    edgeAxials,
+    pleats,
+    hinges,
     seeds,
     offGrid,
     failing,
     complete: gap.complete,
     valid: gap.complete && offGrid.length === 0,
   };
+}
+
+/** Clip each segment to the paper, dropping any that fall entirely outside. */
+function clipAll(segments: OriSegment[], W: number, H: number): OriSegment[] {
+  const out: OriSegment[] = [];
+  for (const s of segments) pushClipped(out, s.a, s.b, W, H);
+  return out;
 }
 
 /** Clip a segment to [0,W]x[0,H] (Liang-Barsky) and push it if any part remains. */
