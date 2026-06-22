@@ -29,10 +29,21 @@ export interface AxialResult {
   seeds: GridPoint[];
   /** Contour hits that terminated at a multi-ridge junction (need Y-handling later). */
   junctionTerminations: GridPoint[];
+  /**
+   * Reflection/termination points that did NOT land on a grid point. Every axial
+   * must reflect or end on an integer grid point; a non-empty list means the
+   * packing produced a sub-grid crease (e.g. a Pythagorean stretch edge whose
+   * reflection misses the grid) and should be rejected.
+   */
+  offGrid: GridPoint[];
   reflections: number;
 }
 
 const EPS = 1e-7;
+// Float-dust tolerance for snapping a reflection/termination point to the grid.
+// Far below any genuine sub-grid offset (a half cell, or a Pythagorean fraction
+// like 1/3), so it only cleans rounding error and never hides a real off-grid hit.
+const GRID_EPS = 1e-6;
 const MAX_BOUNCES = 64;
 const AXIS_DIRS: GridPoint[] = [
   { x: 1, y: 0 },
@@ -58,6 +69,7 @@ export function propagateAxials(
   const all: OriSegment[] = [];
   const seen = new Set<string>();
   const junctionTerminations: GridPoint[] = [];
+  const offGrid: GridPoint[] = [];
   let reflections = 0;
 
   for (const seed of seeds) {
@@ -67,15 +79,24 @@ export function propagateAxials(
       for (let bounce = 0; bounce < MAX_BOUNCES; bounce++) {
         const hit = marchRay(from, d, ridges, sheet);
         if (!hit) break;
-        addSegment(all, seen, from, hit.point);
+        // Every reflection/termination must land on a grid point. Snap away float
+        // dust; a point not near any grid point is a genuine sub-grid crease - we
+        // record it and stop this contour so callers can reject the packing.
+        const point = snapToGrid(hit.point);
+        if (!point) {
+          offGrid.push(hit.point);
+          addSegment(all, seen, from, hit.point);
+          break;
+        }
+        addSegment(all, seen, from, point);
         if (hit.type === "boundary") break;
         if (hit.type === "junction") {
-          junctionTerminations.push(hit.point);
+          junctionTerminations.push(point);
           break;
         }
         // ridge interior: reflect across and continue.
         d = reflect(d, hit.ridgeDir!);
-        from = hit.point;
+        from = point;
         reflections++;
       }
     }
@@ -90,7 +111,14 @@ export function propagateAxials(
   // its M/V may need special handling at assignment (it is "both" a ridge and
   // an axial). Revisit when we wire crease assignment.
   const axials = subtractRidgeOverlaps(interior, ridges);
-  return { axials, edgeAxials, seeds, junctionTerminations, reflections };
+  return { axials, edgeAxials, seeds, junctionTerminations, offGrid, reflections };
+}
+
+/** Snap a point to the integer grid if it is within float-dust tolerance, else null. */
+function snapToGrid(p: GridPoint): GridPoint | null {
+  const rx = Math.round(p.x);
+  const ry = Math.round(p.y);
+  return Math.abs(p.x - rx) < GRID_EPS && Math.abs(p.y - ry) < GRID_EPS ? { x: rx, y: ry } : null;
 }
 
 /** Remove the portions of each axial that lie along a collinear ridge. */
@@ -500,6 +528,39 @@ function rayBoundaryIntersection(
   }
   candidates.sort((p, q) => p.t - q.t);
   return candidates[0] ?? null;
+}
+
+/**
+ * Junction vertices of a ridge set: points where two or more ridges of distinct
+ * directions meet. For a single flap's straight skeleton these are its spine
+ * convergence points - one for a point/square flap, two (the spine endpoints)
+ * for a longer rectangular flap. Axials must be seeded from ALL of them, not
+ * just the flap anchor, or a rectangular flap only grows half its molecule.
+ */
+export function ridgeJunctions(ridges: OriSegment[]): GridPoint[] {
+  const byPoint = new Map<string, { point: GridPoint; dirs: GridPoint[] }>();
+  for (const r of ridges) {
+    for (const [end, other] of [[r.a, r.b], [r.b, r.a]] as const) {
+      const dx = other.x - end.x;
+      const dy = other.y - end.y;
+      const len = Math.hypot(dx, dy);
+      if (len < EPS) continue;
+      const key = `${Math.round(end.x * 1e6) / 1e6},${Math.round(end.y * 1e6) / 1e6}`;
+      const entry = byPoint.get(key) ?? { point: end, dirs: [] };
+      entry.dirs.push({ x: dx / len, y: dy / len });
+      byPoint.set(key, entry);
+    }
+  }
+  const out: GridPoint[] = [];
+  for (const { point, dirs } of byPoint.values()) {
+    // A junction has >= 2 distinct (undirected) ridge directions.
+    const distinct: GridPoint[] = [];
+    for (const d of dirs) {
+      if (!distinct.some((e) => Math.abs(e.x * d.y - e.y * d.x) < EPS)) distinct.push(d);
+    }
+    if (distinct.length >= 2) out.push(point);
+  }
+  return out;
 }
 
 /**
