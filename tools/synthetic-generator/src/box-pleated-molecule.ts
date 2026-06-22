@@ -164,16 +164,18 @@ function segAt(s: OriSegment, t0: number, t1: number): OriSegment {
 }
 
 /**
- * Stage B: axial+1 pleat contours.
+ * Stage B: axial+n pleat contours, generated level by level (axials = level 0).
  *
- * Rule (from the manual construction): take every point that is exactly 1 unit
- * perpendicular-offset from an axial crease and is not already a crease, then
- * march a contour through it in both directions following the SAME rules as
- * axial generation (reflect across ridges, terminate at a multi-ridge junction
- * or the paper edge). Both the interior axials and the paper-edge axials are
- * valid sources to offset from.
+ * Manual construction (the author's process): for each crease at the current
+ * level, walk it at unit gridpoints; offset 1 unit PERPENDICULAR to a candidate
+ * point p. Keep p only if the unit connecting segment from the walk point to p
+ * does NOT intersect or touch any ridge or any already-generated crease (touch
+ * = a crossing, a collinear overlap, or p landing on a crease). Then march a new
+ * crease from p in both directions: reflect at ridges, and STOP at the paper
+ * edge or any existing crease - so a pleat never runs straight through an axial
+ * or another pleat. The marched contour is a crease at the next level.
  *
- * `axials` should be the interior axials; `edgeAxials` the paper-edge runs.
+ * `axials` are the interior axials; `edgeAxials` the paper-edge runs.
  */
 export function propagateAxialOffsets(
   ridges: OriSegment[],
@@ -181,79 +183,120 @@ export function propagateAxialOffsets(
   axials: OriSegment[],
   edgeAxials: OriSegment[],
 ): OriSegment[] {
-  const out: OriSegment[] = [];
+  const sources = [...axials, ...edgeAxials];
+  return offsetRound(ridges, sheet, sources, sources).pleats;
+}
+
+/** One level of offset pleats: offset each source crease, stopping at every crease. */
+function offsetRound(
+  ridges: OriSegment[],
+  sheet: { width: number; height: number },
+  frontier: OriSegment[],
+  existingCreases: OriSegment[],
+): { pleats: OriSegment[] } {
+  // Stoppers grow as pleats are produced, so a later pleat stops at an earlier
+  // one in the same round (matching drawing them one at a time).
+  const stoppers = [...existingCreases];
+  const produced: OriSegment[] = [];
   const seen = new Set<string>();
-  const march = (start: GridPoint, dir: GridPoint): void => {
-    let from = start;
-    let d = dir;
-    for (let bounce = 0; bounce < MAX_BOUNCES; bounce++) {
-      const hit = marchRay(from, d, ridges, sheet);
-      if (!hit) break;
-      // Every pleat reflection/termination must land on the grid. A point that
-      // misses it (e.g. reflecting off a non-45 stretch edge) cannot continue as
-      // an on-grid crease, so stop the contour there rather than emit a sub-grid
-      // segment that would also defeat segmentKey dedup and never converge.
-      const point = snapToGrid(hit.point);
-      if (!point) break;
-      addSegment(out, seen, from, point);
-      if (hit.type !== "ridge") break;
-      d = reflect(d, hit.ridgeDir!);
-      from = point;
-    }
-  };
-
-  // Existing creases. A candidate seed point that already lies on any of these
-  // is skipped - we only seed in still-empty paper, then let the ridge
-  // reflection rules trace the contour.
-  const creases = [...axials, ...edgeAxials, ...ridges];
-  const onCrease = (p: GridPoint): boolean => creases.some((c) => pointOnSegment(p, c));
-
-  // Ridges (and the paper edge) that can separate a seed from its source axial.
-  const separators: OriSegment[] = [
-    ...ridges,
-    { a: { x: 0, y: 0 }, b: { x: sheet.width, y: 0 } },
-    { a: { x: sheet.width, y: 0 }, b: { x: sheet.width, y: sheet.height } },
-    { a: { x: sheet.width, y: sheet.height }, b: { x: 0, y: sheet.height } },
-    { a: { x: 0, y: sheet.height }, b: { x: 0, y: 0 } },
-  ];
-
-  // Seeds: every interior integer point one unit perpendicular off an axial
-  // line, paired with the axial's direction. Offsetting from interior axials and
-  // edge-axials alike. Dedupe identical (point, dir) seeds.
-  const seedKeys = new Set<string>();
-  for (const a of [...axials, ...edgeAxials]) {
-    const dir = unit({ x: a.b.x - a.a.x, y: a.b.y - a.a.y });
-    // The unit-perpendicular-offset rule only lands on the grid for axis-parallel
-    // axials. A non-axis-parallel axial is a Pythagorean-stretch crease whose
-    // pleats live in the stretch's rotated grid - not yet handled - so skip it as
-    // an offset source instead of seeding off-grid pleats that never converge.
+  for (const src of frontier) {
+    const dir = unit({ x: src.b.x - src.a.x, y: src.b.y - src.a.y });
+    // Only axis-parallel sources offset onto the grid; a non-45 stretch crease's
+    // pleats live in the rotated grid (not handled yet), so skip it as a source.
     if (Math.abs(dir.x) > EPS && Math.abs(dir.y) > EPS) continue;
     const perp = { x: -dir.y, y: dir.x };
-    const steps = Math.round(Math.hypot(a.b.x - a.a.x, a.b.y - a.a.y));
+    const steps = Math.round(Math.hypot(src.b.x - src.a.x, src.b.y - src.a.y));
     for (let i = 0; i <= steps; i++) {
-      const base = { x: a.a.x + dir.x * i, y: a.a.y + dir.y * i };
-      // A probe nudged along the axial into its body, used to decide which side
-      // of a ridge-through-base the axial is on (breaks the tie when `base` sits
-      // exactly on a ridge vertex, e.g. a stretch arm endpoint).
-      const tIn = i < steps ? dir : { x: -dir.x, y: -dir.y };
-      const probe = { x: base.x + tIn.x * 1e-3, y: base.y + tIn.y * 1e-3 };
+      const base = { x: src.a.x + dir.x * i, y: src.a.y + dir.y * i };
       for (const sign of [1, -1]) {
         const p = { x: base.x + perp.x * sign, y: base.y + perp.y * sign };
         if (p.x < 0 || p.y < 0 || p.x > sheet.width || p.y > sheet.height) continue;
-        if (onCrease(p)) continue; // only seed in empty paper
-        // Do not seed across a ridge: if a ridge lies between the axial body and
-        // p, the seed is in a different face and would grow a pleat that crosses
-        // straight through the ridge instead of reflecting at it.
-        if (separators.some((s) => segmentsCross(probe, p, s.a, s.b))) continue;
-        const k = `${p.x},${p.y}:${dir.x},${dir.y}`;
-        if (seedKeys.has(k)) continue;
-        seedKeys.add(k);
-        march(p, dir);
-        march(p, { x: -dir.x, y: -dir.y });
+        if (!connectingClear(base, p, ridges, stoppers)) continue;
+        for (const seg of marchPleat(p, dir, ridges, stoppers, sheet)) {
+          const k = segmentKey(seg);
+          if (seen.has(k)) continue;
+          seen.add(k);
+          produced.push(seg);
+          stoppers.push(seg);
+        }
       }
     }
   }
-  return subtractRidgeOverlaps(out.filter((s) => !onPaperEdge(s, sheet)), ridges);
+  return { pleats: subtractRidgeOverlaps(produced.filter((s) => !onPaperEdge(s, sheet)), ridges) };
+}
+
+/**
+ * The unit connecting segment from a source walk point `base` to its offset `p`
+ * is clear iff it does not touch any ridge or crease except at its foot `base`
+ * (which lies on the source). Touch = p on a crease, the segment's midpoint on a
+ * crease (collinear overlap), or a proper interior crossing.
+ */
+function connectingClear(base: GridPoint, p: GridPoint, ridges: OriSegment[], creases: OriSegment[]): boolean {
+  const mid = { x: (base.x + p.x) / 2, y: (base.y + p.y) / 2 };
+  for (const c of ridges) {
+    if (pointOnSegment(p, c) || pointOnSegment(mid, c) || segmentsCross(base, p, c.a, c.b)) return false;
+  }
+  for (const c of creases) {
+    if (pointOnSegment(p, c) || pointOnSegment(mid, c) || segmentsCross(base, p, c.a, c.b)) return false;
+  }
+  return true;
+}
+
+/** March a pleat from `start` along ±dir: reflect at ridges, stop at any crease or the edge. */
+function marchPleat(
+  start: GridPoint,
+  dir: GridPoint,
+  ridges: OriSegment[],
+  creases: OriSegment[],
+  sheet: { width: number; height: number },
+): OriSegment[] {
+  const out: OriSegment[] = [];
+  const seen = new Set<string>();
+  for (const d0 of [dir, { x: -dir.x, y: -dir.y }]) {
+    let from = start;
+    let d = d0;
+    for (let bounce = 0; bounce < MAX_BOUNCES; bounce++) {
+      const hit = marchPleatRay(from, d, ridges, creases, sheet);
+      if (!hit) break;
+      const point = snapToGrid(hit.point);
+      if (!point) break; // off-grid reflection: stop rather than emit a sub-grid crease
+      addSegment(out, seen, from, point);
+      if (hit.type !== "ridge") break; // crease or boundary: stop
+      d = reflect(d, hit.ridgeDir!);
+      from = point;
+    }
+  }
+  return out;
+}
+
+/** Nearest hit for a pleat march: ridge (reflect), crease (stop), or paper edge (stop). */
+function marchPleatRay(
+  from: GridPoint,
+  dir: GridPoint,
+  ridges: OriSegment[],
+  creases: OriSegment[],
+  sheet: { width: number; height: number },
+): RayHit | null {
+  let best: { t: number; hit: RayHit } | null = null;
+  for (const r of ridges) {
+    const inter = raySegmentIntersection(from, dir, r.a, r.b);
+    if (!inter || inter.t <= EPS || inter.collinear) continue;
+    const ridgeDir = straightRidgeDirAt(inter.point, ridges);
+    const hit: RayHit = ridgeDir
+      ? { point: inter.point, type: "ridge", ridgeDir }
+      : { point: inter.point, type: "junction" };
+    if (!best || inter.t < best.t - EPS) best = { t: inter.t, hit };
+  }
+  for (const c of creases) {
+    const inter = raySegmentIntersection(from, dir, c.a, c.b);
+    if (!inter || inter.t <= EPS || inter.collinear) continue;
+    if (!best || inter.t < best.t - EPS) best = { t: inter.t, hit: { point: inter.point, type: "junction" } };
+  }
+  const boundaryHit = rayBoundaryIntersection(from, dir, sheet);
+  if (boundaryHit && (!best || boundaryHit.t < best.t - EPS)) {
+    best = { t: boundaryHit.t, hit: { point: boundaryHit.point, type: "boundary" } };
+  }
+  return best?.hit ?? null;
 }
 
 /**
@@ -293,27 +336,32 @@ export function propagateAxialFamilyWithLevels(
   axials: OriSegment[],
   edgeAxials: OriSegment[],
 ): AxialFamilyLevels {
-  const family: OriSegment[] = [...axials];
-  const seen = new Set<string>(family.map(segmentKey));
   const level = new Map<string, number>();
   for (const s of axials) level.set(segmentKey(s), 0);
+  // Every crease generated so far stops later pleats; ridges (reflectors) stay
+  // separate. Level 0 = the axials and the paper-edge axials.
+  const stoppers: OriSegment[] = [...axials, ...edgeAxials];
+  const seen = new Set<string>(stoppers.map(segmentKey));
+  const pleats: OriSegment[] = [];
+  let frontier: OriSegment[] = [...axials, ...edgeAxials];
   let maxLevel = 0;
   for (let round = 1; round < 64; round++) {
-    const next = propagateAxialOffsets(ridges, sheet, family, edgeAxials);
-    let added = 0;
-    for (const s of next) {
+    const { pleats: produced } = offsetRound(ridges, sheet, frontier, stoppers);
+    const fresh: OriSegment[] = [];
+    for (const s of produced) {
       const k = segmentKey(s);
       if (seen.has(k)) continue;
       seen.add(k);
-      family.push(s);
+      pleats.push(s);
+      stoppers.push(s);
       level.set(k, round);
-      maxLevel = round;
-      added++;
+      fresh.push(s);
     }
-    if (added === 0) break;
+    if (fresh.length === 0) break;
+    maxLevel = round;
+    frontier = fresh;
   }
-  const axialKeys = new Set(axials.map(segmentKey));
-  return { pleats: family.filter((s) => !axialKeys.has(segmentKey(s))), level, maxLevel };
+  return { pleats, level, maxLevel };
 }
 
 export function segmentKey(s: OriSegment): string {
