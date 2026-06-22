@@ -415,6 +415,7 @@ function sampleTree(config: BoxPleatedPackingConfig, rng: SeededRandom): Sampled
     const leavesOnHub = hubIndex === hubCount - 1 && requestedLeaves % 2 === 1 ? 1 : 2;
     for (let leafIndex = 0; leafIndex < leavesOnHub; leafIndex++) {
       const leafId = nextId++;
+      const { width, height } = evenShorterFlap(rng.choice([0, 0, 1, 2, 3]), rng.choice([0, 0, 1, 2, 3]));
       nodes.push({
         id: leafId,
         parentId: hubId,
@@ -422,8 +423,8 @@ function sampleTree(config: BoxPleatedPackingConfig, rng: SeededRandom): Sampled
         label: `leaf-${hubIndex}-${leafIndex}`,
         lengthToParent: scaledLength(rng.int(3, 7), optimizerDistanceScale),
         children: [],
-        width: rng.choice([0, 0, 1, 2, 3]),
-        height: rng.choice([0, 0, 1, 2, 3]),
+        width,
+        height,
       });
       nodes[hubId].children.push(leafId);
       leafIds.push(leafId);
@@ -431,6 +432,32 @@ function sampleTree(config: BoxPleatedPackingConfig, rng: SeededRandom): Sampled
   }
 
   return { nodes, leafIds, symmetry, optimizerDistanceScale, noStretches };
+}
+
+/**
+ * Constrain a flap's rectangular cross-section so its box-pleat molecule lands
+ * on the grid.
+ *
+ * A leaf flap occupies a `width x height` rectangle of paper that must be creased
+ * with its own straight skeleton (a spine plus 45-degree corner miters) to
+ * collapse flat. The spine runs down the middle of the SHORTER side, so it sits
+ * on an integer grid line only when the shorter side is even. A flap with an odd
+ * shorter side >= 1 (e.g. 1x2) would put its spine on a half-grid line - a
+ * sub-grid crease, which box pleating forbids - and there is no valid on-grid
+ * molecule for it. We therefore never sample such a flap: reduce an odd shorter
+ * side to the next even value (1 -> 0, 3 -> 2). A zero dimension is a degenerate
+ * (point/edge) flap with no interior to crease and is always fine; valid
+ * mixed-parity rectangles like 2x3 (shorter side 2) are left untouched.
+ *
+ * (When we later feed in real treemaker trees, which we do not control, the same
+ * rule needs to live as a validation/rejection check on the generated packing.)
+ */
+export function evenShorterFlap(width: number, height: number): { width: number; height: number } {
+  if (Math.min(width, height) % 2 === 1) {
+    if (width <= height) width -= 1;
+    else height -= 1;
+  }
+  return { width, height };
 }
 
 function optimizerRequestForTree(sampled: SampledTree, rng: SeededRandom): BpOptimizerRequest {
