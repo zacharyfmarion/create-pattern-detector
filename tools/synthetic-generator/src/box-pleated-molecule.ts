@@ -876,6 +876,33 @@ export function failingJunctions(adj: Map<string, GridPoint[]>, sheet: { width: 
   return out;
 }
 
+/**
+ * Junction vertices that do NOT lie on an integer grid point. A junction is a
+ * planar vertex where two or more non-collinear creases meet (a corner, T, or
+ * crossing - a straight degree-2 pass-through is not one). Every crease
+ * intersection in a box-pleat pattern must land on the grid; a non-empty result
+ * means the packing produced a sub-grid crease (typically a non-45 stretch edge
+ * or an off-grid river crossing the grid between lattice points) and should be
+ * rejected.
+ */
+export function offGridJunctions(creases: OriSegment[]): GridPoint[] {
+  const adj = planarize(creases);
+  const out: GridPoint[] = [];
+  for (const [vk, neighbors] of adj) {
+    const v = parseKey(vk);
+    if (Math.abs(v.x - Math.round(v.x)) < GRID_EPS && Math.abs(v.y - Math.round(v.y)) < GRID_EPS) continue;
+    // Count distinct undirected edge directions; >= 2 means a real junction.
+    const dirs: GridPoint[] = [];
+    for (const n of neighbors) {
+      const d = unit({ x: n.x - v.x, y: n.y - v.y });
+      if (d.x === 0 && d.y === 0) continue;
+      if (!dirs.some((e) => Math.abs(e.x * d.y - e.y * d.x) < EPS)) dirs.push(d);
+    }
+    if (dirs.length >= 2) out.push(v);
+  }
+  return out;
+}
+
 function isFailingJunction(vx: number, vy: number, neighbors: GridPoint[], sheet: { width: number; height: number }): boolean {
   // Boundary vertices are not interior flat-fold vertices.
   if (vx < EPS || vy < EPS || Math.abs(vx - sheet.width) < EPS || Math.abs(vy - sheet.height) < EPS) return false;
