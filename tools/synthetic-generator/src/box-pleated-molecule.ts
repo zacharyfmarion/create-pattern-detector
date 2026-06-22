@@ -208,6 +208,11 @@ function offsetRound(
     const steps = Math.round(Math.hypot(src.b.x - src.a.x, src.b.y - src.a.y));
     for (let i = 0; i <= steps; i++) {
       const base = { x: src.a.x + dir.x * i, y: src.a.y + dir.y * i };
+      // Do not offset from a walk point that lies on a ridge - that is where the
+      // axial terminated against the ridge (e.g. a stretch corner), so a pleat
+      // seeded there hangs off the junction. (connectingClear can't catch it: the
+      // contact is at the foot, which is exempt as "on the source".)
+      if (ridges.some((r) => pointOnSegment(base, r))) continue;
       for (const sign of [1, -1]) {
         const p = { x: base.x + perp.x * sign, y: base.y + perp.y * sign };
         if (p.x < 0 || p.y < 0 || p.x > sheet.width || p.y > sheet.height) continue;
