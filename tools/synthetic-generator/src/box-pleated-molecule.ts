@@ -439,10 +439,20 @@ function reflect(d: GridPoint, ridgeDir: GridPoint): GridPoint {
   // ridge NORMAL, which preserves the component perpendicular to the ridge so
   // the contour continues to the far side, and flips the component along it.
   // d' = d - 2(d.r)r  (the opposite 90-degree turn from a line-mirror bounce).
+  // ridgeDir is unit, so d' is unit too. Return the true reflected direction
+  // rather than snapping to the 8 grid directions: over a 45-degree ridge an
+  // axis-parallel axial reflects to an exact axis-parallel direction anyway,
+  // but over a non-45-degree ridge (a Pythagorean stretch edge) the reflection
+  // is genuinely off-axis and must not be collapsed.
   const dot = d.x * ridgeDir.x + d.y * ridgeDir.y;
-  const rx = d.x - 2 * dot * ridgeDir.x;
-  const ry = d.y - 2 * dot * ridgeDir.y;
-  return snapDir({ x: rx, y: ry });
+  let rx = d.x - 2 * dot * ridgeDir.x;
+  let ry = d.y - 2 * dot * ridgeDir.y;
+  // Clean float dust so the 45-degree case stays exactly axis-parallel: a
+  // component within EPS of 0 is exactly 0. Genuinely off-axis components (a
+  // non-45-degree stretch reflection) are well above EPS and preserved.
+  if (Math.abs(rx) < EPS) rx = 0;
+  if (Math.abs(ry) < EPS) ry = 0;
+  return unit({ x: rx, y: ry });
 }
 
 // ---- geometry helpers ----
@@ -500,13 +510,6 @@ function isRidgeEndpoint(point: GridPoint, ridges: OriSegment[]): boolean {
 function unit(v: GridPoint): GridPoint {
   const len = Math.hypot(v.x, v.y);
   return len < EPS ? { x: 0, y: 0 } : { x: v.x / len, y: v.y / len };
-}
-
-function snapDir(v: GridPoint): GridPoint {
-  // Axis-parallel contours stay axis-parallel after a 90-degree reflection.
-  const x = Math.abs(v.x) < EPS ? 0 : Math.sign(v.x);
-  const y = Math.abs(v.y) < EPS ? 0 : Math.sign(v.y);
-  return { x, y };
 }
 
 function addSegment(out: OriSegment[], seen: Set<string>, a: GridPoint, b: GridPoint): void {
