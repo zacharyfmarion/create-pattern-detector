@@ -208,6 +208,15 @@ export function propagateAxialOffsets(
   const creases = [...axials, ...edgeAxials, ...ridges];
   const onCrease = (p: GridPoint): boolean => creases.some((c) => pointOnSegment(p, c));
 
+  // Ridges (and the paper edge) that can separate a seed from its source axial.
+  const separators: OriSegment[] = [
+    ...ridges,
+    { a: { x: 0, y: 0 }, b: { x: sheet.width, y: 0 } },
+    { a: { x: sheet.width, y: 0 }, b: { x: sheet.width, y: sheet.height } },
+    { a: { x: sheet.width, y: sheet.height }, b: { x: 0, y: sheet.height } },
+    { a: { x: 0, y: sheet.height }, b: { x: 0, y: 0 } },
+  ];
+
   // Seeds: every interior integer point one unit perpendicular off an axial
   // line, paired with the axial's direction. Offsetting from interior axials and
   // edge-axials alike. Dedupe identical (point, dir) seeds.
@@ -223,10 +232,19 @@ export function propagateAxialOffsets(
     const steps = Math.round(Math.hypot(a.b.x - a.a.x, a.b.y - a.a.y));
     for (let i = 0; i <= steps; i++) {
       const base = { x: a.a.x + dir.x * i, y: a.a.y + dir.y * i };
+      // A probe nudged along the axial into its body, used to decide which side
+      // of a ridge-through-base the axial is on (breaks the tie when `base` sits
+      // exactly on a ridge vertex, e.g. a stretch arm endpoint).
+      const tIn = i < steps ? dir : { x: -dir.x, y: -dir.y };
+      const probe = { x: base.x + tIn.x * 1e-3, y: base.y + tIn.y * 1e-3 };
       for (const sign of [1, -1]) {
         const p = { x: base.x + perp.x * sign, y: base.y + perp.y * sign };
         if (p.x < 0 || p.y < 0 || p.x > sheet.width || p.y > sheet.height) continue;
         if (onCrease(p)) continue; // only seed in empty paper
+        // Do not seed across a ridge: if a ridge lies between the axial body and
+        // p, the seed is in a different face and would grow a pleat that crosses
+        // straight through the ridge instead of reflecting at it.
+        if (separators.some((s) => segmentsCross(probe, p, s.a, s.b))) continue;
         const k = `${p.x},${p.y}:${dir.x},${dir.y}`;
         if (seedKeys.has(k)) continue;
         seedKeys.add(k);
@@ -428,6 +446,21 @@ function classifyFlapRegions(
   }
   return (cx: number, cy: number): boolean =>
     cx < 0 || cy < 0 || cx >= W || cy >= H ? false : flap[label[idx(cx, cy)]];
+}
+
+/**
+ * True when segment [p1,p2] crosses segment [p3,p4] at a point strictly inside
+ * [p1,p2] (and on [p3,p4], endpoints included). Used to detect a ridge lying
+ * between a pleat seed and its source axial.
+ */
+function segmentsCross(p1: GridPoint, p2: GridPoint, p3: GridPoint, p4: GridPoint): boolean {
+  const r = { x: p2.x - p1.x, y: p2.y - p1.y };
+  const s = { x: p4.x - p3.x, y: p4.y - p3.y };
+  const denom = r.x * s.y - r.y * s.x;
+  if (Math.abs(denom) < EPS) return false; // parallel or collinear
+  const t = ((p3.x - p1.x) * s.y - (p3.y - p1.y) * s.x) / denom;
+  const u = ((p3.x - p1.x) * r.y - (p3.y - p1.y) * r.x) / denom;
+  return t > 1e-6 && t < 1 - 1e-6 && u > -1e-6 && u < 1 + 1e-6;
 }
 
 function pointOnSegment(p: GridPoint, seg: OriSegment): boolean {
