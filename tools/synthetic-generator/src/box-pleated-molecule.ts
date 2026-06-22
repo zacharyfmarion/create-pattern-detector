@@ -189,10 +189,16 @@ export function propagateAxialOffsets(
     for (let bounce = 0; bounce < MAX_BOUNCES; bounce++) {
       const hit = marchRay(from, d, ridges, sheet);
       if (!hit) break;
-      addSegment(out, seen, from, hit.point);
+      // Every pleat reflection/termination must land on the grid. A point that
+      // misses it (e.g. reflecting off a non-45 stretch edge) cannot continue as
+      // an on-grid crease, so stop the contour there rather than emit a sub-grid
+      // segment that would also defeat segmentKey dedup and never converge.
+      const point = snapToGrid(hit.point);
+      if (!point) break;
+      addSegment(out, seen, from, point);
       if (hit.type !== "ridge") break;
       d = reflect(d, hit.ridgeDir!);
-      from = hit.point;
+      from = point;
     }
   };
 
@@ -208,6 +214,11 @@ export function propagateAxialOffsets(
   const seedKeys = new Set<string>();
   for (const a of [...axials, ...edgeAxials]) {
     const dir = unit({ x: a.b.x - a.a.x, y: a.b.y - a.a.y });
+    // The unit-perpendicular-offset rule only lands on the grid for axis-parallel
+    // axials. A non-axis-parallel axial is a Pythagorean-stretch crease whose
+    // pleats live in the stretch's rotated grid - not yet handled - so skip it as
+    // an offset source instead of seeding off-grid pleats that never converge.
+    if (Math.abs(dir.x) > EPS && Math.abs(dir.y) > EPS) continue;
     const perp = { x: -dir.y, y: dir.x };
     const steps = Math.round(Math.hypot(a.b.x - a.a.x, a.b.y - a.a.y));
     for (let i = 0; i <= steps; i++) {
