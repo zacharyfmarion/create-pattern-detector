@@ -57,8 +57,11 @@ function clip(a: GridPoint, b: GridPoint, W: number, H: number): [GridPoint, Gri
   ];
 }
 
-/** Render a labelled debug SVG of a packing (rivers, holes, flaps, stretch, ridges). */
-export function renderPackingDebugSvg(packing: BoxPleatedPacking, options: DebugRenderOptions = {}): string {
+/** Inner SVG markup (no <svg> wrapper) plus pixel size, for embedding in a panel. */
+export function renderPackingDebugBody(
+  packing: BoxPleatedPacking,
+  options: DebugRenderOptions = {},
+): { inner: string; width: number; height: number } {
   const W = Math.round(packing.sheet.width);
   const H = Math.round(packing.sheet.height);
   const cell = options.cellSize ?? 36;
@@ -171,12 +174,18 @@ export function renderPackingDebugSvg(packing: BoxPleatedPacking, options: Debug
     "each river = its own colour, YELLOW = boundary between rivers; magenta=hole, green=stretch, grey=flap, red=ridge";
   const width = W * cell + m * 2;
   const height = H * cell + m * 2 + 30;
-  return (
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">` +
-    `<rect width="100%" height="100%" fill="#0d0d0d"/>` +
+  const inner =
     `<text x="${m}" y="13" font-family="Helvetica" font-size="12" fill="#fff" font-weight="700">${title}</text>` +
     `<text x="${m}" y="${height - 6}" font-family="Helvetica" font-size="10" fill="#fde047">${legend}</text>` +
-    `<g transform="translate(0 18)">${body}</g>` +
-    `</svg>`
+    `<g transform="translate(0 18)">${body}</g>`;
+  return { inner, width, height };
+}
+
+/** Render a labelled debug SVG of a packing (rivers, holes, flaps, stretch, ridges). */
+export function renderPackingDebugSvg(packing: BoxPleatedPacking, options: DebugRenderOptions = {}): string {
+  const { inner, width, height } = renderPackingDebugBody(packing, options);
+  return (
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">` +
+    `<rect width="100%" height="100%" fill="#0d0d0d"/>${inner}</svg>`
   );
 }

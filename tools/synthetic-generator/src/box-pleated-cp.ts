@@ -17,6 +17,7 @@
 
 import type { BoxPleatedPacking } from "./box-pleated-packing.ts";
 import { fillPackingGaps } from "./box-pleated-packing.ts";
+import { fillRidgeRectHole } from "./box-pleated-gap-fill.ts";
 import {
   propagateAxials,
   propagateAxialFamilyWithLevels,
@@ -64,6 +65,13 @@ export function buildPackingCP(packing: BoxPleatedPacking): PackingCP {
   for (const object of packing.layout.objects) {
     if (object.kind === "root" || object.kind === "stretch-device") continue;
     for (const line of object.ridges) pushClipped(ridges, line[0], line[1], W, H);
+    // BP Studio leaves a non-square flap's straight-skeleton ridges as a hollow
+    // rectangular ring (the diagonals stop at the ring corners). Fill that
+    // interior so no empty rectangle is left un-creased inside the flap.
+    if (object.kind === "flap") {
+      const objRidges = object.ridges.map((line) => seg(line[0], line[1]));
+      for (const r of fillRidgeRectHole(objRidges)) pushClipped(ridges, r.a, r.b, W, H);
+    }
   }
   for (const object of packing.layout.objects) {
     if (object.kind !== "stretch-device") continue;

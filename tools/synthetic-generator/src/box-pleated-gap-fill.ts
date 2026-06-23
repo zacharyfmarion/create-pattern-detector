@@ -127,6 +127,59 @@ export function flapRidges(r: GapRect): OriSegment[] {
   ];
 }
 
+const RIDGE_EPS = 1e-6;
+
+/**
+ * BP Studio emits a non-square flap's ridges as a rectangular "ring" (four
+ * axis-aligned sides) with the box's four 45-degree diagonals terminating on the
+ * ring's corners - leaving the ring's interior un-creased: a rectangular donut
+ * hole. The true straight skeleton continues into it - extend the diagonals
+ * inward until they meet, then join the two meeting points with the spine
+ * segment. This returns those missing interior creases (the straight skeleton of
+ * the ring rectangle), or an empty list when the ridges have no 2D hole (a flap
+ * whose skeleton already collapses to a point or segment).
+ */
+export function fillRidgeRectHole(ridges: OriSegment[]): OriSegment[] {
+  const horizontal = ridges.filter((s) => Math.abs(s.a.y - s.b.y) < RIDGE_EPS);
+  const vertical = ridges.filter((s) => Math.abs(s.a.x - s.b.x) < RIDGE_EPS);
+  if (horizontal.length === 0 || vertical.length === 0) return [];
+
+  // The ring is the bounding rectangle of the axis-aligned ridges.
+  let x0 = Infinity;
+  let y0 = Infinity;
+  let x1 = -Infinity;
+  let y1 = -Infinity;
+  for (const s of [...horizontal, ...vertical]) {
+    x0 = Math.min(x0, s.a.x, s.b.x);
+    y0 = Math.min(y0, s.a.y, s.b.y);
+    x1 = Math.max(x1, s.a.x, s.b.x);
+    y1 = Math.max(y1, s.a.y, s.b.y);
+  }
+  // No 2D interior (a 1D spine, already creased) - nothing to fill.
+  if (x1 - x0 < 1 - RIDGE_EPS || y1 - y0 < 1 - RIDGE_EPS) return [];
+
+  // Confirm it is a closed rectangular ring: each of the four sides is covered by
+  // an axis-aligned ridge spanning it. Otherwise these axis-aligned ridges are
+  // not a flap's straight-skeleton core and we leave them alone.
+  const spansH = (y: number): boolean =>
+    horizontal.some(
+      (s) =>
+        Math.abs(s.a.y - y) < RIDGE_EPS &&
+        Math.min(s.a.x, s.b.x) <= x0 + RIDGE_EPS &&
+        Math.max(s.a.x, s.b.x) >= x1 - RIDGE_EPS,
+    );
+  const spansV = (x: number): boolean =>
+    vertical.some(
+      (s) =>
+        Math.abs(s.a.x - x) < RIDGE_EPS &&
+        Math.min(s.a.y, s.b.y) <= y0 + RIDGE_EPS &&
+        Math.max(s.a.y, s.b.y) >= y1 - RIDGE_EPS,
+    );
+  if (!spansH(y0) || !spansH(y1) || !spansV(x0) || !spansV(x1)) return [];
+
+  return flapRidges({ x0, y0, x1, y1 });
+}
+
 // ---------------------------------------------------------------------------
 
 function emptyGrid(W: number, H: number, occupied: OccupiedPolygon[]): boolean[][] {
