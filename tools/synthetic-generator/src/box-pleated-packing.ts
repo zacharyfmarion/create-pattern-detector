@@ -285,25 +285,7 @@ export interface PackingGapFill {
  * fully interior strip) is reported incomplete and the packing is rejected.
  */
 export function fillPackingGaps(packing: BoxPleatedPacking): PackingGapFill {
-  const W = Math.round(packing.sheet.width);
-  const H = Math.round(packing.sheet.height);
-  const holes = findPackingHoles(packing);
-  const stretches: OccupiedPolygon[] = [];
-  for (const object of packing.layout.objects) {
-    if (object.kind !== "stretch-device") continue;
-    for (const contour of object.contours) stretches.push({ outer: contour.outer, inner: contour.inner });
-  }
-  // A cell is empty when its centre lies inside a hole rectangle and is not
-  // covered by a stretch device (the stretch's axials fill its own area).
-  const empty: boolean[][] = Array.from({ length: H }, () => new Array<boolean>(W).fill(false));
-  for (let y = 0; y < H; y++) {
-    for (let x = 0; x < W; x++) {
-      const c = { x: x + 0.5, y: y + 0.5 };
-      const inHole = holes.some((r) => c.x > r.x0 && c.x < r.x1 && c.y > r.y0 && c.y < r.y1);
-      if (inHole && !stretches.some((s) => insidePolygon(c, s))) empty[y][x] = true;
-    }
-  }
-  const result = fillBoxPleatedGapsFromGrid(packing.sheet, empty);
+  const result = fillBoxPleatedGapsFromGrid(packing.sheet, packingEmptyGrid(packing));
   return {
     flaps: result.flaps,
     ridges: result.ridges,
@@ -313,90 +295,147 @@ export function fillPackingGaps(packing: BoxPleatedPacking): PackingGapFill {
 }
 
 /**
- * Find the empty regions ("holes") of a packing. Each flap occupies an L-infinity
- * square (the flap tip +/- its length). Two flaps that face each other - their
- * squares overlap along one axis and are disjoint along the other - leave an
- * axis-aligned slab between their facing edges. That slab is filled by the river
- * running between them (width = sum of internal tree-edge lengths on their path,
- * split evenly to keep the river constant width); any gap beyond the river width
- * is a hole. Sibling flaps share a hub and have no river between them, so their
- * whole gap is a hole. Holes are returned clipped to the paper.
+ * The cells (grid centres) that a river band covers. Every internal tree node is
+ * a river: its band is the children's subtree grown outward by the node's edge
+ * length (BP's RoughContour expansion). But that expansion fills interior gaps
+ * between sibling flaps too, so we keep only the OUTWARD ring: a cell within the
+ * width of the subtree is river unless the subtree sandwiches it (subtree cells on
+ * opposite axis-sides), which marks it as an interior hole instead.
  */
-export function findPackingHoles(packing: BoxPleatedPacking): GapRect[] {
+function packingRiverCells(packing: BoxPleatedPacking, W: number, H: number): Set<string> {
+  const childrenOf = new Map<number, number[]>();
+  for (const n of packing.tree.nodes) childrenOf.set(n.id, []);
+  for (const n of packing.tree.nodes) if (n.parentId != null) childrenOf.get(n.parentId)?.push(n.id);
+  const flapById = new Map(packing.flaps.map((f) => [f.id, f]));
+  // Real flap polygons keyed by their tree node, so the river subtree matches the
+  // coverage test (a cell inside a flap's bounding square but outside its real
+  // polygon - common next to a stretch - is not treated as flap).
+  const flapPolysByNode = new Map<number, OccupiedPolygon[]>();
+  for (const object of packing.layout.objects) {
+    if (object.kind !== "flap" || object.nodeId == null) continue;
+    flapPolysByNode.set(
+      object.nodeId,
+      object.contours.map((c) => ({ outer: c.outer, inner: c.inner })),
+    );
+  }
+  const leavesUnder = (id: number): number[] => {
+    const kids = childrenOf.get(id) ?? [];
+    if (kids.length === 0) return flapById.has(id) ? [id] : [];
+    return kids.flatMap(leavesUnder);
+  };
+  const key = (x: number, y: number): string => `${x},${y}`;
+
+  const rivers = new Set<string>();
+  for (const v of packing.tree.nodes) {
+    const kids = childrenOf.get(v.id) ?? [];
+    if (kids.length === 0 || v.parentId == null) continue; // skip flaps (leaves) and the root
+    const width = Math.round(v.lengthToParent);
+    if (width <= 0) continue;
+
+    const polys = leavesUnder(v.id).flatMap((leaf) => flapPolysByNode.get(leaf) ?? []);
+    if (polys.length === 0) continue;
+    const subtree = new Set<string>();
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const c = { x: x + 0.5, y: y + 0.5 };
+        if (polys.some((p) => insidePolygon(c, p))) subtree.add(key(x, y));
+      }
+    }
+    if (subtree.size === 0) continue;
+
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        if (subtree.has(key(x, y))) continue;
+        let near = false;
+        for (let dy = -width; dy <= width && !near; dy++) {
+          for (let dx = -width; dx <= width; dx++) {
+            if (subtree.has(key(x + dx, y + dy))) {
+              near = true;
+              break;
+            }
+          }
+        }
+        if (!near) continue;
+        // Sandwiched = the subtree lies on opposite sides (anywhere along the row
+        // or column), so this cell is an interior gap (a hole), not the outward
+        // river ring. Scan the full row/column, not just within the width, so a
+        // gap taller than the river width is still recognised as enclosed.
+        let up = false;
+        let down = false;
+        let left = false;
+        let right = false;
+        for (let k = y + 1; k < H && !up; k++) if (subtree.has(key(x, k))) up = true;
+        for (let k = y - 1; k >= 0 && !down; k--) if (subtree.has(key(x, k))) down = true;
+        for (let k = x + 1; k < W && !right; k++) if (subtree.has(key(k, y))) right = true;
+        for (let k = x - 1; k >= 0 && !left; k--) if (subtree.has(key(k, y))) left = true;
+        if (!((up && down) || (left && right))) rivers.add(key(x, y));
+      }
+    }
+  }
+  return rivers;
+}
+
+/**
+ * The empty (hole) cells of a packing: paper not covered by a flap polygon, a
+ * stretch device, or a river band. Real flap/stretch polygons are used for
+ * coverage so non-rectangular flaps near Pythagorean stretches are not mis-counted
+ * as empty.
+ */
+export function packingEmptyGrid(packing: BoxPleatedPacking): boolean[][] {
   const W = Math.round(packing.sheet.width);
   const H = Math.round(packing.sheet.height);
-  const flaps = packing.flaps;
-
-  const adj = new Map<number, Array<{ to: number; len: number }>>();
-  for (const node of packing.tree.nodes) adj.set(node.id, []);
-  for (const edge of packing.tree.edges) {
-    adj.get(edge.from)?.push({ to: edge.to, len: edge.length });
-    adj.get(edge.to)?.push({ to: edge.from, len: edge.length });
+  const covers: OccupiedPolygon[] = [];
+  for (const object of packing.layout.objects) {
+    if (object.kind !== "flap" && object.kind !== "stretch-device") continue;
+    for (const contour of object.contours) covers.push({ outer: contour.outer, inner: contour.inner });
   }
-  const isLeaf = (id: number): boolean => (adj.get(id)?.length ?? 0) === 1;
-  // River width between two leaves = sum of internal-internal edge lengths on the
-  // tree path; leaf edges (the flaps themselves) do not contribute.
-  const riverWidth = (a: number, b: number): number => {
-    const prev = new Map<number, [number, number]>();
-    const queue: number[] = [a];
-    const seen = new Set<number>([a]);
-    while (queue.length) {
-      const u = queue.shift()!;
-      if (u === b) break;
-      for (const e of adj.get(u) ?? []) {
-        if (!seen.has(e.to)) {
-          seen.add(e.to);
-          prev.set(e.to, [u, e.len]);
-          queue.push(e.to);
+  const rivers = packingRiverCells(packing, W, H);
+  const empty: boolean[][] = Array.from({ length: H }, () => new Array<boolean>(W).fill(false));
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      if (rivers.has(`${x},${y}`)) continue;
+      const c = { x: x + 0.5, y: y + 0.5 };
+      if (!covers.some((s) => insidePolygon(c, s))) empty[y][x] = true;
+    }
+  }
+  return empty;
+}
+
+/** The packing's holes as the bounding rectangles of its connected empty regions. */
+export function findPackingHoles(packing: BoxPleatedPacking): GapRect[] {
+  const empty = packingEmptyGrid(packing);
+  const H = empty.length;
+  const W = H > 0 ? empty[0].length : 0;
+  const seen = Array.from({ length: H }, () => new Array<boolean>(W).fill(false));
+  const holes: GapRect[] = [];
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      if (!empty[y][x] || seen[y][x]) continue;
+      let x0 = x;
+      let y0 = y;
+      let x1 = x + 1;
+      let y1 = y + 1;
+      const stack: Array<[number, number]> = [[x, y]];
+      seen[y][x] = true;
+      while (stack.length) {
+        const [cx, cy] = stack.pop()!;
+        x0 = Math.min(x0, cx);
+        y0 = Math.min(y0, cy);
+        x1 = Math.max(x1, cx + 1);
+        y1 = Math.max(y1, cy + 1);
+        for (const [nx, ny] of [
+          [cx + 1, cy],
+          [cx - 1, cy],
+          [cx, cy + 1],
+          [cx, cy - 1],
+        ] as Array<[number, number]>) {
+          if (nx >= 0 && ny >= 0 && nx < W && ny < H && empty[ny][nx] && !seen[ny][nx]) {
+            seen[ny][nx] = true;
+            stack.push([nx, ny]);
+          }
         }
       }
-    }
-    let width = 0;
-    let cur = b;
-    while (cur !== a) {
-      const entry = prev.get(cur);
-      if (!entry) break;
-      const [pu, len] = entry;
-      if (!isLeaf(pu) && !isLeaf(cur)) width += len;
-      cur = pu;
-    }
-    return width;
-  };
-
-  const box = (f: BoxPleatedFlap) => ({
-    x0: f.x - f.radius,
-    x1: f.x + f.radius,
-    y0: f.y - f.radius,
-    y1: f.y + f.radius,
-  });
-  const holes: GapRect[] = [];
-  const clipPush = (rect: GapRect): void => {
-    const x0 = Math.max(0, rect.x0);
-    const y0 = Math.max(0, rect.y0);
-    const x1 = Math.min(W, rect.x1);
-    const y1 = Math.min(H, rect.y1);
-    if (x1 - x0 > EPS && y1 - y0 > EPS) holes.push({ x0, y0, x1, y1 });
-  };
-
-  for (let i = 0; i < flaps.length; i++) {
-    for (let j = i + 1; j < flaps.length; j++) {
-      const a = box(flaps[i]);
-      const b = box(flaps[j]);
-      const n = riverWidth(flaps[i].id, flaps[j].id);
-      // Facing vertically: x-extents overlap, y-extents disjoint.
-      const ox0 = Math.max(a.x0, b.x0);
-      const ox1 = Math.min(a.x1, b.x1);
-      if (ox1 - ox0 > EPS) {
-        const [lo, hi] = a.y1 <= b.y0 + EPS ? [a.y1, b.y0] : b.y1 <= a.y0 + EPS ? [b.y1, a.y0] : [NaN, NaN];
-        if (!Number.isNaN(lo) && hi - lo - n > EPS) clipPush({ x0: ox0, x1: ox1, y0: lo + n / 2, y1: hi - n / 2 });
-      }
-      // Facing horizontally: y-extents overlap, x-extents disjoint.
-      const oy0 = Math.max(a.y0, b.y0);
-      const oy1 = Math.min(a.y1, b.y1);
-      if (oy1 - oy0 > EPS) {
-        const [lo, hi] = a.x1 <= b.x0 + EPS ? [a.x1, b.x0] : b.x1 <= a.x0 + EPS ? [b.x1, a.x0] : [NaN, NaN];
-        if (!Number.isNaN(lo) && hi - lo - n > EPS) clipPush({ x0: lo + n / 2, x1: hi - n / 2, y0: oy0, y1: oy1 });
-      }
+      holes.push({ x0, y0, x1, y1 });
     }
   }
   return holes;

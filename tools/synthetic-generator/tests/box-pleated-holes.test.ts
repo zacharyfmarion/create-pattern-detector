@@ -1,14 +1,15 @@
 import { expect, test } from "bun:test";
 import { generateBoxPleatedPacking, findPackingHoles } from "../src/box-pleated-packing.ts";
 
-// A packing's holes are the gaps between facing flaps that exceed their river
-// width. BP Studio's river contours over-cover these gaps (they claim the whole
-// inter-flap region as river), so occupancy by contour alone reports no holes.
-// findPackingHoles instead models each flap as an L-infinity square and finds the
-// axis-aligned slab between facing flaps, minus the river width.
+// A packing's holes are the paper cells covered by no flap, stretch, or river.
+// BP Studio's river contours over-cover (they grow each subtree by the edge length
+// in every direction, filling interior gaps), so occupancy by contour reports no
+// holes. findPackingHoles instead keeps only the OUTWARD river ring: a cell next to
+// a flap-group is river unless that group sandwiches it on opposite sides, which
+// marks it as an enclosed interior hole.
 //
-// Seed 50444 (18x18) has two sibling-pair holes: f5/f6 leave a 3x5 gap on the
-// left, f2/f3 leave a 5x2 gap on the right (no river between siblings).
+// Seed 50444 (18x18) has two such holes: f5/f6 sandwich a 3x5 gap on the left,
+// f2/f3 sandwich a 5x2 gap on the right.
 test("seed 50444 has the two sibling-pair holes", async () => {
   const packing = await generateBoxPleatedPacking({
     id: "holes-50444",
