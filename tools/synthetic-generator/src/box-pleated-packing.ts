@@ -301,8 +301,14 @@ export function fillPackingGaps(packing: BoxPleatedPacking): PackingGapFill {
  * between sibling flaps too, so we keep only the OUTWARD ring: a cell within the
  * width of the subtree is river unless the subtree sandwiches it (subtree cells on
  * opposite axis-sides), which marks it as an interior hole instead.
+ *
+ * Returns a map from each river cell ("x,y") to the tree node that owns it - the
+ * river whose subtree is nearest - so callers (and the debug renderer) can tell
+ * adjacent rivers apart.
  */
-function packingRiverCells(packing: BoxPleatedPacking, W: number, H: number): Set<string> {
+export function packingRiverCells(packing: BoxPleatedPacking): Map<string, number> {
+  const W = Math.round(packing.sheet.width);
+  const H = Math.round(packing.sheet.height);
   const childrenOf = new Map<number, number[]>();
   for (const n of packing.tree.nodes) childrenOf.set(n.id, []);
   for (const n of packing.tree.nodes) if (n.parentId != null) childrenOf.get(n.parentId)?.push(n.id);
@@ -325,7 +331,7 @@ function packingRiverCells(packing: BoxPleatedPacking, W: number, H: number): Se
   };
   const key = (x: number, y: number): string => `${x},${y}`;
 
-  const rivers = new Set<string>();
+  const owner = new Map<string, { node: number; dist: number }>();
   for (const v of packing.tree.nodes) {
     const kids = childrenOf.get(v.id) ?? [];
     if (kids.length === 0 || v.parentId == null) continue; // skip flaps (leaves) and the root
@@ -346,16 +352,13 @@ function packingRiverCells(packing: BoxPleatedPacking, W: number, H: number): Se
     for (let y = 0; y < H; y++) {
       for (let x = 0; x < W; x++) {
         if (subtree.has(key(x, y))) continue;
-        let near = false;
-        for (let dy = -width; dy <= width && !near; dy++) {
+        let dist = Infinity;
+        for (let dy = -width; dy <= width; dy++) {
           for (let dx = -width; dx <= width; dx++) {
-            if (subtree.has(key(x + dx, y + dy))) {
-              near = true;
-              break;
-            }
+            if (subtree.has(key(x + dx, y + dy))) dist = Math.min(dist, Math.max(Math.abs(dx), Math.abs(dy)));
           }
         }
-        if (!near) continue;
+        if (!Number.isFinite(dist)) continue;
         // Sandwiched = the subtree lies on opposite sides (anywhere along the row
         // or column), so this cell is an interior gap (a hole), not the outward
         // river ring. Scan the full row/column, not just within the width, so a
@@ -368,11 +371,13 @@ function packingRiverCells(packing: BoxPleatedPacking, W: number, H: number): Se
         for (let k = y - 1; k >= 0 && !down; k--) if (subtree.has(key(x, k))) down = true;
         for (let k = x + 1; k < W && !right; k++) if (subtree.has(key(k, y))) right = true;
         for (let k = x - 1; k >= 0 && !left; k--) if (subtree.has(key(k, y))) left = true;
-        if (!((up && down) || (left && right))) rivers.add(key(x, y));
+        if ((up && down) || (left && right)) continue;
+        const prev = owner.get(key(x, y));
+        if (!prev || dist < prev.dist) owner.set(key(x, y), { node: v.id, dist });
       }
     }
   }
-  return rivers;
+  return new Map([...owner].map(([k, v]) => [k, v.node]));
 }
 
 /**
@@ -389,7 +394,7 @@ export function packingEmptyGrid(packing: BoxPleatedPacking): boolean[][] {
     if (object.kind !== "flap" && object.kind !== "stretch-device") continue;
     for (const contour of object.contours) covers.push({ outer: contour.outer, inner: contour.inner });
   }
-  const rivers = packingRiverCells(packing, W, H);
+  const rivers = packingRiverCells(packing);
   const empty: boolean[][] = Array.from({ length: H }, () => new Array<boolean>(W).fill(false));
   for (let y = 0; y < H; y++) {
     for (let x = 0; x < W; x++) {

@@ -7,6 +7,7 @@
     "generate": "bun run src/index.ts",
     "folded-preview": "bun run src/folded-preview.ts",
     "box-pleated-preview": "bun run src/box-pleated-preview.ts",
+    "box-pleated-debug": "bun run src/box-pleated-debug.ts",
     "test": "bun test",
     "typecheck": "tsc --noEmit"
   },
