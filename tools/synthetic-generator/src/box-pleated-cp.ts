@@ -17,7 +17,6 @@
 
 import type { BoxPleatedPacking } from "./box-pleated-packing.ts";
 import { fillPackingGaps } from "./box-pleated-packing.ts";
-import { flapRidges } from "./box-pleated-gap-fill.ts";
 import {
   propagateAxials,
   propagateAxialFamilyWithLevels,
@@ -72,13 +71,19 @@ export function buildPackingCP(packing: BoxPleatedPacking): PackingCP {
   }
   for (const r of gap.ridges) pushClipped(ridges, r.a, r.b, W, H);
 
-  // Seeds: each flap's ridge convergence points, plus the filler flaps'.
+  // Seeds: each flap's ridge convergence points, plus the filler flaps'. Filler
+  // seeds come from gap.ridges - the exact ridges the molecule uses - not from
+  // flapRidges, because an edge/corner filler's molecule ridges are the
+  // edge-reflected skeleton, whose spine sits on the paper edge, while flapRidges
+  // gives the un-reflected interior skeleton. Seeding from the un-reflected
+  // skeleton put axial seeds at interior points that then reflected off the
+  // reflected ridge and crossed each other (and neighbouring axials).
   const rawSeeds: GridPoint[] = [];
   for (const object of packing.layout.objects) {
     if (object.kind !== "flap") continue;
     rawSeeds.push(...ridgeJunctions(object.ridges.map((l) => seg(l[0], l[1]))));
   }
-  for (const f of gap.flaps) rawSeeds.push(...ridgeJunctions(flapRidges(f)));
+  rawSeeds.push(...ridgeJunctions(gap.ridges));
   const seenSeed = new Set<string>();
   const seeds = rawSeeds.filter((s) => {
     const k = `${s.x},${s.y}`;
