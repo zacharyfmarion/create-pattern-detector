@@ -44,6 +44,14 @@ const EPS = 1e-7;
 // Far below any genuine sub-grid offset (a half cell, or a Pythagorean fraction
 // like 1/3), so it only cleans rounding error and never hides a real off-grid hit.
 const GRID_EPS = 1e-6;
+// Tolerance for the Kawasaki alternating angle sum (radians). A junction incident
+// to an off-grid vertex (where a non-45 stretch ridge crosses an axis crease at a
+// fractional point) carries that vertex at a slightly irrational angle, so its
+// angle sum misses zero by rounding dust (~6e-5 rad observed). This tolerance
+// absorbs that dust while staying far below any genuine Kawasaki violation (which
+// is on the order of a radian). The real off-grid vertices are still rejected -
+// they are odd-degree, which fails the even-degree condition regardless.
+const KAWASAKI_EPS = 1e-3;
 const MAX_BOUNCES = 64;
 const AXIS_DIRS: GridPoint[] = [
   { x: 1, y: 0 },
@@ -929,7 +937,7 @@ function isFailingJunction(vx: number, vy: number, neighbors: GridPoint[], sheet
   }
   let alt = 0;
   for (let i = 0; i < sectors.length; i++) alt += (i % 2 === 0 ? 1 : -1) * sectors[i];
-  const kawasaki = deg >= 4 && deg % 2 === 0 && Math.abs(alt) < 1e-6;
+  const kawasaki = deg >= 4 && deg % 2 === 0 && Math.abs(alt) < KAWASAKI_EPS;
   return !kawasaki;
 }
 
@@ -956,7 +964,13 @@ export function hingeEndpoint(
       if (inter && !inter.collinear && inter.t > EPS && inter.t < best) best = inter.t;
     }
   };
-  crossStop(ridges);
+  // A non-45 (Pythagorean stretch) ridge is off-grid everywhere except where it
+  // passes through a lattice point. An axis-aligned hinge that stops on such a
+  // ridge lands at a fractional point (an off-grid junction). Stop only at clean
+  // 45/90 ridges; reject the whole direction below if it would reach a stretch
+  // ridge at an off-grid point.
+  const stretchRidges = ridges.filter((r) => !isCleanRidge(r));
+  crossStop(ridges.filter(isCleanRidge));
   crossStop(hinges);
   for (const c of flapCenters) {
     const t = (c.x - from.x) * dir.x + (c.y - from.y) * dir.y;
@@ -977,7 +991,23 @@ export function hingeEndpoint(
     if (hi > EPS) best = Math.min(best, Math.max(Math.min(ta, tb), 0));
   }
   if (!Number.isFinite(best) || best < EPS) return null;
+  // Refuse to extend a hinge that would cross or end on a stretch ridge at an
+  // off-grid point: the resulting junction would never be a unit box-pleat vertex.
+  for (const r of stretchRidges) {
+    const inter = raySegmentIntersection(from, dir, r.a, r.b);
+    if (!inter || inter.collinear || inter.t <= EPS || inter.t > best + EPS) continue;
+    const px = from.x + dir.x * inter.t;
+    const py = from.y + dir.y * inter.t;
+    if (Math.abs(px - Math.round(px)) > GRID_EPS || Math.abs(py - Math.round(py)) > GRID_EPS) return null;
+  }
   return { x: from.x + dir.x * best, y: from.y + dir.y * best };
+}
+
+/** A 45/90 (axis-aligned or diagonal) ridge, vs a non-45 Pythagorean stretch ridge. */
+function isCleanRidge(s: OriSegment): boolean {
+  const dx = s.b.x - s.a.x;
+  const dy = s.b.y - s.a.y;
+  return Math.abs(dx) < EPS || Math.abs(dy) < EPS || Math.abs(Math.abs(dx) - Math.abs(dy)) < EPS;
 }
 
 function segmentIntersection(p1: GridPoint, p2: GridPoint, p3: GridPoint, p4: GridPoint): GridPoint | null {
