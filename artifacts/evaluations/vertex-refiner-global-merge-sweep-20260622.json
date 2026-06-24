@@ -1,0 +1,186 @@
+{
+  "schema": "create-pattern-detector/vertex-refiner-global-merge-sweep/v1",
+  "createdAt": "2026-06-22",
+  "purpose": "Measure whether simple full-pattern duplicate suppression fixes the low global precision produced by overlapping VertexRefinerV1 crop predictions.",
+  "checkpoint": "checkpoints/runpod_vertex_refiner_source_only_probe_20260622_fixed_selector/full/latest.pt",
+  "checkpointManifest": "artifacts/checkpoints/runpod-vertex-refiner-source-only-phase4-fixed-selector-3090.json",
+  "manifest": "data/generated/synthetic/cp_training_mix_v1/raw-manifest.jsonl",
+  "split": "val",
+  "limit": 8,
+  "imageSize": 512,
+  "baseChannels": 24,
+  "auxiliaryMode": "zero",
+  "includeGtTrainingAnchors": false,
+  "proposalsPerSample": 128,
+  "heatmapThreshold": 0.25,
+  "matchTolerancePx": 2.0,
+  "localCropMetrics": {
+    "samples": 798,
+    "precision": 0.911050394656952,
+    "recall": 0.9040518150323844,
+    "f1": 0.9075376124593634,
+    "meanErrorPx": 0.6787066496340747
+  },
+  "proposalCoverage": {
+    "totalGtVertices": 1210,
+    "coveredByCrop": 1200,
+    "coverage": 0.9917355371900827
+  },
+  "referenceUnmergedFullPattern": {
+    "source": "Corrected RunPod probe standalone eval before global NMS/merge",
+    "totalGtVertices": 1085,
+    "precision": 0.1951,
+    "recall": 0.9558,
+    "f1": 0.324,
+    "meanErrorPx": 0.4911
+  },
+  "sweep": [
+    {
+      "radiusPx": 3.0,
+      "minScore": 0.0,
+      "minSupport": 1,
+      "truePositive": 1128,
+      "falsePositive": 239,
+      "falseNegative": 82,
+      "precision": 0.825164594001463,
+      "recall": 0.9322314049586777,
+      "f1": 0.8754365541327125,
+      "meanErrorPx": 0.6239902534561746,
+      "rawPredictions": 6588,
+      "mergedPredictions": 1367
+    },
+    {
+      "radiusPx": 3.0,
+      "minScore": 0.0,
+      "minSupport": 2,
+      "truePositive": 1043,
+      "falsePositive": 96,
+      "falseNegative": 167,
+      "precision": 0.9157155399473222,
+      "recall": 0.8619834710743801,
+      "f1": 0.8880374627501064,
+      "mergedPredictions": 1139
+    },
+    {
+      "radiusPx": 3.0,
+      "minScore": 0.0,
+      "minSupport": 3,
+      "truePositive": 934,
+      "falsePositive": 46,
+      "falseNegative": 276,
+      "precision": 0.9530612244897959,
+      "recall": 0.771900826446281,
+      "f1": 0.8529680365296805,
+      "mergedPredictions": 980
+    },
+    {
+      "radiusPx": 2.0,
+      "minScore": 0.0,
+      "minSupport": 1,
+      "truePositive": 1136,
+      "falsePositive": 284,
+      "falseNegative": 74,
+      "precision": 0.8,
+      "recall": 0.9388429752066115,
+      "f1": 0.8638783269961978,
+      "mergedPredictions": 1420
+    },
+    {
+      "radiusPx": 4.0,
+      "minScore": 0.0,
+      "minSupport": 1,
+      "truePositive": 1107,
+      "falsePositive": 209,
+      "falseNegative": 103,
+      "precision": 0.8411854103343465,
+      "recall": 0.9148760330578513,
+      "f1": 0.8764845605700713,
+      "mergedPredictions": 1316
+    },
+    {
+      "radiusPx": 2.0,
+      "minScore": 0.0,
+      "minSupport": 2,
+      "truePositive": 1045,
+      "falsePositive": 98,
+      "falseNegative": 165,
+      "precision": 0.9142607174103237,
+      "recall": 0.8636363636363636,
+      "f1": 0.8882277943051423,
+      "mergedPredictions": 1143
+    },
+    {
+      "radiusPx": 3.0,
+      "minScore": 0.7,
+      "minSupport": 1,
+      "truePositive": 747,
+      "falsePositive": 5,
+      "falseNegative": 463,
+      "precision": 0.9933510638297872,
+      "recall": 0.6173553719008265,
+      "f1": 0.7614678899082568,
+      "mergedPredictions": 752
+    },
+    {
+      "radiusPx": 3.0,
+      "minScore": 0.5,
+      "minSupport": 1,
+      "truePositive": 1054,
+      "falsePositive": 24,
+      "falseNegative": 156,
+      "precision": 0.9777365491651205,
+      "recall": 0.8710743801652893,
+      "f1": 0.9213286713286714,
+      "mergedPredictions": 1078
+    },
+    {
+      "radiusPx": 3.0,
+      "minScore": 0.4,
+      "minSupport": 1,
+      "truePositive": 1103,
+      "falsePositive": 61,
+      "falseNegative": 107,
+      "precision": 0.947594501718213,
+      "recall": 0.9115702479338843,
+      "f1": 0.9292333614153329,
+      "meanErrorPx": 0.6159482301564942,
+      "mergedPredictions": 1164,
+      "byKindRecall": {
+        "boundaryContact": 0.8333,
+        "corner": 0.5429,
+        "interiorJunction": 0.9362
+      }
+    },
+    {
+      "radiusPx": 3.0,
+      "minScore": 0.35,
+      "minSupport": 1,
+      "truePositive": 1112,
+      "falsePositive": 93,
+      "falseNegative": 98,
+      "precision": 0.9228215767634855,
+      "recall": 0.9190082644628099,
+      "f1": 0.9209109730848862,
+      "mergedPredictions": 1205,
+      "byKindRecall": {
+        "boundaryContact": 0.8462,
+        "corner": 0.5714,
+        "interiorJunction": 0.9421
+      }
+    }
+  ],
+  "bestSimpleSetting": {
+    "selectionCriterion": "highest F1 in this threshold sweep",
+    "radiusPx": 3.0,
+    "minScore": 0.4,
+    "minSupport": 1,
+    "precision": 0.947594501718213,
+    "recall": 0.9115702479338843,
+    "f1": 0.9292333614153329
+  },
+  "interpretation": {
+    "summary": "Simple global merge turns the crop-level duplicate problem into a usable full-pattern signal, but threshold-only suppression is not exact-graph safe yet.",
+    "evidence": "Support thresholds raise precision but remove too many true boundary and corner vertices. Score thresholds can reach very high precision, but the high-precision settings lose recall. The best simple F1 setting still misses 107 of 1210 GT vertices and leaves 61 false positives.",
+    "nextStep": "Replace threshold-only merge with cluster-level scoring that uses location-dependent crop support, score statistics, member spread, kind/degree/ray consistency, and source-line/graph consistency before discarding candidates."
+  }
+}

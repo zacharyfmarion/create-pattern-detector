@@ -1,0 +1,169 @@
+{
+  "schema": "create-pattern-detector/vertex-refiner-checkpoint/v1",
+  "modelId": "vertex-refiner-source-only-warm-continue-20260623-4090",
+  "role": "phase4-source-only-warm-continuation",
+  "promoted": false,
+  "createdAt": "2026-06-23",
+  "checkpoint": {
+    "relativePath": "checkpoints/runpod_vertex_refiner_warm_continue_20260623/full/latest.pt",
+    "sha256": "f14a49f29b7428cef998a801e20eacabd1e128193642f5308a372f0ddb96b68e",
+    "sizeBytes": 7762411
+  },
+  "trainingCheckpoint": {
+    "relativePath": "checkpoints/runpod_vertex_refiner_warm_continue_20260623/full/latest_train.pt",
+    "sha256": "824f8416ad5c753dbf1402baf3cd2599e55e42dd4b60308306d0a8eddc9e92ec",
+    "sizeBytes": 7768457
+  },
+  "runpod": {
+    "podId": "1ctjmwchg23hmh",
+    "gpu": "NVIDIA GeForce RTX 4090",
+    "costPerHourUsd": 0.69,
+    "templateId": "runpod-torch-v220",
+    "image": "runpod/pytorch:2.2.0-py3.10-cuda12.1.1-devel-ubuntu22.04",
+    "stoppedAfterCopyBack": true,
+    "deletedAfterCopyBack": true,
+    "networkVolumesAfterCleanup": 0,
+    "podsAfterCleanup": 0,
+    "currentSpendPerHourUsdAfterCleanup": 0,
+    "budgetNote": "Warm continuation ran on an RTX 4090, artifacts were copied back, then pod stop/delete succeeded. runpodctl reported no pods, no network volumes, and currentSpendPerHr=0 afterward."
+  },
+  "architecture": {
+    "model": "VertexRefinerV1",
+    "baseChannels": 24,
+    "cropSizePx": 96,
+    "inputChannels": 8,
+    "auxiliaryMode": "zero",
+    "sourceOnly": true
+  },
+  "dataset": {
+    "sourceManifest": "data/generated/synthetic/cp_training_mix_v1/raw-manifest.jsonl",
+    "trainRecords": 64,
+    "valRecords": 8,
+    "trainCrops": 6811,
+    "valCrops": 872,
+    "maxEdges": 1200,
+    "imageSize": 512,
+    "proposalsPerSample": 128,
+    "includeGtTrainingAnchors": true,
+    "includeValGtAnchors": false,
+    "seed": 61
+  },
+  "training": {
+    "initCheckpoint": "checkpoints/runpod_vertex_refiner_source_only_probe_20260622_fixed_selector/full/latest.pt",
+    "steps": 2000,
+    "batchSize": 64,
+    "learningRate": 0.00005,
+    "checkpointEvery": 250,
+    "evalMaxBatches": 16,
+    "firstStepLoss": 0.9972712397575378,
+    "lastStepLoss": 0.15761083364486694,
+    "trainLossDelta": -1.0310836951248348,
+    "valLossDelta": -0.7802439757755824,
+    "elapsedSeconds": 3092.1778172980994
+  },
+  "reports": {
+    "runConfig": "checkpoints/runpod_vertex_refiner_warm_continue_20260623/full/run_config.json",
+    "summary": "checkpoints/runpod_vertex_refiner_warm_continue_20260623/full/summary.json",
+    "eval": "checkpoints/runpod_vertex_refiner_warm_continue_20260623/full/eval.json",
+    "seed17BestEval": "checkpoints/runpod_vertex_refiner_warm_continue_20260623/full/eval-global-merge-corners-best-seed17.json",
+    "seed61SameSettingEval": "checkpoints/runpod_vertex_refiner_warm_continue_20260623/full/eval-global-merge-corners-best-seed61.json",
+    "seed17FocusedSweep": "checkpoints/runpod_vertex_refiner_warm_continue_20260623/full/eval-global-merge-corners-focused-sweep-seed17.json",
+    "seed61FocusedSweep": "checkpoints/runpod_vertex_refiner_warm_continue_20260623/full/eval-global-merge-corners-focused-sweep-seed61.json",
+    "qualitativeOverlay": "checkpoints/runpod_vertex_refiner_warm_continue_20260623/full/qualitative_before_after.png",
+    "trainHistory": "checkpoints/runpod_vertex_refiner_warm_continue_20260623/full/train_history.jsonl",
+    "trainLog": "checkpoints/runpod_vertex_refiner_warm_continue_20260623/full/train.log"
+  },
+  "standaloneEvalMetrics": {
+    "cropLevel": {
+      "samples": 918,
+      "precision": 0.9656066602975297,
+      "recall": 0.9568569110089261,
+      "f1": 0.9612118741933292,
+      "meanErrorPx": 0.45350570386150596,
+      "falsePositive": 252,
+      "falseNegative": 319,
+      "loss": 0.20372909704844158
+    },
+    "proposalCoverage": {
+      "totalGtVertices": 1558,
+      "coveredByCrop": 1553,
+      "coverage": 0.996790757381258,
+      "uncoveredByCrop": 5
+    },
+    "rawFullPatternBeforeMerge": {
+      "precision": 0.20881705200054595,
+      "recall": 0.9820282413350449,
+      "f1": 0.3444006752954417,
+      "truePositive": 1530,
+      "falsePositive": 5797,
+      "falseNegative": 28
+    }
+  },
+  "productStyleEval": {
+    "seed17BestSetting": {
+      "heatmapThreshold": 0.075,
+      "mergeRadiusPx": 2.0,
+      "mergeMinScore": 0.25,
+      "mergeMinSupportFraction": 0.45,
+      "proposalCoverage": 1.0,
+      "coveredConditionalRecall": 0.9677685950413223,
+      "precision": 0.9923728813559322,
+      "recall": 0.9677685950413223,
+      "f1": 0.9799163179916317,
+      "truePositive": 1171,
+      "falsePositive": 9,
+      "falseNegative": 39,
+      "byKindRecall": {
+        "boundaryContact": 0.9551282051282052,
+        "corner": 0.9142857142857143,
+        "interiorJunction": 0.971540726202159
+      }
+    },
+    "seed61SameSetting": {
+      "heatmapThreshold": 0.075,
+      "mergeRadiusPx": 2.0,
+      "mergeMinScore": 0.25,
+      "mergeMinSupportFraction": 0.45,
+      "proposalCoverage": 1.0,
+      "coveredConditionalRecall": 0.9582798459563543,
+      "precision": 0.9887417218543046,
+      "recall": 0.9582798459563543,
+      "f1": 0.9732724902216429,
+      "truePositive": 1493,
+      "falsePositive": 17,
+      "falseNegative": 65,
+      "byKindRecall": {
+        "boundaryContact": 0.8646288209606987,
+        "corner": 0.9393939393939394,
+        "interiorJunction": 0.9753086419753086
+      }
+    },
+    "seed61BestFocusedSweep": {
+      "heatmapThreshold": 0.125,
+      "mergeRadiusPx": 2.0,
+      "mergeMinScore": 0.3,
+      "mergeMinSupportFraction": 0.55,
+      "precision": 0.9979919678714859,
+      "recall": 0.9569961489088575,
+      "f1": 0.9770642201834864,
+      "truePositive": 1491,
+      "falsePositive": 3,
+      "falseNegative": 67
+    }
+  },
+  "codeChangesMeasured": {
+    "squareFrameCornerProposals": true,
+    "visibilityNormalizedGlobalMerge": true,
+    "spatialGridMergeAcceleration": true
+  },
+  "interpretation": {
+    "summary": "Warm continuation plus explicit square-frame corner proposals fixes proposal coverage on the measured slices and gives very high full-pattern precision after global merge, but it is still not product-ready because covered vertices are still missed.",
+    "knownLimitations": [
+      "This is still a 512px, base-24 source-only checkpoint, not the final 1024px/base-48 V1 target.",
+      "Proposal coverage is no longer the measured blocker on the seed-17 and seed-61 slices; residual false negatives are covered-but-not-matched model/decoder misses.",
+      "Boundary-contact recall is unstable across seeds and is the largest current weak slice.",
+      "The checkpoint is not exported to ONNX and should not be promoted for product integration."
+    ],
+    "nextStep": "Improve the model/training target for covered boundary and close/junction vertices before spending on the full 1024px/base-48 run. Candidate changes include stronger boundary oversampling, boundary/corner loss weighting, larger base model or 1024px training, and miss-mining from the copied eval artifacts."
+  }
+}

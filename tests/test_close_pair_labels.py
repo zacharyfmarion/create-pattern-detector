@@ -1,8 +1,9 @@
 """Label and loss tests for the close-pair junction recovery recipe.
 
-See docs/v2-close-pair-junction-recovery.md. The failure being fixed: GT vertex
-pairs closer than ~8px fuse into a single junction-heatmap blob (sigma ~3.33px
-at 1024) and the legacy sub-pixel offsets carry no information to split them.
+The close-pair experiment is summarized in docs/model-training-history.md. The
+failure being fixed: GT vertex pairs closer than ~8px fuse into a single
+junction-heatmap blob (sigma ~3.33px at 1024) and the legacy sub-pixel offsets
+carry no information to split them.
 """
 
 from __future__ import annotations

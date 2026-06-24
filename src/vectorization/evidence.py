@@ -238,8 +238,8 @@ def _vertices_on_segment(
 def _metric_assignment_priority(assignment: int) -> int:
     if assignment in (0, 1):
         return 3
-    if assignment == 3:
-        return 2
     if assignment == 2:
+        return 2
+    if assignment == 3:
         return 1
     return 0

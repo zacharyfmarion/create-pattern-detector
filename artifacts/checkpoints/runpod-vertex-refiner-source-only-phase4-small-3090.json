@@ -1,0 +1,114 @@
+{
+  "schema": "create-pattern-detector/vertex-refiner-checkpoint/v1",
+  "modelId": "vertex-refiner-source-only-phase4-small-20260622-3090",
+  "role": "phase4-source-only-budget-probe",
+  "promoted": false,
+  "createdAt": "2026-06-22",
+  "checkpoint": {
+    "relativePath": "checkpoints/runpod_vertex_refiner_source_only_probe_20260622_phase4_small/full/latest.pt",
+    "sha256": "83cde42cd5d3387170f40711f19c7b729dad04b2c4394d8c2fd35f5fb743af99",
+    "sizeBytes": 7546230
+  },
+  "runpod": {
+    "podId": "6a9ku2p8b6xsoc",
+    "gpu": "NVIDIA GeForce RTX 3090",
+    "location": "CZ",
+    "costPerHourUsd": 0.46,
+    "stoppedAfterCopyBack": true,
+    "budgetNote": "The full Phase 4 attempt, including failed US capacity attempts, a stopped slow-transfer pod, setup, preflight, and this probe, moved account balance by about $0.35, under the requested $10 cap."
+  },
+  "architecture": {
+    "model": "VertexRefinerV1",
+    "baseChannels": 24,
+    "cropSizePx": 96,
+    "inputChannels": 8,
+    "auxiliaryMode": "zero",
+    "sourceOnly": true
+  },
+  "dataset": {
+    "sourceManifest": "data/generated/synthetic/cp_training_mix_v1/raw-manifest.jsonl",
+    "remoteSubsetRecords": 576,
+    "trainRecords": 32,
+    "valRecords": 8,
+    "maxEdges": 1200,
+    "imageSize": 512,
+    "proposalsPerSample": 8,
+    "includeGtTrainingAnchors": true,
+    "includeValGtAnchors": false,
+    "seed": 41
+  },
+  "training": {
+    "steps": 200,
+    "batchSize": 16,
+    "learningRate": 0.0003,
+    "checkpointEvery": 50,
+    "evalMaxBatches": 4,
+    "firstStepLoss": 325.7701416015625,
+    "lastStepLoss": 3.857430934906006
+  },
+  "reports": {
+    "runConfig": "checkpoints/runpod_vertex_refiner_source_only_probe_20260622_phase4_small/full/run_config.json",
+    "summary": "checkpoints/runpod_vertex_refiner_source_only_probe_20260622_phase4_small/full/summary.json",
+    "eval": "checkpoints/runpod_vertex_refiner_source_only_probe_20260622_phase4_small/full/eval.json",
+    "qualitativeOverlay": "checkpoints/runpod_vertex_refiner_source_only_probe_20260622_phase4_small/full/qualitative_before_after.png",
+    "trainHistory": "checkpoints/runpod_vertex_refiner_source_only_probe_20260622_phase4_small/full/train_history.jsonl",
+    "trainLog": "checkpoints/runpod_vertex_refiner_source_only_probe_20260622_phase4_small/full/train.log"
+  },
+  "sampledBeforeAfterMetrics": {
+    "valBefore": {
+      "precision": 0.010627238073235531,
+      "recall": 0.3724696356275304,
+      "f1": 0.020664869721473498,
+      "falsePositive": 8565,
+      "loss": 393.1650695800781
+    },
+    "valAfter": {
+      "precision": 0.86,
+      "recall": 0.3481781376518219,
+      "f1": 0.4956772334293948,
+      "falsePositive": 14,
+      "loss": 3.9838762283325195
+    }
+  },
+  "standaloneEvalMetrics": {
+    "samples": 64,
+    "precision": 0.7157894736842105,
+    "recall": 0.2905982905982906,
+    "f1": 0.4133738601823708,
+    "meanErrorPx": 1.0019788027686232,
+    "falsePositive": 27,
+    "falseNegative": 166,
+    "slices": {
+      "boundaryContact": {
+        "samples": 50,
+        "precision": 0.8125,
+        "recall": 0.29545454545454547,
+        "f1": 0.4333333333333334,
+        "meanErrorPx": 1.0036055931678185
+      },
+      "closePair": {
+        "samples": 14,
+        "precision": 0.7878787878787878,
+        "recall": 0.19548872180451127,
+        "f1": 0.3132530120481927,
+        "meanErrorPx": 0.8757844796547523
+      },
+      "corner": {
+        "samples": 12,
+        "precision": 0.3333333333333333,
+        "recall": 0.11904761904761904,
+        "f1": 0.1754385964912281,
+        "meanErrorPx": 0.9128529369831085
+      }
+    }
+  },
+  "interpretation": {
+    "summary": "The source-only refiner learns quickly and sharply reduces false positives, but recall is not high enough for promotion. Close-pair and corner recall are the next model/data/proposal targets.",
+    "knownLimitations": [
+      "This is a 512px, base-24 budget probe, not the final 1024px/base-48 V1 target.",
+      "The run used a selected subset of cp_training_mix_v1 to stay under the requested RunPod budget.",
+      "Validation/eval used source-image proposals only, so recall reflects both model quality and proposal coverage.",
+      "No ONNX export or product integration should use this checkpoint as a promoted model."
+    ]
+  }
+}

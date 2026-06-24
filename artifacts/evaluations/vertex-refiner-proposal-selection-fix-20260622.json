@@ -1,0 +1,79 @@
+{
+  "schema": "create-pattern-detector/vertex-refiner-proposal-selection-fix/v1",
+  "createdAt": "2026-06-22",
+  "checkpoint": "checkpoints/runpod_vertex_refiner_source_only_probe_20260622_phase4_small/full/latest.pt",
+  "manifest": "data/generated/synthetic/cp_training_mix_v1/raw-manifest.jsonl",
+  "split": "val",
+  "limit": 8,
+  "imageSize": 512,
+  "baseChannels": 24,
+  "auxiliaryMode": "zero",
+  "includeGtTrainingAnchors": false,
+  "beforeFixObservation": {
+    "proposalCap": 8,
+    "issue": "Dataset construction capped proposals by taking the first N after spatial sorting, which starved most full-pattern vertices of any crop coverage."
+  },
+  "afterFixCap8": {
+    "proposalCap": 8,
+    "totalGtVertices": 1210,
+    "coveredByCrop": 316,
+    "proposalCoverage": 0.2611570247933884,
+    "fullPatternRecall": 0.01487603305785124,
+    "falseNegativeSplit": {
+      "dueToNoCropCoverage": 894,
+      "dueToCoveredButNotMatched": 298,
+      "noCropFraction": 0.75,
+      "coveredMissFraction": 0.25
+    }
+  },
+  "afterFixCap128": {
+    "proposalCap": 128,
+    "totalGtVertices": 1210,
+    "coveredByCrop": 1200,
+    "proposalCoverage": 0.9917355371900827,
+    "fullPatternRecall": 0.11652892561983472,
+    "coveredConditionalRecall": 0.1175,
+    "falseNegativeSplit": {
+      "dueToNoCropCoverage": 10,
+      "dueToCoveredButNotMatched": 1059,
+      "noCropFraction": 0.009354536950420954,
+      "coveredMissFraction": 0.990645463049579
+    },
+    "byKind": {
+      "boundaryContact": {
+        "proposalCoverage": 1.0,
+        "recall": 0.23717948717948717
+      },
+      "corner": {
+        "proposalCoverage": 0.7142857142857143,
+        "recall": 0.22857142857142856
+      },
+      "interiorJunction": {
+        "proposalCoverage": 1.0,
+        "recall": 0.09421000981354269
+      }
+    }
+  },
+  "interpretation": {
+    "summary": "The proposal-selection bug is fixed for the corrected Phase 4 cap: selected crops cover nearly all non-corner vertices on this slice. The remaining recall bottleneck is model/training/decode quality on vertices that are already inside selected crops.",
+    "nextStep": "Run the corrected Phase 4 training probe with PROPOSALS_PER_SAMPLE=128 and full-pattern diagnostics enabled."
+  },
+  "runpodRetry": {
+    "attempted": true,
+    "status": "blocked_by_ssh_readiness",
+    "podsStopped": [
+      {
+        "podId": "f6w3yb8juvopp7",
+        "gpu": "NVIDIA L4",
+        "costPerHourUsd": 0.39,
+        "reason": "RUNNING but runpodctl ssh info never became ready."
+      },
+      {
+        "podId": "du7ny360ld1gwf",
+        "gpu": "NVIDIA RTX PRO 4000 Blackwell",
+        "costPerHourUsd": 0.57,
+        "reason": "RUNNING but runpodctl ssh info never became ready."
+      }
+    ]
+  }
+}

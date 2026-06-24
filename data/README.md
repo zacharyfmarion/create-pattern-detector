@@ -95,9 +95,67 @@ bun run src/validate-scraped.ts
 - Mathematical constraints violated
 - Not suitable for training
 
-## Data Sources
+## Synthetic dataset roots
 
-### Synthetic Patterns
+Each synthetic source is a self-contained "dataset root" (lives under
+`~/Documents/datasets/create-pattern-detector/synthetic/<name>/`, symlinked into the
+repo via `data/output`) with this layout:
+
+```
+<root>/
+  folds/<id>.fold            # canonical training files (geometry + M/V/B/U/F)
+  metadata/<id>.json         # per-sample config + validation + embedded fold
+  raw-manifest.jsonl         # one row/sample (id, foldPath, family, bucket, split, …)
+  recipe.json                # how the root was generated
+  qa.json                    # summary stats
+```
+
+Roots are combined into a training mix with `scripts/data/build_synthetic_training_mix.py`,
+which symlinks folds/metadata, tags each row with `sourceDataset`, dedupes by `id`, and
+(optionally) recomputes train/val/test splits.
+
+Current sources:
+
+| Source root | Family | Origin |
+|-------------|--------|--------|
+| `rabbit_ear_fold_program_v1` | `rabbit-ear-fold-program` | In-repo TS generator (`data/ts-generation`) |
+| `treemaker_tree_v1` | `treemaker-tree` | External TreeMaker CLI, normalized to a root |
+| `search225_v1` | `search225-tiling` | ExplOri 22.5 API (see below) |
+
+### SEARCH-22.5 / ExplOri 22.5 patterns
+
+Exact, flat-foldable 22.5° grid tilings from <https://225.designorigami.net>
+(source: <https://github.com/theplantpsychologist/SEARCH-22.5>). These satisfy
+Maekawa/Kawasaki by construction and ship with valid M/V/B assignments, giving a
+distinct distribution (tessellation/modular-style) from the tree-based sources.
+
+The site is backed by per-(N, symmetry) SQLite databases (`N`=2..6, `sym` ∈
+{none, diag, book}); the prebuilt databases are **not** distributed, so regenerating
+them locally means rerunning SEARCH-22.5's full enumeration pipeline. Instead we pull
+finished patterns from its public API and normalize them with the same `cp → fold`
+conversion the site uses. The server reconstructs each tiling per-request and is **not**
+concurrency-safe (parallel requests return 400), so the adapter fetches **sequentially**
+with a politeness delay.
+
+```bash
+# Curated ~10k, weighted toward higher-N / denser patterns (~30-60 min, resumable)
+python scripts/data/build_search225_dataset.py \
+  --out ~/Documents/datasets/create-pattern-detector/synthetic/search225_v1 \
+  --count 10000 --weights higher-n
+
+# Then fold it into a new training mix alongside the existing sources:
+python scripts/data/build_synthetic_training_mix.py --recompute-splits \
+  --out ~/Documents/datasets/create-pattern-detector/synthetic/cp_training_mix_v2 \
+  ~/Documents/datasets/create-pattern-detector/synthetic/treemaker_tree_v1 \
+  ~/Documents/datasets/create-pattern-detector/synthetic/rabbit_ear_fold_program_v1 \
+  ~/Documents/datasets/create-pattern-detector/synthetic/search225_v1
+```
+
+Weight presets (`--weights`): `higher-n` (favors N=4,5,6), `lower-n`, `balanced`.
+Restrict combos with `--combo 4_diag 5_book`; re-running resumes from the existing
+manifest. Adapter code: `src/data/search225/`.
+
+### Legacy synthetic patterns (Rabbit Ear)
 - Generated using Rabbit Ear library
 - Axiom-based folding simulation
 - Guaranteed local flat-foldability
