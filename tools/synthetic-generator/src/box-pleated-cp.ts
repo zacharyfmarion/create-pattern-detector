@@ -76,6 +76,12 @@ export function buildPackingCP(packing: BoxPleatedPacking): PackingCP {
   for (const object of packing.layout.objects) {
     if (object.kind !== "stretch-device") continue;
     for (const line of object.ridges) pushClipped(ridges, line[0], line[1], W, H);
+    // A stretch device split into two contours shares an interior edge between
+    // them. BP Studio emits each contour's other edges as ridges but drops the
+    // shared edge (it is the internal boundary between the two gadget halves),
+    // leaving its two endpoints under-creased. That edge is a real ridge, so add
+    // it back.
+    for (const e of sharedContourEdges(object.contours)) pushClipped(ridges, e.a, e.b, W, H);
   }
   for (const r of gap.ridges) pushClipped(ridges, r.a, r.b, W, H);
 
@@ -138,6 +144,32 @@ export function buildPackingCP(packing: BoxPleatedPacking): PackingCP {
     complete: gap.complete,
     valid: gap.complete && offGrid.length === 0,
   };
+}
+
+/**
+ * Edges that appear on the boundary of two or more of an object's contours - the
+ * internal creases where its sub-regions meet. (For a two-contour stretch device,
+ * this is the single shared edge BP Studio omits from its ridge list.)
+ */
+function sharedContourEdges(
+  contours: Array<{ outer: GridPoint[] }>,
+): OriSegment[] {
+  const count = new Map<string, { a: GridPoint; b: GridPoint; n: number }>();
+  const round = (v: number): number => Math.round(v * 1e4) / 1e4;
+  for (const c of contours) {
+    const ring = c.outer;
+    for (let i = 0; i < ring.length; i++) {
+      const a = ring[i];
+      const b = ring[(i + 1) % ring.length];
+      const ka = `${round(a.x)},${round(a.y)}`;
+      const kb = `${round(b.x)},${round(b.y)}`;
+      const key = ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`;
+      const entry = count.get(key) ?? { a, b, n: 0 };
+      entry.n += 1;
+      count.set(key, entry);
+    }
+  }
+  return [...count.values()].filter((e) => e.n >= 2).map((e) => ({ a: e.a, b: e.b }));
 }
 
 /** Clip each segment to the paper, dropping any that fall entirely outside. */
