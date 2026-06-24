@@ -22,6 +22,13 @@ import { flapRidges, type GapRect } from "./box-pleated-gap-fill.ts";
 export interface TilingResult {
   flaps: GapRect[];
   ridges: OriSegment[];
+  /**
+   * Ridges grouped per filler flap (parallel to `flaps`), so axial seeds can be
+   * taken from each flap's OWN straight skeleton. Seeding from the flattened
+   * `ridges` would fuse adjacent flaps and invent junctions at their shared
+   * boundary (a point interior to neither skeleton).
+   */
+  ridgesByFlap: OriSegment[][];
   solved: boolean;
 }
 
@@ -73,16 +80,16 @@ export function tileEmptyCells(occupied: boolean[][], W: number, H: number): Til
   // only be tiled by even-area flaps, so an odd total area is untileable. Cheap
   // reject avoids exhausting the backtracker on the common odd-interior void.
   if (!touchesSheetEdge(grid, W, H) && emptyArea(grid, W, H) % 2 === 1) {
-    return { flaps: [], ridges: [], solved: false };
+    return { flaps: [], ridges: [], ridgesByFlap: [], solved: false };
   }
   return tile(grid, W, H, freeFn);
 }
 
 function tile(occupied: boolean[][], W: number, H: number, freeFn: FreeSidesFn): TilingResult {
   const flaps = solve(occupied, W, H, freeFn, { nodes: 0 });
-  if (!flaps) return { flaps: [], ridges: [], solved: false };
-  const ridges = flaps.flatMap((f) => croppedFlapRidges(f, freeFn));
-  return { flaps, ridges, solved: true };
+  if (!flaps) return { flaps: [], ridges: [], ridgesByFlap: [], solved: false };
+  const ridgesByFlap = flaps.map((f) => croppedFlapRidges(f, freeFn));
+  return { flaps, ridges: ridgesByFlap.flat(), ridgesByFlap, solved: true };
 }
 
 /** Backtracking exact tiling. Returns the flap list, or null if untileable / budget exhausted. */

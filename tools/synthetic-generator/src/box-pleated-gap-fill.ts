@@ -40,6 +40,11 @@ export interface GapFillResult {
   flaps: GapRect[];
   /** Straight-skeleton ridge creases for every new flap. */
   ridges: OriSegment[];
+  /**
+   * Ridges grouped per filler flap (parallel to `flaps`), so axial seeds can be
+   * taken from each flap's OWN straight skeleton rather than the fused union.
+   */
+  ridgesByFlap: OriSegment[][];
   /** True when every empty region was filled. */
   resolved: boolean;
   /** Bounding rectangles of empty regions that could not be filled. */
@@ -70,6 +75,7 @@ function fillEmptyGrid(W: number, H: number, empty: boolean[][]): GapFillResult 
 
   const flaps: GapRect[] = [];
   const ridges: OriSegment[] = [];
+  const ridgesByFlap: OriSegment[][] = [];
   const unresolved: GapRect[] = [];
   for (const region of regions) {
     // Tile this region's actual cells (in sheet coordinates), so non-rectangular
@@ -81,12 +87,13 @@ function fillEmptyGrid(W: number, H: number, empty: boolean[][]): GapFillResult 
     if (tiling.solved) {
       flaps.push(...tiling.flaps);
       ridges.push(...tiling.ridges);
+      ridgesByFlap.push(...tiling.ridgesByFlap);
     } else {
       unresolved.push(boundingRect(region));
     }
   }
 
-  return { flaps, ridges, resolved: unresolved.length === 0, unresolved };
+  return { flaps, ridges, ridgesByFlap, resolved: unresolved.length === 0, unresolved };
 }
 
 /** Straight-skeleton ridge creases of a rectangular flap. */

@@ -271,6 +271,12 @@ export interface PackingGapFill {
   flaps: GapRect[];
   /** Straight-skeleton ridge creases for the filler flaps. */
   ridges: OriSegment[];
+  /**
+   * Filler ridges grouped per flap (parallel to `flaps`). Axial seeds come from
+   * each filler flap's own straight skeleton, so a point where two adjacent
+   * fillers merely touch on their shared boundary is never seeded.
+   */
+  ridgesByFlap: OriSegment[][];
   /** True when all empty paper was filled (the packing is complete, rule #4). */
   complete: boolean;
   /** Empty regions that could not be filled (the packing should be rejected). */
@@ -289,6 +295,7 @@ export function fillPackingGaps(packing: BoxPleatedPacking): PackingGapFill {
   return {
     flaps: result.flaps,
     ridges: result.ridges,
+    ridgesByFlap: result.ridgesByFlap,
     complete: result.resolved,
     unresolved: result.unresolved,
   };

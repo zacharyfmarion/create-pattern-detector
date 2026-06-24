@@ -79,19 +79,20 @@ export function buildPackingCP(packing: BoxPleatedPacking): PackingCP {
   }
   for (const r of gap.ridges) pushClipped(ridges, r.a, r.b, W, H);
 
-  // Seeds: each flap's ridge convergence points, plus the filler flaps'. Filler
-  // seeds come from gap.ridges - the exact ridges the molecule uses - not from
-  // flapRidges, because an edge/corner filler's molecule ridges are the
-  // edge-reflected skeleton, whose spine sits on the paper edge, while flapRidges
-  // gives the un-reflected interior skeleton. Seeding from the un-reflected
-  // skeleton put axial seeds at interior points that then reflected off the
-  // reflected ridge and crossed each other (and neighbouring axials).
+  // Seeds: the interior convergence points of each polygon's OWN straight
+  // skeleton. A valid axial seed is a junction inside one polygon's skeleton; a
+  // point where two adjacent polygons merely touch on a shared boundary is
+  // interior to neither and must not be seeded. So we run ridgeJunctions per
+  // polygon (each real flap, and each filler flap separately) - never on the
+  // union, which would fuse neighbours and invent boundary junctions. The filler
+  // groups carry the edge-reflected ridges (croppedFlapRidges) the molecule uses,
+  // so an edge/corner filler is seeded from the same skeleton it is drawn with.
   const rawSeeds: GridPoint[] = [];
   for (const object of packing.layout.objects) {
     if (object.kind !== "flap") continue;
     rawSeeds.push(...ridgeJunctions(object.ridges.map((l) => seg(l[0], l[1]))));
   }
-  rawSeeds.push(...ridgeJunctions(gap.ridges));
+  for (const group of gap.ridgesByFlap) rawSeeds.push(...ridgeJunctions(group));
   const seenSeed = new Set<string>();
   const seeds = rawSeeds.filter((s) => {
     const k = `${s.x},${s.y}`;

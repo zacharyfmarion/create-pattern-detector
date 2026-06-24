@@ -46,11 +46,17 @@ export interface Crossing {
 /** Classify every pair of axial-family creases (axials, edge-axials, pleats). */
 export function computeCrossings(cp: ReturnType<typeof buildPackingCP>): Crossing[] {
   const fam = [...cp.axials, ...cp.edgeAxials, ...cp.pleats];
+  const W = Math.round(cp.sheet.width);
+  const H = Math.round(cp.sheet.height);
+  // Two creases meeting on the paper boundary is fine (axials run along and end
+  // on the edge); only flag intersections in the interior of the paper.
+  const onBoundary = (p: Pt): boolean =>
+    Math.abs(p.x) < EPS || Math.abs(p.x - W) < EPS || Math.abs(p.y) < EPS || Math.abs(p.y - H) < EPS;
   const out: Crossing[] = [];
   for (let i = 0; i < fam.length; i++) {
     for (let j = i + 1; j < fam.length; j++) {
       const c = classify(fam[i], fam[j]);
-      if (c) out.push(c);
+      if (c && !onBoundary(c.at)) out.push(c);
     }
   }
   return out;
