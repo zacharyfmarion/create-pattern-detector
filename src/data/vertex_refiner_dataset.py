@@ -49,8 +49,8 @@ from src.models.vertex_refiner_contract import CROP_SIZE_PX, normalized_coord_gr
 
 AuxiliaryJunctionMode = Literal["zero", "rendered-labels", "dense-cache"]
 AUXILIARY_JUNCTION_MODES: tuple[str, ...] = ("zero", "rendered-labels", "dense-cache")
-RefinerInputVersion = Literal["v1", "v2"]
-REFINER_INPUT_VERSIONS: tuple[str, ...] = ("v1", "v2")
+RefinerInputVersion = Literal["v1", "v2", "v3"]
+REFINER_INPUT_VERSIONS: tuple[str, ...] = ("v1", "v2", "v3")
 
 
 @dataclass(frozen=True)
@@ -191,12 +191,26 @@ def build_vertex_refiner_input(
             x_grid,
             y_grid,
         ]
-    else:
+    elif input_version == "v2":
         channels = [
             crop_array(sample.image_gray, crop_origin_xy, crop_size, pad_value=1.0),
             crop_array(sample.source_ink_probability, crop_origin_xy, crop_size, pad_value=0.0),
             crop_array(sample.source_distance_to_ink, crop_origin_xy, crop_size, pad_value=1.0),
             crop_array(sample.source_skeleton, crop_origin_xy, crop_size, pad_value=0.0),
+            crop_array(sample.source_orientation_cos2, crop_origin_xy, crop_size, pad_value=0.0),
+            crop_array(sample.source_orientation_sin2, crop_origin_xy, crop_size, pad_value=0.0),
+            crop_array(sample.signed_distance_to_frame, crop_origin_xy, crop_size, pad_value=-1.0),
+            crop_array(sample.frame_edge_mask, crop_origin_xy, crop_size, pad_value=0.0),
+            crop_array(sample.inside_paper_mask, crop_origin_xy, crop_size, pad_value=0.0),
+            crop_array(sample.boundary_contact_prior, crop_origin_xy, crop_size, pad_value=0.0),
+            x_grid,
+            y_grid,
+        ]
+    else:
+        channels = [
+            crop_array(sample.image_gray, crop_origin_xy, crop_size, pad_value=1.0),
+            crop_array(sample.source_ink_probability, crop_origin_xy, crop_size, pad_value=0.0),
+            crop_array(sample.source_distance_to_ink, crop_origin_xy, crop_size, pad_value=1.0),
             crop_array(sample.source_orientation_cos2, crop_origin_xy, crop_size, pad_value=0.0),
             crop_array(sample.source_orientation_sin2, crop_origin_xy, crop_size, pad_value=0.0),
             crop_array(sample.signed_distance_to_frame, crop_origin_xy, crop_size, pad_value=-1.0),

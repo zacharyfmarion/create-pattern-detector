@@ -16,6 +16,7 @@ from torch.utils.data import DataLoader
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 
+from src.data.cpline_augmentations import AUGMENT_PROFILES
 from src.data.vertex_refiner_dataset import VertexRefinerCropDataset, vertex_refiner_collate
 from src.evaluation.vertex_refiner_eval import evaluate_vertex_refiner
 from src.evaluation.vertex_refiner_global_merge import VertexMergeConfig
@@ -23,7 +24,7 @@ from src.evaluation.vertex_refiner_recall_diagnostics import (
     evaluate_full_pattern_vertex_recall,
     summarize_proposal_coverage,
 )
-from src.models import VertexRefinerV1, VertexRefinerV2
+from src.models import VertexRefinerV1, VertexRefinerV2, VertexRefinerV3
 from src.models.losses import VertexRefinerLoss
 
 
@@ -40,6 +41,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-edges", type=int, default=1200)
     parser.add_argument("--image-size", type=int, default=128)
     parser.add_argument("--proposals-per-sample", type=int, default=32)
+    parser.add_argument(
+        "--augment-profile",
+        choices=AUGMENT_PROFILES,
+        default="clean",
+        help="Render augmentation profile for the source image and matching targets.",
+    )
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--base-channels", type=int, default=None)
     parser.add_argument(
@@ -48,7 +55,7 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Optional max number of rendered full-pattern samples cached by the dataset.",
     )
-    parser.add_argument("--model-version", choices=["v1", "v2"], default=None)
+    parser.add_argument("--model-version", choices=["v1", "v2", "v3"], default=None)
     parser.add_argument(
         "--crop-refs",
         type=Path,
@@ -107,7 +114,7 @@ def main() -> int:
     base_channels = args.base_channels or int(config.get("base_channels", 48))
     model_version = args.model_version or str(config.get("model_version", "v1"))
     auxiliary_mode = args.auxiliary_mode or str(config.get("auxiliary_mode", "zero"))
-    model_cls = VertexRefinerV2 if model_version == "v2" else VertexRefinerV1
+    model_cls = _model_class(model_version)
     model = model_cls(base_channels=base_channels).to(device)
     model.load_state_dict(checkpoint["model_state_dict"])
     manifest = args.manifest if args.manifest.is_absolute() else REPO_ROOT / args.manifest
@@ -118,6 +125,7 @@ def main() -> int:
         limit=args.limit,
         max_edges=args.max_edges,
         image_size=args.image_size,
+        augment_profile=args.augment_profile,
         seed=args.seed,
         proposals_per_sample=args.proposals_per_sample,
         include_gt_training_anchors=args.include_gt_training_anchors,
@@ -146,7 +154,11 @@ def main() -> int:
         "checkpoint": checkpoint_path.as_posix(),
         "manifest": manifest.as_posix(),
         "split": args.split,
+        "limit": args.limit,
+        "max_edges": args.max_edges,
         "image_size": args.image_size,
+        "augment_profile": args.augment_profile,
+        "proposals_per_sample": args.proposals_per_sample,
         "base_channels": base_channels,
         "model_version": model_version,
         "auxiliary_mode": auxiliary_mode,
@@ -196,6 +208,16 @@ def _select_device(requested: str) -> torch.device:
             return torch.device("cuda")
         return torch.device("cpu")
     return torch.device(requested)
+
+
+def _model_class(model_version: str) -> type[torch.nn.Module]:
+    if model_version == "v1":
+        return VertexRefinerV1
+    if model_version == "v2":
+        return VertexRefinerV2
+    if model_version == "v3":
+        return VertexRefinerV3
+    raise ValueError(f"Unsupported model_version: {model_version}")
 
 
 if __name__ == "__main__":

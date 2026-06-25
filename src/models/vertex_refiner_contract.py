@@ -21,6 +21,7 @@ CURRENT_POINTER_SCHEMA = "create-pattern-detector/current-vertex-refiner-pointer
 CROP_SIZE_PX = 96
 INPUT_CHANNEL_COUNT = 8
 V2_INPUT_CHANNEL_COUNT = 12
+V3_INPUT_CHANNEL_COUNT = 11
 AUXILIARY_CPLINE_CHANNEL_INDICES = (3, 4, 5)
 COORD_CHANNEL_RANGE = (-1.0, 1.0)
 
@@ -163,6 +164,60 @@ V2_INPUT_CHANNELS = (
     ),
 )
 
+V3_INPUT_CHANNELS = (
+    ChannelSpec(0, "image_gray", "float32", "Original grayscale crop, normalized to 0..1."),
+    ChannelSpec(
+        1,
+        "source_ink_probability",
+        "float32",
+        "Processed source-image ink or crease-line probability, normalized to 0..1.",
+    ),
+    ChannelSpec(
+        2,
+        "source_distance_to_ink",
+        "float32",
+        "Distance-to-ink map in crop-local pixels, normalized by crop size unless noted.",
+    ),
+    ChannelSpec(
+        3,
+        "source_orientation_cos2",
+        "float32",
+        "Source line tangent orientation cos(2 theta), zero away from supported ink.",
+    ),
+    ChannelSpec(
+        4,
+        "source_orientation_sin2",
+        "float32",
+        "Source line tangent orientation sin(2 theta), zero away from supported ink.",
+    ),
+    ChannelSpec(
+        5,
+        "signed_distance_to_frame",
+        "float32",
+        "Signed distance to the square paper frame, clipped and normalized by crop size.",
+    ),
+    ChannelSpec(6, "frame_edge_mask", "float32", "Mask for pixels close to the square frame."),
+    ChannelSpec(7, "inside_paper_mask", "float32", "Mask for pixels inside the known paper frame."),
+    ChannelSpec(
+        8,
+        "boundary_contact_prior",
+        "float32",
+        "Source ink probability restricted to a narrow band around the square frame.",
+    ),
+    ChannelSpec(
+        9,
+        "crop_x_normalized",
+        "float32",
+        "Crop-local x coordinate channel spanning -1 at the left edge to +1 at the right edge.",
+    ),
+    ChannelSpec(
+        10,
+        "crop_y_normalized",
+        "float32",
+        "Crop-local y coordinate channel spanning -1 at the top edge to +1 at the bottom edge.",
+    ),
+)
+
 OUTPUT_SPECS = (
     TensorSpec(
         "vertex_heatmap",
@@ -213,6 +268,8 @@ V2_OUTPUT_SPECS = (
     ),
 )
 V2_ONNX_OUTPUT_NAMES = tuple(spec.name for spec in V2_OUTPUT_SPECS)
+V3_OUTPUT_SPECS = V2_OUTPUT_SPECS
+V3_ONNX_OUTPUT_NAMES = V2_ONNX_OUTPUT_NAMES
 
 
 def normalized_coord_grid(crop_size: int = CROP_SIZE_PX) -> tuple[np.ndarray, np.ndarray]:

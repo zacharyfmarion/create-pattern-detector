@@ -10,6 +10,7 @@ from torch.utils.data import DataLoader
 
 from src.data.cpline_augmentations import (
     AUGMENT_MIXES,
+    AUGMENT_PROFILES,
     DARK_MODE_STYLE_VARIANTS,
     NON_IDENTITY_SQUARE_SYMMETRIES,
     _sample_mix_entry,
@@ -435,6 +436,78 @@ def test_v3_no_guide_grid_replay_mix_excludes_guide_grid_profiles():
     assert "v2-dashed" in profile_weights
     assert "v2-faint" in profile_weights
     assert "v2-ambiguous-mv" in profile_weights
+
+
+def test_vertex_light_rendered_mix_is_light_mode_only():
+    assert "vertex-light-rendered" in AUGMENT_PROFILES
+    entries = AUGMENT_MIXES["vertex-light-rendered"]
+    profiles = [profile for profile, _, _ in entries]
+    allowed = {
+        "clean",
+        "square-symmetry",
+        "line-style-light",
+        "print-light",
+        "print-medium-lite",
+        "faint-light",
+    }
+
+    assert abs(sum(weight for _, weight, _ in entries) - 1.0) < 1e-6
+    assert set(profiles) == allowed
+    assert all("dark" not in profile for profile in profiles)
+    assert all("photo" not in profile for profile in profiles)
+    assert all("grid" not in profile for profile in profiles)
+    assert all("text" not in profile for profile in profiles)
+    assert all("watermark" not in profile for profile in profiles)
+
+
+@pytest.mark.parametrize("profile", ["line-style-light", "print-medium-lite", "faint-light"])
+def test_vertex_light_rendered_profiles_stay_within_v1_scope(profile: str):
+    cp = simple_mv_cp()
+    clean = render_cpline_sample(
+        cp, image_size=128, padding=8, line_width=2, augment_profile="clean"
+    )
+    sample = render_cpline_sample(
+        cp,
+        image_size=128,
+        padding=8,
+        line_width=2,
+        augment_profile=profile,
+        seed=19,
+    )
+    params = sample.metadata["params"]
+    background = np.asarray(params["background"], dtype=np.float32)
+
+    assert sample.metadata["selected_profile"] == profile
+    assert sample.metadata["style_variant"] is None
+    assert sample.metadata["grid_enabled"] is False
+    assert sample.metadata["geometry_applied"] is False
+    assert background.min() >= 232
+    assert float(sample.image.mean()) > 200.0
+    assert not np.array_equal(sample.image, clean.image)
+    assert np.allclose(sample.pixel_vertices, clean.pixel_vertices)
+    assert sample.junction_mask.sum() == clean.junction_mask.sum()
+
+
+@pytest.mark.parametrize(
+    "profile",
+    ["line-style-light", "print-light", "print-medium-lite", "faint-light"],
+)
+def test_vertex_light_rendered_profiles_cap_small_render_line_width(profile: str):
+    cp = simple_mv_cp()
+    widths = {
+        render_cpline_sample(
+            cp,
+            image_size=96,
+            padding=8,
+            line_width=1,
+            augment_profile=profile,
+            seed=seed,
+        ).metadata["line_width"]
+        for seed in range(40)
+    }
+
+    assert min(widths) == 1
+    assert max(widths) == 2
 
 
 def test_augment_mix_sampler_handles_all_registered_mixes_repeatedly():

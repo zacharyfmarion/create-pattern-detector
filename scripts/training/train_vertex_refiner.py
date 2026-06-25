@@ -25,7 +25,7 @@ from src.evaluation.vertex_refiner_eval import (
     evaluate_vertex_refiner,
     vertex_refiner_targets_to_device,
 )
-from src.models import VertexRefinerV1, VertexRefinerV2
+from src.models import VertexRefinerV1, VertexRefinerV2, VertexRefinerV3
 from src.models.losses import VertexRefinerLoss, VertexRefinerLossConfig
 
 
@@ -66,7 +66,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-steps", type=int, default=40)
     parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--base-channels", type=int, default=16)
-    parser.add_argument("--model-version", choices=["v1", "v2"], default="v1")
+    parser.add_argument("--model-version", choices=["v1", "v2", "v3"], default="v1")
     parser.add_argument(
         "--train-crop-refs",
         type=Path,
@@ -91,7 +91,7 @@ def parse_args() -> argparse.Namespace:
         default="zero",
         help=(
             "Legacy CPLineNet auxiliary source. Use zero for source-only training; "
-            "model-version=v2 selects source/frame channels separately."
+            "model-version=v2/v3 selects source/frame channels separately."
         ),
     )
     parser.add_argument("--auxiliary-dropout-p", type=float, default=0.5)
@@ -228,7 +228,7 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         collate_fn=vertex_refiner_collate,
     )
 
-    model_cls = VertexRefinerV2 if args.model_version == "v2" else VertexRefinerV1
+    model_cls = _model_class(args.model_version)
     model = model_cls(base_channels=args.base_channels).to(device)
     init_checkpoint_path = None
     if args.init_checkpoint is not None:
@@ -443,6 +443,16 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
     }
     (output_dir / "summary.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
     return summary
+
+
+def _model_class(model_version: str) -> type[torch.nn.Module]:
+    if model_version == "v1":
+        return VertexRefinerV1
+    if model_version == "v2":
+        return VertexRefinerV2
+    if model_version == "v3":
+        return VertexRefinerV3
+    raise ValueError(f"Unsupported model_version: {model_version}")
 
 
 def select_device(requested: str) -> torch.device:

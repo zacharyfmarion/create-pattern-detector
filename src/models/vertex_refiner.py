@@ -17,6 +17,7 @@ from src.models.vertex_refiner_contract import (
     INCIDENT_RAY_BINS,
     INPUT_CHANNEL_COUNT,
     V2_INPUT_CHANNEL_COUNT,
+    V3_INPUT_CHANNEL_COUNT,
     VERTEX_KIND_NAMES,
 )
 
@@ -165,20 +166,22 @@ class VertexRefinerV1(nn.Module):
         )
 
 
-class VertexRefinerV2(nn.Module):
-    """Frame-aware source-only crop model for boundary-sensitive junction detection."""
+class _FrameAwareVertexRefiner(nn.Module):
+    """Shared frame-aware crop model body for V2/V3 junction refinement."""
 
     def __init__(
         self,
         *,
-        input_channels: int = V2_INPUT_CHANNEL_COUNT,
+        input_channels: int,
+        expected_input_channels: int,
+        model_name: str,
         base_channels: int = 48,
         crop_size: int = CROP_SIZE_PX,
         offset_limit_px: float = 4.0,
     ) -> None:
         super().__init__()
-        if input_channels != V2_INPUT_CHANNEL_COUNT:
-            raise ValueError(f"VertexRefinerV2 expects {V2_INPUT_CHANNEL_COUNT} input channels")
+        if input_channels != expected_input_channels:
+            raise ValueError(f"{model_name} expects {expected_input_channels} input channels")
         self.input_channels = int(input_channels)
         self.base_channels = int(base_channels)
         self.crop_size = int(crop_size)
@@ -244,6 +247,48 @@ class VertexRefinerV2(nn.Module):
             outputs["incident_rays"],
             outputs["boundary_contact_heatmap"],
             outputs["boundary_side"],
+        )
+
+
+class VertexRefinerV2(_FrameAwareVertexRefiner):
+    """Frame-aware source-only crop model with the legacy source skeleton channel."""
+
+    def __init__(
+        self,
+        *,
+        input_channels: int = V2_INPUT_CHANNEL_COUNT,
+        base_channels: int = 48,
+        crop_size: int = CROP_SIZE_PX,
+        offset_limit_px: float = 4.0,
+    ) -> None:
+        super().__init__(
+            input_channels=input_channels,
+            expected_input_channels=V2_INPUT_CHANNEL_COUNT,
+            model_name="VertexRefinerV2",
+            base_channels=base_channels,
+            crop_size=crop_size,
+            offset_limit_px=offset_limit_px,
+        )
+
+
+class VertexRefinerV3(_FrameAwareVertexRefiner):
+    """Frame-aware source-only crop model without a skeleton input channel."""
+
+    def __init__(
+        self,
+        *,
+        input_channels: int = V3_INPUT_CHANNEL_COUNT,
+        base_channels: int = 48,
+        crop_size: int = CROP_SIZE_PX,
+        offset_limit_px: float = 4.0,
+    ) -> None:
+        super().__init__(
+            input_channels=input_channels,
+            expected_input_channels=V3_INPUT_CHANNEL_COUNT,
+            model_name="VertexRefinerV3",
+            base_channels=base_channels,
+            crop_size=crop_size,
+            offset_limit_px=offset_limit_px,
         )
 
 

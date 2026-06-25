@@ -13,6 +13,9 @@ from src.models.vertex_refiner_contract import (
     V2_INPUT_CHANNELS,
     V2_INPUT_CHANNEL_COUNT,
     V2_ONNX_OUTPUT_NAMES,
+    V3_INPUT_CHANNELS,
+    V3_INPUT_CHANNEL_COUNT,
+    V3_ONNX_OUTPUT_NAMES,
     VERTEX_KIND_NAMES,
     checkpoint_manifest_skeleton,
     degree_class_for_count,
@@ -78,6 +81,22 @@ def test_vertex_refiner_input_and_output_names_are_stable() -> None:
         "boundary_contact_heatmap",
         "boundary_side",
     )
+    assert V3_INPUT_CHANNEL_COUNT == 11
+    assert [channel.name for channel in V3_INPUT_CHANNELS] == [
+        "image_gray",
+        "source_ink_probability",
+        "source_distance_to_ink",
+        "source_orientation_cos2",
+        "source_orientation_sin2",
+        "signed_distance_to_frame",
+        "frame_edge_mask",
+        "inside_paper_mask",
+        "boundary_contact_prior",
+        "crop_x_normalized",
+        "crop_y_normalized",
+    ]
+    assert "source_skeleton" not in [channel.name for channel in V3_INPUT_CHANNELS]
+    assert V3_ONNX_OUTPUT_NAMES == V2_ONNX_OUTPUT_NAMES
 
 
 def test_normalized_coord_grid_matches_crop_edges() -> None:

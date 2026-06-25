@@ -97,6 +97,35 @@ def test_vertex_refiner_v2_input_channels_are_frame_aligned(tmp_path: Path) -> N
     assert inputs[6, 52, 48] > 0.0
 
 
+def test_vertex_refiner_v3_input_channels_omit_skeleton(tmp_path: Path) -> None:
+    manifest = _write_manifest(tmp_path)
+    dataset = VertexRefinerCropDataset(
+        manifest,
+        split="train",
+        image_size=128,
+        padding=8,
+        line_width=2,
+        seed=17,
+        proposals_per_sample=1,
+        input_version="v3",
+    )
+    sample = dataset._render_record(0)
+    proposal = VertexProposal(64.0, 8.0, 1.0, ("test_top_boundary_contact",))
+    v2_inputs = extract_vertex_refiner_crop(sample, proposal, input_version="v2")["input"]
+    v3_inputs = extract_vertex_refiner_crop(sample, proposal, input_version="v3")["input"]
+
+    assert dataset[0]["input"].shape == (11, 96, 96)
+    assert v3_inputs.shape == (11, 96, 96)
+    assert np.allclose(v3_inputs[:3], v2_inputs[:3])
+    assert np.allclose(v3_inputs[3:], v2_inputs[4:])
+    assert not np.allclose(v3_inputs[3], v2_inputs[3])
+    assert v3_inputs[6, 48, 48] > 0.5
+    assert v3_inputs[7, 44, 48] == 0.0
+    assert v3_inputs[7, 52, 48] == 1.0
+    assert v3_inputs[5, 44, 48] < 0.0
+    assert v3_inputs[5, 52, 48] > 0.0
+
+
 def test_boundary_gt_jitter_anchors_oversample_boundary_contacts(tmp_path: Path) -> None:
     manifest = _write_manifest(tmp_path)
 

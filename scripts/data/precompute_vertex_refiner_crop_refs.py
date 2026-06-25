@@ -50,7 +50,7 @@ def parse_args() -> argparse.Namespace:
         choices=["zero", "rendered-labels"],
         default="zero",
     )
-    parser.add_argument("--input-version", choices=["v1", "v2"], default="v2")
+    parser.add_argument("--input-version", choices=["v1", "v2", "v3"], default="v2")
     parser.add_argument(
         "--crop-ref-progress-every",
         type=int,

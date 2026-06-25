@@ -32,9 +32,12 @@ BASE_AUGMENT_PROFILES = (
     "clean",
     "square-symmetry",
     "line-style",
+    "line-style-light",
     "dark-mode",
     "print-light",
+    "print-medium-lite",
     "print-medium",
+    "faint-light",
     "photo-light",
     "photo-dark",
 )
@@ -53,6 +56,14 @@ AUGMENT_MIXES: dict[str, tuple[tuple[str, float, str | None], ...]] = {
         ("photo-light", 0.10, None),
         ("dark-mode", 0.15, None),
         ("photo-dark", 0.10, None),
+    ),
+    "vertex-light-rendered": (
+        ("clean", 0.15, None),
+        ("square-symmetry", 0.10, None),
+        ("line-style-light", 0.25, None),
+        ("print-light", 0.25, None),
+        ("print-medium-lite", 0.15, None),
+        ("faint-light", 0.10, None),
     ),
 }
 V2_AUGMENT_MIX = (
@@ -448,6 +459,18 @@ def _sample_render_params(
         return params
     if profile == "line-style":
         _apply_line_style_params(params, rng, line_width=line_width)
+    elif profile == "line-style-light":
+        _apply_line_style_params(params, rng, line_width=line_width, mild=True)
+        params.update(
+            {
+                "background": tuple(int(v) for v in rng.integers(246, 256, size=3)),
+                "brightness": float(rng.uniform(-3, 3)),
+                "contrast": float(rng.uniform(0.97, 1.04)),
+                "noise_std": float(rng.uniform(0.0, 1.5)),
+                "blur_kernel": int(rng.choice([0, 0, 0, 3])),
+                "jpeg_quality": int(rng.integers(90, 100)),
+            }
+        )
     elif profile == "dark-mode":
         _apply_dark_mode_params(
             params, rng, image_size=image_size, line_width=line_width, style_variant=style_variant
@@ -464,6 +487,19 @@ def _sample_render_params(
                 "jpeg_quality": int(rng.integers(82, 98)),
             }
         )
+    elif profile == "print-medium-lite":
+        _apply_line_style_params(params, rng, line_width=line_width, mild=True)
+        params.update(
+            {
+                "background": tuple(int(v) for v in rng.integers(232, 256, size=3)),
+                "brightness": float(rng.uniform(-7, 7)),
+                "contrast": float(rng.uniform(0.91, 1.09)),
+                "noise_std": float(rng.uniform(0.5, 4.5)),
+                "blur_kernel": int(rng.choice([0, 0, 3, 3])),
+                "jpeg_quality": int(rng.integers(76, 98)),
+                "lighting_gradient": bool(rng.random() < 0.20),
+            }
+        )
     elif profile == "print-medium":
         _apply_line_style_params(params, rng, line_width=line_width)
         params.update(
@@ -477,6 +513,8 @@ def _sample_render_params(
                 "lighting_gradient": bool(rng.random() < 0.45),
             }
         )
+    elif profile == "faint-light":
+        _apply_faint_light_params(params, rng, line_width=line_width)
     elif profile == "photo-light":
         _apply_line_style_params(params, rng, line_width=line_width, mild=True)
         params.update(
@@ -529,8 +567,13 @@ def _apply_line_style_params(
     line_width: int,
     mild: bool = False,
 ) -> None:
-    max_width = max(line_width, int(round(line_width * (1.5 if mild else 2.0))) + 1)
-    width = int(rng.integers(max(1, line_width), max_width + 1))
+    if mild:
+        min_width = 1
+        max_width = max(min_width, int(line_width) + 1)
+    else:
+        min_width = max(1, int(line_width))
+        max_width = max(min_width, int(round(line_width * 2.0)) + 1)
+    width = int(rng.integers(min_width, max_width + 1))
     palette_kind = str(rng.choice(["assignment", "assignment", "monochrome", "muted"]))
     if palette_kind == "monochrome":
         shade = int(rng.integers(20, 95))
@@ -561,6 +604,45 @@ def _apply_line_style_params(
     params["target_line_width"] = width
     params["line_alpha"] = float(rng.uniform(0.78 if mild else 0.68, 1.0))
     params["palette_kind"] = palette_kind
+
+
+def _apply_faint_light_params(
+    params: dict[str, Any],
+    rng: np.random.Generator,
+    *,
+    line_width: int,
+) -> None:
+    _apply_line_style_params(params, rng, line_width=line_width, mild=True)
+    background = tuple(int(v) for v in rng.integers(246, 256, size=3))
+    params["background"] = background
+    params["palette"] = _blend_palette_toward_background(
+        params["palette"],
+        background=background,
+        amount=float(rng.uniform(0.20, 0.45)),
+    )
+    params["line_alpha"] = float(rng.uniform(0.45, 0.76))
+    params["brightness"] = float(rng.uniform(-2, 4))
+    params["contrast"] = float(rng.uniform(0.94, 1.05))
+    params["noise_std"] = float(rng.uniform(0.0, 2.0))
+    params["blur_kernel"] = int(rng.choice([0, 0, 3]))
+    params["jpeg_quality"] = int(rng.integers(86, 100))
+    params["palette_kind"] = f"faint-{params.get('palette_kind', 'assignment')}"
+
+
+def _blend_palette_toward_background(
+    palette: dict[int, tuple[int, int, int]],
+    *,
+    background: tuple[int, int, int],
+    amount: float,
+) -> dict[int, tuple[int, int, int]]:
+    bg = np.asarray(background, dtype=np.float32)
+    blend = float(np.clip(amount, 0.0, 1.0))
+    result: dict[int, tuple[int, int, int]] = {}
+    for key, color in palette.items():
+        base = np.asarray(color, dtype=np.float32)
+        mixed = base * (1.0 - blend) + bg * blend
+        result[int(key)] = tuple(int(v) for v in np.clip(np.round(mixed), 0, 255))
+    return result
 
 
 def _target_assignments(assignments: np.ndarray, params: dict[str, Any]) -> np.ndarray:

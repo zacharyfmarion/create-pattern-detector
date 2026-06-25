@@ -10,6 +10,7 @@ from src.models.vertex_refiner import (
     VertexRefinerOnnxWrapper,
     VertexRefinerV1,
     VertexRefinerV2,
+    VertexRefinerV3,
     apply_auxiliary_channel_dropout,
     decode_vertex_refiner_outputs,
 )
@@ -32,6 +33,19 @@ def test_vertex_refiner_forward_shapes() -> None:
 def test_vertex_refiner_v2_forward_shapes() -> None:
     model = VertexRefinerV2(base_channels=8)
     outputs = model(torch.randn(2, 12, 96, 96))
+
+    assert outputs["vertex_heatmap"].shape == (2, 1, 96, 96)
+    assert outputs["boundary_contact_heatmap"].shape == (2, 1, 96, 96)
+    assert outputs["vertex_offset"].shape == (2, 2, 96, 96)
+    assert outputs["vertex_kind"].shape == (2, 5, 96, 96)
+    assert outputs["degree"].shape == (2, 9, 96, 96)
+    assert outputs["incident_rays"].shape == (2, 36, 96, 96)
+    assert outputs["boundary_side"].shape == (2, 4, 96, 96)
+
+
+def test_vertex_refiner_v3_forward_shapes() -> None:
+    model = VertexRefinerV3(base_channels=8)
+    outputs = model(torch.randn(2, 11, 96, 96))
 
     assert outputs["vertex_heatmap"].shape == (2, 1, 96, 96)
     assert outputs["boundary_contact_heatmap"].shape == (2, 1, 96, 96)
@@ -167,6 +181,25 @@ def test_vertex_refiner_loss_is_finite_and_backpropagates() -> None:
 def test_vertex_refiner_v2_loss_is_finite_and_backpropagates() -> None:
     model = VertexRefinerV2(base_channels=8)
     inputs = torch.randn(1, 12, 96, 96)
+    targets = _tiny_targets()
+    outputs = model(inputs)
+    losses = VertexRefinerLoss()(outputs, targets)
+
+    assert torch.isfinite(losses["total"])
+    assert torch.isfinite(losses["boundary_heatmap"])
+    assert torch.isfinite(losses["boundary_side"])
+    losses["total"].backward()
+    grad_norm = sum(
+        float(parameter.grad.abs().sum())
+        for parameter in model.parameters()
+        if parameter.grad is not None
+    )
+    assert grad_norm > 0.0
+
+
+def test_vertex_refiner_v3_loss_is_finite_and_backpropagates() -> None:
+    model = VertexRefinerV3(base_channels=8)
+    inputs = torch.randn(1, 11, 96, 96)
     targets = _tiny_targets()
     outputs = model(inputs)
     losses = VertexRefinerLoss()(outputs, targets)

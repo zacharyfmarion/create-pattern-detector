@@ -385,15 +385,104 @@ Exit criteria:
 
 ### Phase 5: Corrected Native Eval And Failure Review
 
-- [ ] Run corrected native CPOOGLE clean 15.
+- [x] Run corrected native CPOOGLE clean 15.
 - [ ] Run a larger CPOOGLE slice if local runtime is acceptable, or run it on
       the same affordable GPU pod.
 - [ ] Generate per-kind metrics and tolerance sweep.
-- [ ] Generate visual failure sheets for boundary-contact FNs and FPs.
-- [ ] Compare against V1 corrected baseline:
+- [x] Generate visual failure sheets for boundary-contact FNs and FPs.
+- [x] Run an exact proposal-cap sweep on native CPOOGLE clean 15.
+- [x] Compare against V1 corrected baseline:
       - overall recall `0.9574`
       - boundary-contact recall `0.8266`
       - interior recall `0.9890`
+
+Native CPOOGLE clean-15 V2 result from
+`checkpoints/runpod_vertex_refiner_v2_cached_continue_lr1e4_20260624_4090/full/latest.pt`
+using the same seed-17 manifest as the corrected V1 baseline:
+
+- Report:
+  `visualizations/native_real_cp_eval_20260624/native15-seed17-v2-eval.json`.
+- Failure visuals:
+  `visualizations/native_real_cp_eval_20260624/v2_failure_overlays/`.
+- Full-pattern precision `0.9820`, recall `0.9591`, F1 `0.9704`.
+- False positives dropped from `100` to `43`; false negatives moved from `104`
+  to `100`.
+- Boundary-contact recall improved from `0.8266` to `0.9660`.
+- Corner recall improved from `0.9833` to `1.0000`.
+- Interior-junction recall fell from `0.9890` to `0.9561`, but the failure
+  split shows this is mostly proposal coverage, not refiner scoring:
+  proposal coverage was `0.9648`, covered-conditional recall was `0.9941`,
+  and `86 / 100` full-pattern false negatives had no selected crop.
+- Visual review shows most no-crop misses cluster in the dense Aknosom native
+  pattern, where the `128` proposal cap misses interior vertices and several
+  boundary contacts by roughly `7-16px`.
+
+2026-06-24 exact proposal-cap sweep:
+
+- Script:
+  `scripts/evals/sweep_vertex_refiner_proposal_caps.py`.
+- Report:
+  `visualizations/native_real_cp_eval_20260624/proposal_cap_sweep_seed17_v2.json`.
+- The sweep recomputes the exact selected proposals for each cap, then runs one
+  shared union inference pass. This matters because the greedy selector at
+  `256` proposals is not guaranteed to be a simple prefix-compatible superset
+  of the selector at `128` proposals.
+
+| Cap | Mean proposals | Proposal coverage | Precision | Recall | F1 | FP | FN | No-crop FN |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `128` | `97.4` | `0.9648` | `0.9820` | `0.9591` | `0.9704` | `43` | `100` | `86` |
+| `160` | `108.6` | `0.9898` | `0.9844` | `0.9832` | `0.9838` | `38` | `41` | `25` |
+| `192` | `117.1` | `0.9963` | `0.9857` | `0.9902` | `0.9880` | `35` | `24` | `9` |
+| `256` | `132.1` | `1.0000` | `0.9870` | `0.9947` | `0.9908` | `32` | `13` | `0` |
+
+Cap `256` is the current best native clean-15 setting. It removes all no-crop
+misses, raises interior recall to `0.9969`, keeps boundary-contact recall at
+`0.9851`, and improves precision rather than hurting it. The mean selected
+proposal count is only `132.1`, because many records have fewer viable
+proposals than the cap.
+
+Cap `192` is the cheaper compromise: it reaches F1 `0.9880` and overall recall
+`0.9902`, but it still leaves `9` no-crop misses. Product integration should
+start with either cap `256` or an adaptive cap that defaults lower but allows
+`256` when a record hits the lower cap or has high proposal density. Sliding
+window coverage is not the first lever unless larger evals show cap `256`
+still misses proposals.
+
+2026-06-25 augmentation robustness check:
+
+- Added `--augment-profile` to `scripts/evals/eval_vertex_refiner.py`.
+- Added source-image contact sheet script:
+  `scripts/visualize/vertex_refiner_augmentation_contact_sheet.py`.
+- Contact sheet:
+  `visualizations/vertex_refiner_augmentations/contact_sheet_profiles_384.png`.
+- Crop-level eval reports:
+  `visualizations/vertex_refiner_augment_eval_20260625/*.json`.
+- Scope: 15 validation records, `1024px`, product-style proposals, cap `256`,
+  no GT eval anchors, source-only V2 input. This is not full-pattern native
+  product eval, but it directly tests whether the crop model trained on clean
+  renders survives source-image style changes.
+
+| Profile | Precision | Recall | F1 | FP | FN |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `clean` | `0.9688` | `0.9553` | `0.9620` | `245` | `356` |
+| `square-symmetry` | `0.9740` | `0.9521` | `0.9629` | `203` | `383` |
+| `line-style` | `0.7325` | `0.8174` | `0.7726` | `2403` | `1470` |
+| `print-light` | `0.7221` | `0.9165` | `0.8078` | `2731` | `647` |
+| `print-medium` | `0.3957` | `0.7669` | `0.5220` | `9570` | `1905` |
+| `photo-light` | `0.5147` | `0.8657` | `0.6456` | `6575` | `1082` |
+| `dark-mode` | `0.8263` | `0.9441` | `0.8813` | `1556` | `438` |
+| `photo-dark` | `0.7562` | `0.8252` | `0.7892` | `2186` | `1436` |
+| `v3-no-guide-grid-replay` | `0.1456` | `0.8731` | `0.2496` | `40476` | `1003` |
+
+Conclusion: the current checkpoint is clean-render strong but not
+augmentation-robust. Square-domain rotations/flips transfer fine, so local
+geometry orientation is not the issue. Style/print/photo profiles mainly break
+precision, which means source-derived proposal and crop decoding are treating
+too much non-crease or thick/noisy line evidence as vertices. The V3 replay mix
+is especially bad because it includes non-crease issue content such as text,
+watermarks, dashed/faint variants, and combined dark/light perturbations. Before
+product integration, train or fine-tune V2 with a source-only augmentation mix
+and add augmented full-pattern eval gates.
 
 Exit criteria:
 
@@ -408,8 +497,15 @@ Exit criteria:
 - [ ] If precision becomes weak, tune boundary peak threshold, support fraction,
       and hard-negative mining.
 - [ ] If localization dominates, tune offset loss and boundary snap/merge.
-- [ ] If proposal coverage regresses, add frame-grid or sliding-window fallback
-      only for affected cases.
+- [ ] Promote the product proposal cap from `128` to `256`, or add an adaptive
+      cap that can reach `256` on dense records.
+- [ ] If proposal coverage remains weak at cap `256`, add frame-grid or
+      sliding-window fallback only for affected cases.
+- [ ] Add source-image augmentation training for VertexRefinerV2 using a
+      refiner-specific mix derived from `stage-balanced` and selected V3 issue
+      profiles.
+- [ ] Add augmented crop-level and full-pattern eval gates before product
+      integration; clean-only eval is not sufficient.
 
 Exit criteria:
 
