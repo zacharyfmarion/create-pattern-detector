@@ -140,16 +140,13 @@ const RIDGE_EPS = 1e-6;
  * BP Studio emits a non-square flap's ridges as a rectangular "ring" (four
  * axis-aligned sides) with the box's four 45-degree diagonals terminating on the
  * ring's corners - leaving the ring's interior un-creased: a rectangular donut
- * hole. The true straight skeleton continues into it - extend the diagonals
- * inward until they meet, then join the two meeting points with the spine
- * segment. This returns those missing interior creases (the straight skeleton of
- * the ring rectangle), or an empty list when the ridges have no 2D hole (a flap
- * whose skeleton already collapses to a point or segment).
+ * hole. Detect that ring and return its rectangle, or null when the ridges have
+ * no 2D ring (a flap whose skeleton already collapses to a point or segment).
  */
-export function fillRidgeRectHole(ridges: OriSegment[]): OriSegment[] {
+function ringRect(ridges: OriSegment[]): GapRect | null {
   const horizontal = ridges.filter((s) => Math.abs(s.a.y - s.b.y) < RIDGE_EPS);
   const vertical = ridges.filter((s) => Math.abs(s.a.x - s.b.x) < RIDGE_EPS);
-  if (horizontal.length === 0 || vertical.length === 0) return [];
+  if (horizontal.length === 0 || vertical.length === 0) return null;
 
   // The ring is the bounding rectangle of the axis-aligned ridges.
   let x0 = Infinity;
@@ -162,12 +159,12 @@ export function fillRidgeRectHole(ridges: OriSegment[]): OriSegment[] {
     x1 = Math.max(x1, s.a.x, s.b.x);
     y1 = Math.max(y1, s.a.y, s.b.y);
   }
-  // No 2D interior (a 1D spine, already creased) - nothing to fill.
-  if (x1 - x0 < 1 - RIDGE_EPS || y1 - y0 < 1 - RIDGE_EPS) return [];
+  // No 2D interior (a 1D spine, already a clean skeleton) - no ring.
+  if (x1 - x0 < 1 - RIDGE_EPS || y1 - y0 < 1 - RIDGE_EPS) return null;
 
   // Confirm it is a closed rectangular ring: each of the four sides is covered by
   // an axis-aligned ridge spanning it. Otherwise these axis-aligned ridges are
-  // not a flap's straight-skeleton core and we leave them alone.
+  // not a flap's straight-skeleton core.
   const spansH = (y: number): boolean =>
     horizontal.some(
       (s) =>
@@ -182,10 +179,57 @@ export function fillRidgeRectHole(ridges: OriSegment[]): OriSegment[] {
         Math.min(s.a.y, s.b.y) <= y0 + RIDGE_EPS &&
         Math.max(s.a.y, s.b.y) >= y1 - RIDGE_EPS,
     );
-  if (!spansH(y0) || !spansH(y1) || !spansV(x0) || !spansV(x1)) return [];
-
-  return flapRidges({ x0, y0, x1, y1 });
+  if (!spansH(y0) || !spansH(y1) || !spansV(x0) || !spansV(x1)) return null;
+  return { x0, y0, x1, y1 };
 }
+
+/**
+ * The straight-skeleton creases that fill a non-square flap's rectangular donut
+ * hole (spine + the four diagonals from the ring corners to the spine), or an
+ * empty list when the ridges have no 2D ring.
+ */
+export function fillRidgeRectHole(ridges: OriSegment[]): OriSegment[] {
+  const rect = ringRect(ridges);
+  return rect ? flapRidges(rect) : [];
+}
+
+/** True when a segment lies on one of the rectangle's four sides. */
+function onRectSide(s: OriSegment, r: GapRect): boolean {
+  const horizontal = Math.abs(s.a.y - s.b.y) < RIDGE_EPS;
+  const vertical = Math.abs(s.a.x - s.b.x) < RIDGE_EPS;
+  const within = (lo: number, hi: number, a: number, b: number): boolean =>
+    Math.min(a, b) >= lo - RIDGE_EPS && Math.max(a, b) <= hi + RIDGE_EPS;
+  if (horizontal && (Math.abs(s.a.y - r.y0) < RIDGE_EPS || Math.abs(s.a.y - r.y1) < RIDGE_EPS))
+    return within(r.x0, r.x1, s.a.x, s.b.x);
+  if (vertical && (Math.abs(s.a.x - r.x0) < RIDGE_EPS || Math.abs(s.a.x - r.x1) < RIDGE_EPS))
+    return within(r.y0, r.y1, s.a.y, s.b.y);
+  return false;
+}
+
+/**
+ * Repair a flap's ridge set. Always fill the rectangular donut hole with the true
+ * straight skeleton (spine + the diagonals from each ring corner to the spine).
+ * Additionally DELETE the four ring sides when the ring lies entirely on the
+ * paper - a true interior donut hole, where the ring is a BP Studio artifact, not
+ * a straight-skeleton ridge. An edge/corner flap's box runs off the sheet, so its
+ * ring straddles the paper edge; we keep that ring (only adding the fill) because
+ * its on-paper side coincides with the edge and removing it breaks the gadget.
+ */
+export function repairFlapRidgeHole(
+  ridges: OriSegment[],
+  bounds: { width: number; height: number },
+): OriSegment[] {
+  const rect = ringRect(ridges);
+  if (!rect) return ridges;
+  const onPaper =
+    rect.x0 >= -RIDGE_EPS &&
+    rect.y0 >= -RIDGE_EPS &&
+    rect.x1 <= bounds.width + RIDGE_EPS &&
+    rect.y1 <= bounds.height + RIDGE_EPS;
+  const kept = onPaper ? ridges.filter((s) => !onRectSide(s, rect)) : ridges;
+  return [...kept, ...flapRidges(rect)];
+}
+
 
 // ---------------------------------------------------------------------------
 

@@ -25,10 +25,11 @@ import {
   hingeEndpoint,
   planarize,
   propagateAxials,
-  propagateAxialFamilyWithLevels,
+  propagateAllAxialOffsets,
   propagateHinges,
   segmentKey,
 } from "./box-pleated-molecule.ts";
+import { axialChainColors } from "./box-pleated-axial-coloring.ts";
 
 const AXIS_DIRS: GridPoint[] = [
   { x: 1, y: 0 },
@@ -73,23 +74,19 @@ export function buildMolecule(f: OriFixture): BoxPleatedMolecule {
   // axials, but they are genuine flap centers for ridge purposes).
   const ridgeSeeds = findFlapCenters(f.ridges, f.packing);
   const { axials, edgeAxials } = propagateAxials(f.ridges, f.sheet, centers);
-  const { pleats, level, maxLevel } = propagateAxialFamilyWithLevels(f.ridges, f.sheet, axials, edgeAxials);
+  const pleats = propagateAllAxialOffsets(f.ridges, f.sheet, axials, edgeAxials);
   const axialFamily = [...axials, ...edgeAxials, ...pleats];
   const base = [...f.boundary, ...f.ridges, ...axialFamily];
   const { hinges } = propagateHinges(f.ridges, axialFamily, centers, f.sheet, base);
 
-  const axialColorOf = (seg: OriSegment): Assignment | null => {
-    const lvl = level.get(segmentKey(seg));
-    if (lvl === undefined) return null;
-    return (maxLevel - lvl) % 2 === 0 ? "M" : "V";
-  };
+  const axialColorOf = axialChainColors(axialFamily, f.ridges, f.sheet);
 
   return { sheet: f.sheet, boundary: f.boundary, ridges: f.ridges, axialFamily, hinges, centers, ridgeSeeds, axialColorOf };
 }
 
 /** Assign M/V to every crease and return the planarized unit edges. */
 export function assignCreases(m: BoxPleatedMolecule): AssignedEdge[] {
-  const ridgeColor = assignRidges(m);
+  const ridge = assignRidges(m);
 
   const adj = planarize([...m.boundary, ...m.ridges, ...m.axialFamily, ...m.hinges]);
   const edges = planarUnitEdges(adj);
@@ -102,7 +99,11 @@ export function assignCreases(m: BoxPleatedMolecule): AssignedEdge[] {
       e.mv = "B";
     } else if (onAny(mid, m.ridges)) {
       e.type = "ridge";
-      e.mv = ridgeColor.get(segId) ?? null;
+      // Clean (45/90) ridges colour by exact unit key (first-write-wins, the
+      // center-out alternation). A non-45 Pythagorean stretch ridge's unit edges
+      // do not land on lattice steps, so fall back to the geometric span that
+      // contains the midpoint.
+      e.mv = ridge.colors.get(segId) ?? ridge.spans.find((s) => pointOnSegment(mid, s))?.color ?? null;
     } else if (onAny(mid, m.hinges)) {
       e.type = "hinge";
       e.mv = null; // assigned below
@@ -133,12 +134,20 @@ export interface AssignmentResult {
  * after each repair and loop until no such vertex remains.
  */
 export function assignBoxPleated(f: OriFixture): AssignmentResult {
-  const m = buildMolecule(f);
+  return assignMolecule(buildMolecule(f), f.sheet);
+}
+
+/**
+ * Full M/V assignment with ridge-crossing repair, operating on an already-built
+ * molecule. Split from {@link assignBoxPleated} so callers that construct the
+ * molecule themselves (the packing pipeline) can reuse the same assignment.
+ */
+export function assignMolecule(m: BoxPleatedMolecule, sheet: { width: number; height: number }): AssignmentResult {
   const hinges = [...m.hinges];
   let edges = assignCreases({ ...m, hinges });
 
   for (let iter = 0; iter < 64; iter++) {
-    const targets = ridgeCrossingFailures(edges, f.sheet);
+    const targets = ridgeCrossingFailures(edges, sheet);
     if (targets.length === 0) break;
     let added = false;
     for (const c of targets) {
@@ -149,14 +158,14 @@ export function assignBoxPleated(f: OriFixture): AssignmentResult {
       // to assign. An arm that stops at a ridge (inward) is still valid as a
       // fallback. At a corner-adjacent crossing the two best arms are the
       // perpendicular pair toward the nearest edges, e.g. (2,2) -> (0,2),(2,0).
-      const arms = AXIS_DIRS.map((d) => hingeEndpoint(c, d, m.ridges, m.ridgeSeeds, hinges, m.axialFamily, f.sheet))
+      const arms = AXIS_DIRS.map((d) => hingeEndpoint(c, d, m.ridges, m.ridgeSeeds, hinges, m.axialFamily, sheet))
         .filter((end): end is GridPoint => end !== null && !samePoint(end, c))
-        .map((end) => ({ end, onEdge: isOnEdge(end, f.sheet) }));
+        .map((end) => ({ end, onEdge: isOnEdge(end, sheet) }));
       arms.sort((a, b) => Number(b.onEdge) - Number(a.onEdge));
       const chosen = arms.slice(0, 2).map((arm) => ({ a: c, b: arm.end }));
       if (chosen.length === 0) continue;
       const trial = assignCreases({ ...m, hinges: [...hinges, ...chosen] });
-      if (!maekawaConflicts(trial, f.sheet).some((p) => samePoint(p, c))) {
+      if (!maekawaConflicts(trial, sheet).some((p) => samePoint(p, c))) {
         hinges.push(...chosen);
         edges = trial;
         added = true;
@@ -169,9 +178,9 @@ export function assignBoxPleated(f: OriFixture): AssignmentResult {
   // Final repair: flip non-ridge creases to clear any remaining Maekawa
   // conflicts (degree-8 flap-center 3-1 splits, and crossings the hinge repair
   // could not resolve to the edge).
-  repairByFlipping(edges, f.sheet);
+  repairByFlipping(edges, sheet);
 
-  return { molecule: { ...m, hinges }, edges, conflicts: maekawaConflicts(edges, f.sheet) };
+  return { molecule: { ...m, hinges }, edges, conflicts: maekawaConflicts(edges, sheet) };
 }
 
 /** Degree-4 interior vertices whose incident creases are all ridges and that fail Maekawa. */
@@ -229,7 +238,10 @@ function repairByFlipping(edges: AssignedEdge[], sheet: { width: number; height:
     return Math.abs(M - V) !== 2;
   };
 
-  const flippable = (e: AssignedEdge): boolean => e.type === "axial" || e.type === "hinge";
+  // Axials carry the chain + alternation coloring, which is correct by
+  // construction; flipping a single axial unit edge would break a crease's
+  // one-color invariant. Only hinges (the balancing creases) may be flipped.
+  const flippable = (e: AssignedEdge): boolean => e.type === "hinge";
   // Tabu the most recent flips so we do not immediately undo a non-improving move.
   const tabu: string[] = [];
   const tabuSize = 6;
@@ -298,8 +310,23 @@ export function maekawaConflicts(edges: AssignedEdge[], sheet: { width: number; 
 // Ridge assignment (center-out alternation)
 // ---------------------------------------------------------------------------
 
-function assignRidges(m: BoxPleatedMolecule): Map<string, Assignment> {
+/** A coloured stretch of a ridge between two consecutive axial-family crossings. */
+interface RidgeSpan {
+  a: GridPoint;
+  b: GridPoint;
+  color: Assignment;
+}
+
+interface RidgeColors {
+  /** Exact unit-edge colours for clean 45/90 ridges (center-out, first-write-wins). */
+  colors: Map<string, Assignment>;
+  /** Per-piece coloured spans, used as a geometric fallback for non-45 ridges. */
+  spans: RidgeSpan[];
+}
+
+function assignRidges(m: BoxPleatedMolecule): RidgeColors {
   const colors = new Map<string, Assignment>();
+  const spans: RidgeSpan[] = [];
   for (const ridge of mergeCollinear(m.ridges)) {
     // A single straight ridge can pass through several flap centers (e.g. the
     // main diagonals of a pinwheel). Split it at every center and seed each
@@ -308,7 +335,7 @@ function assignRidges(m: BoxPleatedMolecule): Map<string, Assignment> {
     // with flipped parity; the per-span seeds agree on shared boundaries.
     const centers = m.ridgeSeeds.filter((c) => pointOnSegment(c, ridge));
     if (centers.length === 0) {
-      emitRidgeArm(ridge.a, ridge.b, m, colors);
+      emitRidgeArm(ridge.a, ridge.b, m, colors, spans);
       continue;
     }
     const dir = { x: ridge.b.x - ridge.a.x, y: ridge.b.y - ridge.a.y };
@@ -322,17 +349,30 @@ function assignRidges(m: BoxPleatedMolecule): Map<string, Assignment> {
     for (let i = 0; i + 1 < uniq.length; i++) {
       const s0 = uniq[i].p;
       const s1 = uniq[i + 1].p;
-      if (isCenter(s0)) emitRidgeArm(s0, s1, m, colors);
-      else if (isCenter(s1)) emitRidgeArm(s1, s0, m, colors);
+      if (isCenter(s0)) emitRidgeArm(s0, s1, m, colors, spans);
+      else if (isCenter(s1)) emitRidgeArm(s1, s0, m, colors, spans);
     }
   }
-  return colors;
+  return { colors, spans };
 }
 
-function emitRidgeArm(center: GridPoint, far: GridPoint, m: BoxPleatedMolecule, colors: Map<string, Assignment>): void {
+/** A clean (axis-aligned or 45-degree) segment, vs a non-45 stretch span. */
+function isCleanSeg(a: GridPoint, b: GridPoint): boolean {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  return Math.abs(dx) < EPS || Math.abs(dy) < EPS || Math.abs(Math.abs(dx) - Math.abs(dy)) < EPS;
+}
+
+function emitRidgeArm(
+  center: GridPoint,
+  far: GridPoint,
+  m: BoxPleatedMolecule,
+  colors: Map<string, Assignment>,
+  spans: RidgeSpan[],
+): void {
   // Axial-family crossings along center -> far, with the axial's color, sorted
   // outward from the center. Keep the actual intersection point (not a
-  // distance-reconstructed one) so the cut lands exactly on the grid.
+  // distance-reconstructed one) so the cut lands exactly on the crease.
   const cuts: Array<{ point: GridPoint; d: number; color: Assignment | null }> = [];
   for (const ax of m.axialFamily) {
     const x = intersect(center, far, ax.a, ax.b);
@@ -348,18 +388,24 @@ function emitRidgeArm(center: GridPoint, far: GridPoint, m: BoxPleatedMolecule, 
   const bounds: GridPoint[] = [center, ...unique.map((c) => c.point), far];
 
   // First piece matches the first axial crossing's color; flip at each crossing.
+  // Clean pieces colour their unit edges by exact key (preserving the original
+  // first-write-wins behaviour); every piece is also recorded as a span so a
+  // non-45 piece (whose unit edges miss the lattice) can be coloured by midpoint.
   const color0: Assignment = unique.length ? (unique[0].color ?? "M") : "M";
   let color: Assignment = color0;
   for (let i = 0; i < bounds.length - 1; i++) {
-    const p = snapPoint(bounds[i]);
-    const q = snapPoint(bounds[i + 1]);
-    const sd = { x: Math.sign(q.x - p.x), y: Math.sign(q.y - p.y) };
-    const n = Math.round(Math.max(Math.abs(q.x - p.x), Math.abs(q.y - p.y)));
-    for (let j = 0; j < n; j++) {
-      const a = snapPoint({ x: p.x + sd.x * j, y: p.y + sd.y * j });
-      const b = snapPoint({ x: p.x + sd.x * (j + 1), y: p.y + sd.y * (j + 1) });
-      const k = segKey(a, b);
-      if (!colors.has(k)) colors.set(k, color);
+    spans.push({ a: bounds[i], b: bounds[i + 1], color });
+    if (isCleanSeg(bounds[i], bounds[i + 1])) {
+      const p = snapPoint(bounds[i]);
+      const q = snapPoint(bounds[i + 1]);
+      const sd = { x: Math.sign(q.x - p.x), y: Math.sign(q.y - p.y) };
+      const n = Math.round(Math.max(Math.abs(q.x - p.x), Math.abs(q.y - p.y)));
+      for (let j = 0; j < n; j++) {
+        const a = snapPoint({ x: p.x + sd.x * j, y: p.y + sd.y * j });
+        const b = snapPoint({ x: p.x + sd.x * (j + 1), y: p.y + sd.y * (j + 1) });
+        const k = segKey(a, b);
+        if (!colors.has(k)) colors.set(k, color);
+      }
     }
     color = color === "M" ? "V" : "M";
   }

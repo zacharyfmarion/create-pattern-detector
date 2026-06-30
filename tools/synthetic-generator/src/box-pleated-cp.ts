@@ -17,16 +17,22 @@
 
 import type { BoxPleatedPacking } from "./box-pleated-packing.ts";
 import { fillPackingGaps } from "./box-pleated-packing.ts";
-import { fillRidgeRectHole } from "./box-pleated-gap-fill.ts";
+import { repairFlapRidgeHole } from "./box-pleated-gap-fill.ts";
 import {
   propagateAxials,
-  propagateAxialFamilyWithLevels,
+  propagateAllAxialOffsets,
   propagateHinges,
   planarize,
   failingJunctions,
   offGridJunctions,
   ridgeJunctions,
 } from "./box-pleated-molecule.ts";
+import {
+  assignMolecule,
+  type AssignedEdge,
+  type BoxPleatedMolecule,
+} from "./box-pleated-assignment.ts";
+import { axialChainColors } from "./box-pleated-axial-coloring.ts";
 import type { GridPoint, OriSegment } from "./ori-parser.ts";
 
 const EPS = 1e-9;
@@ -49,6 +55,10 @@ export interface PackingCP {
   complete: boolean;
   /** True when complete AND no off-grid crease junction. */
   valid: boolean;
+  /** M/V-assigned unit edges (the same geometry, coloured mountain/valley/border). */
+  assignedEdges: AssignedEdge[];
+  /** Interior vertices still failing Maekawa after assignment + repair. */
+  mvConflicts: GridPoint[];
 }
 
 /** Build the crease pattern up to hinge selection and report its validity. */
@@ -61,17 +71,17 @@ export function buildPackingCP(packing: BoxPleatedPacking): PackingCP {
   const gap = fillPackingGaps(packing);
 
   // Ridges from every flap/river, EVERY stretch device, and the filler flaps.
+  // A non-square flap's BP Studio ridges are a hollow rectangular ring (the box
+  // diagonals stop at the ring corners). fillRidgeRectHole adds the straight
+  // skeleton that fills that interior (spine + corner diagonals) so no empty
+  // rectangle is left inside the flap. (We keep the ring sides: the pleats reflect
+  // off them and the M/V balance depends on them - deleting them is worse.)
   const ridges: OriSegment[] = [];
   for (const object of packing.layout.objects) {
     if (object.kind === "root" || object.kind === "stretch-device") continue;
-    for (const line of object.ridges) pushClipped(ridges, line[0], line[1], W, H);
-    // BP Studio leaves a non-square flap's straight-skeleton ridges as a hollow
-    // rectangular ring (the diagonals stop at the ring corners). Fill that
-    // interior so no empty rectangle is left un-creased inside the flap.
-    if (object.kind === "flap") {
-      const objRidges = object.ridges.map((line) => seg(line[0], line[1]));
-      for (const r of fillRidgeRectHole(objRidges)) pushClipped(ridges, r.a, r.b, W, H);
-    }
+    const objRidges = object.ridges.map((line) => seg(line[0], line[1]));
+    const repaired = object.kind === "flap" ? repairFlapRidgeHole(objRidges, sheet) : objRidges;
+    for (const r of repaired) pushClipped(ridges, r.a, r.b, W, H);
   }
   for (const object of packing.layout.objects) {
     if (object.kind !== "stretch-device") continue;
@@ -96,7 +106,9 @@ export function buildPackingCP(packing: BoxPleatedPacking): PackingCP {
   const rawSeeds: GridPoint[] = [];
   for (const object of packing.layout.objects) {
     if (object.kind !== "flap") continue;
-    rawSeeds.push(...ridgeJunctions(object.ridges.map((l) => seg(l[0], l[1]))));
+    // Seed from the repaired skeleton, so a removed ring's spine endpoints are the
+    // real convergence points instead of the (now-deleted) ring corners.
+    rawSeeds.push(...ridgeJunctions(repairFlapRidgeHole(object.ridges.map((l) => seg(l[0], l[1])), sheet)));
   }
   for (const group of gap.ridgesByFlap) rawSeeds.push(...ridgeJunctions(group));
   const seenSeed = new Set<string>();
@@ -108,14 +120,14 @@ export function buildPackingCP(packing: BoxPleatedPacking): PackingCP {
   });
 
   const rawAx = propagateAxials(ridges, sheet, seeds);
-  const fam = propagateAxialFamilyWithLevels(ridges, sheet, rawAx.axials, rawAx.edgeAxials);
+  const rawPleats = propagateAllAxialOffsets(ridges, sheet, rawAx.axials, rawAx.edgeAxials);
 
   // A corner/edge flap's center can lie outside the paper, so a crease seeded
   // there overhangs the edge; clip every crease to the paper so they all
   // terminate at the boundary.
   const axials = clipAll(rawAx.axials, W, H);
   const edgeAxials = clipAll(rawAx.edgeAxials, W, H);
-  const pleats = clipAll(fam.pleats, W, H);
+  const pleats = clipAll(rawPleats, W, H);
   const axialFamily = [...axials, ...edgeAxials, ...pleats];
 
   const boundary: OriSegment[] = [
@@ -131,6 +143,24 @@ export function buildPackingCP(packing: BoxPleatedPacking): PackingCP {
   const adj = planarize([...boundary, ...ridges, ...axialFamily, ...hinges]);
   const failing = failingJunctions(adj, sheet).map((f) => ({ x: f.x, y: f.y }));
 
+  // Stage D: M/V assignment. Build the molecule from the CLIPPED geometry so no
+  // off-paper crease (e.g. an edge flap's off-paper spine) leaks into the
+  // assignment as a dangling stub. Axial colour comes from the chain +
+  // parallel-alternation method (see box-pleated-axial-coloring), run on the same
+  // clipped family the assignment uses.
+  const clippedFamily = [...axials, ...edgeAxials, ...pleats];
+  const molecule: BoxPleatedMolecule = {
+    sheet,
+    boundary,
+    ridges,
+    axialFamily: clippedFamily,
+    hinges,
+    centers: seeds,
+    ridgeSeeds: seeds,
+    axialColorOf: axialChainColors(clippedFamily, ridges, sheet),
+  };
+  const assignment = assignMolecule(molecule, sheet);
+
   return {
     sheet,
     ridges,
@@ -140,6 +170,8 @@ export function buildPackingCP(packing: BoxPleatedPacking): PackingCP {
     hinges,
     seeds,
     offGrid,
+    assignedEdges: assignment.edges,
+    mvConflicts: assignment.conflicts,
     failing,
     complete: gap.complete,
     valid: gap.complete && offGrid.length === 0,
