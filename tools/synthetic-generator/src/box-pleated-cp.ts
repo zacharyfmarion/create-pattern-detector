@@ -15,8 +15,8 @@
 // orthogonal pleat grid between lattice points; such a packing cannot be a unit
 // box-pleat pattern and is rejected (offGridJunctions non-empty).
 
-import type { BoxPleatedPacking } from "./box-pleated-packing.ts";
-import { fillPackingGaps } from "./box-pleated-packing.ts";
+import type { BoxPleatedPacking, BoxPleatedPackingConfig } from "./box-pleated-packing.ts";
+import { fillPackingGaps, generateBoxPleatedPacking } from "./box-pleated-packing.ts";
 import { repairFlapRidgeHole } from "./box-pleated-gap-fill.ts";
 import {
   propagateAxials,
@@ -167,9 +167,23 @@ function packingGeometry(packing: BoxPleatedPacking): PackingGeometry {
   return { molecule, gap, offGrid, axials, edgeAxials, pleats, seeds, W, H };
 }
 
-/** The axial+ridge molecule (no hinges) for a packing - the router's input. */
+/** Why a packing is not a valid CP candidate, or null if it is valid. */
+function rejectionReason(g: PackingGeometry): string | null {
+  if (!g.gap.complete) return "incomplete: an interior region cannot be filled (ODS rule #4)";
+  if (g.offGrid.length > 0) return "off-grid: a crease junction misses the unit lattice";
+  return null;
+}
+
+/**
+ * The axial+ridge molecule (no hinges) for a VALID packing - the router's input.
+ * Throws on a rejected candidate: geometry must never be built from an invalid
+ * packing (use generateValidCP, or check buildPackingCP's `valid` flag).
+ */
 export function buildPackingMolecule(packing: BoxPleatedPacking): BoxPleatedMolecule {
-  return packingGeometry(packing).molecule;
+  const g = packingGeometry(packing);
+  const reason = rejectionReason(g);
+  if (reason) throw new Error(`buildPackingMolecule: rejected packing (${reason})`);
+  return g.molecule;
 }
 
 /** Build the crease pattern (Phase 1 colors + Phase 2 routed hinges) and its validity. */
@@ -177,6 +191,27 @@ export function buildPackingCP(packing: BoxPleatedPacking): PackingCP {
   const g = packingGeometry(packing);
   const { molecule, gap, offGrid, axials, edgeAxials, pleats, seeds, W, H } = g;
   const sheet = molecule.sheet;
+
+  // Reject invalid candidates BEFORE the (expensive) M/V assignment, so no
+  // downstream consumer ever receives creases from a packing that would be
+  // rejected. `valid` is false and there are no assigned edges.
+  if (rejectionReason(g)) {
+    return {
+      sheet,
+      ridges: molecule.ridges,
+      axials,
+      edgeAxials,
+      pleats,
+      hinges: [],
+      seeds,
+      offGrid,
+      assignedEdges: [],
+      mvConflicts: [],
+      failing: [],
+      complete: gap.complete,
+      valid: false,
+    };
+  }
 
   const assignment = assignMolecule(molecule, sheet);
   const hinges = clipAll(assignment.molecule.hinges, W, H);
@@ -199,6 +234,17 @@ export function buildPackingCP(packing: BoxPleatedPacking): PackingCP {
     complete: gap.complete,
     valid: gap.complete && offGrid.length === 0,
   };
+}
+
+/**
+ * THE canonical entry: generate a packing and build its CP, returning it only if
+ * valid, otherwise null. Every consumer that wants a crease pattern (data gen,
+ * tests, debug renders) should go through this so a rejected candidate can never
+ * leak downstream.
+ */
+export async function generateValidCP(config: BoxPleatedPackingConfig): Promise<PackingCP | null> {
+  const cp = buildPackingCP(await generateBoxPleatedPacking(config));
+  return cp.valid ? cp : null;
 }
 
 /**
