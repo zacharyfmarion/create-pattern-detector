@@ -1003,6 +1003,84 @@ export function hingeEndpoint(
   return { x: from.x + dir.x * best, y: from.y + dir.y * best };
 }
 
+export interface HingeTrace {
+  /** The reflected polyline from origin to terminus. */
+  path: OriSegment[];
+  terminus: GridPoint;
+  terminusType: "edge" | "hinge" | "junction";
+  /** Total grid distance travelled - its parity decides the terminus colour. */
+  steps: number;
+}
+
+/**
+ * Trace a hinge as a reflecting ray from `from` in `dir`. Like an axial it
+ * reflects off ridges (mirror) and continues, crossing axials freely; it
+ * terminates at the paper edge, on another hinge, or at a ridge junction (where
+ * ridges of different directions meet and it cannot cleanly reflect). Returns
+ * null if any reflection/termination lands off the integer grid (a non-45 stretch
+ * reflection can never be a unit box-pleat vertex).
+ */
+export function traceHingeRay(
+  from: GridPoint,
+  dir: GridPoint,
+  ridges: OriSegment[],
+  hinges: OriSegment[],
+  axials: OriSegment[],
+  sheet: { width: number; height: number },
+): HingeTrace | null {
+  const path: OriSegment[] = [];
+  let cur = from;
+  let d = dir;
+  let steps = 0;
+  const stepLen = (a: GridPoint, b: GridPoint): number =>
+    Math.round(Math.max(Math.abs(b.x - a.x), Math.abs(b.y - a.y)));
+  // A hinge is perpendicular to axials - it can never run coincident with one. If
+  // the ray leaves `cur` along an axial (the direction "toward an axial"), the
+  // route is invalid; that is the direction excluded at every vertex (max 3 remain).
+  const alongAxial = (o: GridPoint, dd: GridPoint): boolean =>
+    axials.some((c) => {
+      const ex = c.b.x - c.a.x;
+      const ey = c.b.y - c.a.y;
+      if (Math.abs(ex * dd.y - ey * dd.x) > EPS) return false; // not parallel
+      if (Math.abs((c.a.x - o.x) * dd.y - (c.a.y - o.y) * dd.x) > EPS) return false; // not on the ray's line
+      return Math.max((c.a.x - o.x) * dd.x + (c.a.y - o.y) * dd.y, (c.b.x - o.x) * dd.x + (c.b.y - o.y) * dd.y) > EPS;
+    });
+
+  for (let bounce = 0; bounce < MAX_BOUNCES; bounce++) {
+    if (alongAxial(cur, d)) return null; // would run coincident with an axial
+    const ride = marchRay(cur, d, ridges, sheet);
+    let hinge: { t: number; point: GridPoint } | null = null;
+    for (const h of hinges) {
+      const inter = raySegmentIntersection(cur, d, h.a, h.b);
+      if (inter && !inter.collinear && inter.t > EPS && (!hinge || inter.t < hinge.t)) {
+        hinge = { t: inter.t, point: inter.point };
+      }
+    }
+    const rideDist = ride ? Math.hypot(ride.point.x - cur.x, ride.point.y - cur.y) : Infinity;
+    const hingeDist = hinge ? Math.hypot(hinge.point.x - cur.x, hinge.point.y - cur.y) : Infinity;
+
+    if (hinge && hingeDist < rideDist - EPS) {
+      const pt = snapToGrid(hinge.point);
+      if (!pt) return null;
+      path.push({ a: cur, b: pt });
+      return { path, terminus: pt, terminusType: "hinge", steps: steps + stepLen(cur, pt) };
+    }
+    if (!ride) return null;
+    if (ride.type === "boundary") {
+      path.push({ a: cur, b: ride.point });
+      return { path, terminus: ride.point, terminusType: "edge", steps: steps + stepLen(cur, ride.point) };
+    }
+    const pt = snapToGrid(ride.point);
+    if (!pt) return null; // off-grid reflection or junction
+    path.push({ a: cur, b: pt });
+    steps += stepLen(cur, pt);
+    if (ride.type === "junction") return { path, terminus: pt, terminusType: "junction", steps };
+    d = reflect(d, ride.ridgeDir!);
+    cur = pt;
+  }
+  return null;
+}
+
 /** A 45/90 (axis-aligned or diagonal) ridge, vs a non-45 Pythagorean stretch ridge. */
 function isCleanRidge(s: OriSegment): boolean {
   const dx = s.b.x - s.a.x;

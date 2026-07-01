@@ -27,6 +27,8 @@ import {
   propagateAxials,
   propagateAllAxialOffsets,
   propagateHinges,
+  failingJunctions,
+  traceHingeRay,
   segmentKey,
 } from "./box-pleated-molecule.ts";
 import { axialChainColors } from "./box-pleated-axial-coloring.ts";
@@ -169,7 +171,26 @@ function applyBigLittleBig(m: BoxPleatedMolecule, edges: AssignedEdge[]): void {
     }
   });
 
-  for (const [k, list] of inc) {
+  // Rule Y - Y-junction: at a degree-3 vertex of two ridges + one axial (the ridge
+  // bends rather than crossing straight through), both ridge arms take the axial's
+  // colour. Neither the bisector nor Big-Little-Big applies at a degree-3 vertex,
+  // so this is the anchor there. Apply first so it wins over any far-end colour.
+  for (const [, list] of inc) {
+    if (list.length !== 3) continue;
+    const ridgeIdx = list.filter((x) => edges[x.i].type === "ridge").map((x) => x.i);
+    const axialIdx = list.filter((x) => edges[x.i].type === "axial").map((x) => x.i);
+    if (ridgeIdx.length === 2 && axialIdx.length === 1) {
+      union(ridgeIdx[0], axialIdx[0], 0);
+      union(ridgeIdx[1], axialIdx[0], 0);
+    }
+  }
+
+  // Rule 0 - Axial-bisector anchor: a ridge that bisects the angle between its two
+  // neighbouring axials is OPPOSITE them when that angle is the small (< 180, the
+  // acute/right) wedge, and SAME when it is the large (> 180, reflex) wedge. Since
+  // axial colours are fixed, this is what ties ridges to the ground; the other two
+  // rules only fix relationships between creases.
+  for (const [, list] of inc) {
     if (list.length < 3) continue;
     const L = [...list].sort((a, b) => a.ang - b.ang);
     const n = L.length;
@@ -178,55 +199,110 @@ function applyBigLittleBig(m: BoxPleatedMolecule, edges: AssignedEdge[]): void {
       if (g <= 0) g += 2 * Math.PI;
       return g;
     });
-    // Group the sectors into maximal runs of equal angle (cyclically). A run whose
-    // angle is strictly smaller than the sectors bounding it on both ends is a
-    // minimum (a crimp when it has length > 1); the creases spanning it alternate,
-    // so union every consecutive pair across the WHOLE run - not just its ends,
-    // which would break the alternation chain for runs of length >= 3.
-    const EPS_A = 1e-9;
-    const eq = (a: number, b: number): boolean => Math.abs(a - b) < EPS_A;
-    // Constrain only between two fold creases: at a paper-edge vertex the boundary
-    // half-edges shape the sector geometry but carry no M/V.
-    const link = (s: number): void => {
-      const a = L[s].i;
-      const b = L[(s + 1) % n].i;
-      if (edges[a].type !== "boundary" && edges[b].type !== "boundary") union(a, b, 1);
-    };
-    if (!gaps.every((g) => eq(g, gaps[0]))) {
-      // Start at a run boundary so runs do not wrap.
-      let s0 = 0;
-      while (eq(gaps[s0], gaps[(s0 - 1 + n) % n])) s0++;
-      let idx = s0;
-      do {
-        const val = gaps[idx];
-        const run = [idx];
-        let nx = (idx + 1) % n;
-        while (eq(gaps[nx], val)) {
-          run.push(nx);
-          nx = (nx + 1) % n;
-        }
-        const before = gaps[(run[0] - 1 + n) % n];
-        const after = gaps[nx];
-        if (val < before - EPS_A && val < after - EPS_A) for (const s of run) link(s);
-        idx = nx;
-      } while (idx !== s0);
+    for (let i = 0; i < n; i++) {
+      if (edges[L[i].i].type !== "ridge") continue;
+      const prev = L[(i - 1 + n) % n];
+      const next = L[(i + 1) % n];
+      if (edges[prev.i].type !== "axial" || edges[next.i].type !== "axial") continue;
+      const angle = gaps[(i - 1 + n) % n] + gaps[i];
+      const rel = angle < Math.PI - 1e-9 ? 1 : 0; // small wedge -> opposite, large -> same
+      union(L[i].i, prev.i, rel);
+      union(L[i].i, next.i, rel);
     }
   }
 
+  // Rule 1 - Ridge alternation: a ridge that passes straight through a vertex
+  // flips wherever another crease crosses it, so its two collinear halves are
+  // opposite. Applies at every crossing (axial or ridge), not just axial ones.
+  for (const [, list] of inc) {
+    const ridges = list.filter((x) => edges[x.i].type === "ridge");
+    if (ridges.length < 2) continue;
+    for (let a = 0; a < ridges.length; a++) {
+      for (let b = a + 1; b < ridges.length; b++) {
+        let d = Math.abs(ridges[a].ang - ridges[b].ang) % (2 * Math.PI);
+        if (d > Math.PI) d = 2 * Math.PI - d;
+        if (Math.abs(d - Math.PI) >= 1e-6) continue; // not collinear - not a straight-through ridge
+        // A crossing exists if some incident crease is not parallel to this ridge.
+        const crossed = list.some((x) => {
+          let e = Math.abs(x.ang - ridges[a].ang) % (2 * Math.PI);
+          if (e > Math.PI) e = 2 * Math.PI - e;
+          return e > 1e-6 && Math.abs(e - Math.PI) > 1e-6;
+        });
+        if (crossed) union(ridges[a].i, ridges[b].i, 1);
+      }
+    }
+  }
+
+  for (const [k, list] of inc) {
+    if (list.length < 3) continue;
+    if (list.length % 2 === 1) continue; // odd-degree vertex is not flat-foldable: no lemma
+    const L = [...list].sort((a, b) => a.ang - b.ang);
+    const n = L.length;
+    const gaps = L.map((_, j) => {
+      let g = L[(j + 1) % n].ang - L[j].ang;
+      if (g <= 0) g += 2 * Math.PI;
+      return g;
+    });
+    // Kawasaki gate: Big-Little-Big is a theorem about FLAT-FOLDABLE vertices only.
+    // Apply it just where the alternating sector sums are equal (= pi). A vertex
+    // that fails Kawasaki (e.g. a 45-degree ridge crossing a straight axial, sectors
+    // 45,135,45,135) is not flat-foldable - it needs a hinge - so the lemma must
+    // not run there (it would contradict the ridge-alternation rule).
+    let evenSum = 0;
+    for (let j = 0; j < n; j += 2) evenSum += gaps[j];
+    if (Math.abs(evenSum - Math.PI) > 1e-6) continue;
+    // Big-Little-Big proper: only a STRICT local-minimum sector forces its two
+    // bounding creases opposite. (Equal-angle runs are NOT "alternate across the
+    // run" - that over-extension produced Maekawa-invalid colours; the straight-
+    // through cases are handled by the ridge-alternation rule instead.) Never
+    // constrain through a boundary half-edge.
+    const EPS_A = 1e-9;
+    for (let j = 0; j < n; j++) {
+      const prev = gaps[(j - 1 + n) % n];
+      const cur = gaps[j];
+      const next = gaps[(j + 1) % n];
+      if (cur >= prev - EPS_A || cur >= next - EPS_A) continue; // not a strict local min
+      const a = L[j].i;
+      const b = L[(j + 1) % n].i;
+      if (edges[a].type !== "boundary" && edges[b].type !== "boundary") union(a, b, 1);
+    }
+  }
+
+  // Read each ridge/hinge colour from its parity to the Mountain ground.
+  const { width: W, height: H } = m.sheet;
+  const paperEdges = (pt: GridPoint): string[] => {
+    const es: string[] = [];
+    if (Math.abs(pt.x) < EPS) es.push("L");
+    if (Math.abs(pt.x - W) < EPS) es.push("R");
+    if (Math.abs(pt.y) < EPS) es.push("B");
+    if (Math.abs(pt.y - H) < EPS) es.push("T");
+    return es;
+  };
   const [rg, pg] = find(GROUND);
-  const walk = new Map<number, Assignment | null>();
   edges.forEach((e, i) => {
-    if (e.type !== "ridge") return;
-    walk.set(i, e.mv); // remember the fallback walk color
+    if (e.type !== "ridge" && e.type !== "hinge") return;
     const [r, p] = find(i);
-    e.mv = r === rg ? ((p ^ pg) === 0 ? "M" : "V") : null; // lemma color, else undetermined
+    if (r === rg) {
+      e.mv = (p ^ pg) === 0 ? "M" : "V";
+      return;
+    }
+    // Not anchored to any axial. Default ONLY a ridge that spans a paper corner
+    // (its two endpoints lie on two different paper edges) - that one is genuinely
+    // free, valid either way, so choose Mountain. Every other undetermined crease
+    // stays null, to be handled separately.
+    if (e.type === "ridge") {
+      const ea = paperEdges(e.a);
+      const eb = paperEdges(e.b);
+      const cornerSpan = ea.length > 0 && eb.length > 0 && !ea.some((x) => eb.includes(x));
+      e.mv = cornerSpan ? "M" : null;
+    } else {
+      e.mv = null;
+    }
   });
 
-  // Maekawa completion: a ridge the lemma did not reach (e.g. a stretch ridge
-  // whose only anchor is the paper edge) is still forced once the other creases at
-  // an interior, even-degree vertex are known. Any valid M/V assignment is fine -
-  // we just need |M-V|=2 - so fill a single undetermined ridge wherever that forces
-  // a unique value, and iterate to a fixpoint.
+  // Maekawa completion: resolve any ridge still undetermined at an even-degree
+  // interior vertex where it is the only unknown, by choosing the colour that
+  // makes |M-V|=2. Iterate to a fixpoint.
   const vEdges = new Map<string, number[]>();
   for (const [k, list] of inc) vEdges.set(k, list.map((x) => x.i));
   for (let pass = 0; pass < 64; pass++) {
@@ -235,7 +311,7 @@ function applyBigLittleBig(m: BoxPleatedMolecule, edges: AssignedEdge[]): void {
       const [x, y] = k.split(",").map(Number);
       if (isBoundaryVertex({ x, y }, m.sheet)) continue;
       const fold = idxs.filter((i) => edges[i].type !== "boundary");
-      if (fold.length % 2 !== 0) continue;
+      if (fold.length % 2 !== 0) continue; // odd degree: Maekawa cannot resolve it
       let mk = 0;
       let vk = 0;
       const unknown: number[] = [];
@@ -257,11 +333,6 @@ function applyBigLittleBig(m: BoxPleatedMolecule, edges: AssignedEdge[]): void {
     }
     if (!changed) break;
   }
-
-  // Anything still undetermined falls back to the walk color.
-  edges.forEach((e, i) => {
-    if (e.type === "ridge" && e.mv == null) e.mv = walk.get(i) ?? null;
-  });
 }
 
 export interface AssignmentResult {
@@ -289,44 +360,206 @@ export function assignBoxPleated(f: OriFixture): AssignmentResult {
  * molecule. Split from {@link assignBoxPleated} so callers that construct the
  * molecule themselves (the packing pipeline) can reuse the same assignment.
  */
-export function assignMolecule(m: BoxPleatedMolecule, sheet: { width: number; height: number }): AssignmentResult {
-  const hinges = [...m.hinges];
-  let edges = assignCreases({ ...m, hinges });
+// ---------------------------------------------------------------------------
+// Hinge routing (Phase 2): place + color hinges by reflecting-ray search.
+// ---------------------------------------------------------------------------
 
-  for (let iter = 0; iter < 64; iter++) {
-    const targets = ridgeCrossingFailures(edges, sheet);
-    if (targets.length === 0) break;
-    let added = false;
-    for (const c of targets) {
-      // Resolve the crossing by adding two hinge arms (degree 4 -> 6, so |M-V|=2
-      // becomes reachable). March each axis direction with the shared hinge
-      // marcher and pick the two arms that reach the paper edge first - an
-      // edge-terminating arm has no far-end junction to balance, so it is easier
-      // to assign. An arm that stops at a ridge (inward) is still valid as a
-      // fallback. At a corner-adjacent crossing the two best arms are the
-      // perpendicular pair toward the nearest edges, e.g. (2,2) -> (0,2),(2,0).
-      const arms = AXIS_DIRS.map((d) => hingeEndpoint(c, d, m.ridges, m.ridgeSeeds, hinges, m.axialFamily, sheet))
-        .filter((end): end is GridPoint => end !== null && !samePoint(end, c))
-        .map((end) => ({ end, onEdge: isOnEdge(end, sheet) }));
-      arms.sort((a, b) => Number(b.onEdge) - Number(a.onEdge));
-      const chosen = arms.slice(0, 2).map((arm) => ({ a: c, b: arm.end }));
-      if (chosen.length === 0) continue;
-      const trial = assignCreases({ ...m, hinges: [...hinges, ...chosen] });
-      if (!maekawaConflicts(trial, sheet).some((p) => samePoint(p, c))) {
-        hinges.push(...chosen);
-        edges = trial;
-        added = true;
+const HINGE_AXES: GridPoint[] = [
+  { x: 1, y: 0 },
+  { x: -1, y: 0 },
+  { x: 0, y: 1 },
+  { x: 0, y: -1 },
+];
+
+/** Does a crease leave vertex v going in direction d (so a hinge there would overlap)? */
+function dirOccupied(v: GridPoint, d: GridPoint, segs: OriSegment[]): boolean {
+  return segs.some((c) => {
+    const ex = c.b.x - c.a.x;
+    const ey = c.b.y - c.a.y;
+    if (Math.abs(ex * d.y - ey * d.x) > EPS) return false; // not parallel
+    if (Math.abs((c.a.x - v.x) * d.y - (c.a.y - v.y) * d.x) > EPS) return false; // not on v's ray line
+    const ta = (c.a.x - v.x) * d.x + (c.a.y - v.y) * d.y;
+    const tb = (c.b.x - v.x) * d.x + (c.b.y - v.y) * d.y;
+    return Math.max(ta, tb) > EPS && Math.min(ta, tb) < 1 - EPS; // the segment leaves v forward
+  });
+}
+
+/** Axis directions at v not already carrying a crease (the <= 3 usable hinge dirs). */
+function freeAxes(v: GridPoint, m: BoxPleatedMolecule, hinges: OriSegment[]): GridPoint[] {
+  const segs = [...m.ridges, ...m.axialFamily, ...hinges];
+  return HINGE_AXES.filter((d) => !dirOccupied(v, d, segs));
+}
+
+/** Vertices still needing a hinge: geometry- or Maekawa-failing, interior, non-saturated. */
+function hingeFrontier(
+  m: BoxPleatedMolecule,
+  hinges: OriSegment[],
+  edges: AssignedEdge[],
+  sheet: { width: number; height: number },
+): GridPoint[] {
+  const adj = planarize([...m.boundary, ...m.ridges, ...m.axialFamily, ...hinges]);
+  const geom = failingJunctions(adj, sheet).map((f) => ({ x: f.x, y: f.y }));
+  const mae = maekawaConflicts(edges, sheet);
+  const seen = new Set<string>();
+  const out: GridPoint[] = [];
+  for (const v of [...geom, ...mae]) {
+    const k = `${v.x},${v.y}`;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    if (isBoundaryVertex(v, sheet)) continue;
+    if (freeAxes(v, m, hinges).length === 0) continue; // saturated: deferred
+    out.push(v);
+  }
+  return out;
+}
+
+/** Degree of vertex v in the current planar graph (count of incident unit edges). */
+function vertexDegree(v: GridPoint, edges: AssignedEdge[]): number {
+  let n = 0;
+  for (const e of edges) if (samePoint(e.a, v) || samePoint(e.b, v)) n++;
+  return n;
+}
+
+/** Reflecting hinge rays from v that discharge cleanly (terminate at edge or hinge). */
+function hingeRays(
+  v: GridPoint,
+  m: BoxPleatedMolecule,
+  hinges: OriSegment[],
+  sheet: { width: number; height: number },
+): OriSegment[][] {
+  return freeAxes(v, m, hinges)
+    .map((d) => traceHingeRay(v, d, m.ridges, hinges, m.axialFamily, sheet))
+    .filter((t): t is NonNullable<typeof t> => t !== null && (t.terminusType === "edge" || t.terminusType === "hinge"))
+    .map((t) => t.path);
+}
+
+/** Candidate hinge placements at v: one ray if odd degree, a pair if even. */
+function hingePlacements(
+  v: GridPoint,
+  m: BoxPleatedMolecule,
+  hinges: OriSegment[],
+  edges: AssignedEdge[],
+  sheet: { width: number; height: number },
+): OriSegment[][] {
+  const single = hingeRays(v, m, hinges, sheet);
+  return vertexDegree(v, edges) % 2 === 1
+    ? single
+    : single.flatMap((a, i) => single.slice(i + 1).map((b) => [...a, ...b]));
+}
+
+export interface HingeStep {
+  hinges: OriSegment[];
+  edges: AssignedEdge[];
+  frontier: GridPoint[];
+  /** The vertex chosen this step and the rays placed to discharge it (empty when stuck). */
+  vertex: GridPoint | null;
+  placed: OriSegment[];
+}
+
+/**
+ * Greedy forward trace of the hinge router (no backtracking) for debugging: each
+ * step records the current hinges, the colored edges, the frontier, and the
+ * placement it commits (the resolving placement that leaves the fewest new failing
+ * vertices). Stops when the frontier is empty or no vertex is resolvable.
+ */
+export function routeHingesSteps(m: BoxPleatedMolecule, sheet: { width: number; height: number }): HingeStep[] {
+  const steps: HingeStep[] = [];
+  let hinges: OriSegment[] = [];
+  for (let i = 0; i < 200; i++) {
+    const edges = assignCreases({ ...m, hinges });
+    const fr = hingeFrontier(m, hinges, edges, sheet);
+    let chosen: { v: GridPoint; add: OriSegment[] } | null = null;
+    for (const v of fr) {
+      const scored = hingePlacements(v, m, hinges, edges, sheet)
+        .map((add) => ({ add, nfr: hingeFrontier(m, [...hinges, ...add], assignCreases({ ...m, hinges: [...hinges, ...add] }), sheet) }))
+        .filter((c) => !c.nfr.some((p) => samePoint(p, v)))
+        .sort((a, b) => a.nfr.length - b.nfr.length);
+      if (scored.length) {
+        chosen = { v, add: scored[0].add };
         break;
       }
     }
-    if (!added) break;
+    steps.push({ hinges: [...hinges], edges, frontier: fr, vertex: chosen?.v ?? null, placed: chosen?.add ?? [] });
+    if (!chosen || fr.length === 0) break;
+    hinges = [...hinges, ...chosen.add];
   }
+  return steps;
+}
 
-  // Final repair: flip non-ridge creases to clear any remaining Maekawa
-  // conflicts (degree-8 flap-center 3-1 splits, and crossings the hinge repair
-  // could not resolve to the edge).
-  repairByFlipping(edges, sheet);
+/**
+ * Route hinges with a backtracking, best-first reflecting-ray search.
+ *
+ * At each step pick a failing (non-saturated, interior) vertex and enumerate hinge
+ * placements from it - a single ray when its degree is odd (one ray makes it even),
+ * a pair of rays when its degree is even (a pair preserves degree parity while
+ * shifting the M/V balance). Each ray reflects off ridges and terminates at the
+ * edge / another hinge / a junction. A placement is only taken if it resolves the
+ * chosen vertex; the search then recurses on whatever new obligations it created,
+ * and backtracks when a branch dead-ends. Candidates are tried in increasing
+ * resulting-frontier order (edge-terminating routes tend to sort first). Falls back
+ * to the best partial hinge set seen if no full solution is found within budget.
+ */
+export function routeHinges(m: BoxPleatedMolecule, sheet: { width: number; height: number }): OriSegment[] {
+  let budget = 2500;
+  let best: { hinges: OriSegment[]; score: number } = { hinges: [], score: Infinity };
 
+  const rays = (v: GridPoint, hinges: OriSegment[]): OriSegment[][] => {
+    const dirs = freeAxes(v, m, hinges);
+    return dirs
+      .map((d) => traceHingeRay(v, d, m.ridges, hinges, m.axialFamily, sheet))
+      // A hinge must discharge at the paper edge or on another hinge. Terminating
+      // at a ridge junction is a dead-end that leaves a new odd-degree vertex.
+      .filter((t): t is NonNullable<typeof t> => t !== null && (t.terminusType === "edge" || t.terminusType === "hinge"))
+      .map((t) => t.path);
+  };
+
+  const solve = (hinges: OriSegment[], edges: AssignedEdge[], fr: GridPoint[]): OriSegment[] | null => {
+    if (fr.length < best.score) best = { hinges: [...hinges], score: fr.length };
+    if (fr.length === 0) return hinges;
+    if (budget-- <= 0) return null;
+
+    // Branch on the first frontier vertex that has a placement resolving it; a
+    // vertex with none is (for now) unroutable and deferred like the saturated
+    // ones - skip it rather than failing the whole search.
+    for (const v of fr) {
+      const single = rays(v, hinges);
+      // One ray for an odd-degree vertex, a pair for an even-degree one.
+      const placements: OriSegment[][] =
+        vertexDegree(v, edges) % 2 === 1
+          ? single
+          : single.flatMap((a, i) => single.slice(i + 1).map((b) => [...a, ...b]));
+
+      const scored = placements
+        .map((add) => {
+          const next = [...hinges, ...add];
+          const nedges = assignCreases({ ...m, hinges: next });
+          return { next, nedges, nfr: hingeFrontier(m, next, nedges, sheet) };
+        })
+        .filter((c) => !c.nfr.some((p) => samePoint(p, v))) // must discharge v
+        .sort((a, b) => a.nfr.length - b.nfr.length);
+
+      if (scored.length === 0) continue; // v not resolvable now - try another vertex
+
+      for (const c of scored) {
+        const r = solve(c.next, c.nedges, c.nfr);
+        if (r) return r;
+        if (budget <= 0) return null;
+      }
+      return null; // committed to v, exhausted its options -> backtrack
+    }
+    return null; // no frontier vertex resolvable
+  };
+
+  const edges0 = assignCreases({ ...m, hinges: [] });
+  const solved = solve([], edges0, hingeFrontier(m, [], edges0, sheet));
+  return solved ?? best.hinges;
+}
+
+export function assignMolecule(m: BoxPleatedMolecule, sheet: { width: number; height: number }): AssignmentResult {
+  // Phase 2: route hinges from scratch (axials + ridges are already colored) with
+  // the reflecting-ray search, then do the final coloring with those hinges.
+  const hinges = routeHinges(m, sheet);
+  const edges = assignCreases({ ...m, hinges });
   return { molecule: { ...m, hinges }, edges, conflicts: maekawaConflicts(edges, sheet) };
 }
 
@@ -620,7 +853,7 @@ function assignHinges(m: BoxPleatedMolecule, edges: AssignedEdge[]): void {
 
     for (const u of units) {
       const e = byKey.get(segKey(u.a, u.b));
-      if (e) e.mv = color;
+      if (e && e.mv == null) e.mv = color; // keep any color the constraint solve already set
       color = color === "M" ? "V" : "M";
     }
   }

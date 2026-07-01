@@ -21,7 +21,6 @@ import { repairFlapRidgeHole } from "./box-pleated-gap-fill.ts";
 import {
   propagateAxials,
   propagateAllAxialOffsets,
-  propagateHinges,
   planarize,
   failingJunctions,
   offGridJunctions,
@@ -61,8 +60,20 @@ export interface PackingCP {
   mvConflicts: GridPoint[];
 }
 
-/** Build the crease pattern up to hinge selection and report its validity. */
-export function buildPackingCP(packing: BoxPleatedPacking): PackingCP {
+interface PackingGeometry {
+  molecule: BoxPleatedMolecule;
+  gap: ReturnType<typeof fillPackingGaps>;
+  offGrid: GridPoint[];
+  axials: OriSegment[];
+  edgeAxials: OriSegment[];
+  pleats: OriSegment[];
+  seeds: GridPoint[];
+  W: number;
+  H: number;
+}
+
+/** The axial+ridge molecule (no hinges yet) plus the intermediates cp needs. */
+function packingGeometry(packing: BoxPleatedPacking): PackingGeometry {
   const sheet = packing.sheet;
   const W = Math.round(sheet.width);
   const H = Math.round(sheet.height);
@@ -136,34 +147,46 @@ export function buildPackingCP(packing: BoxPleatedPacking): PackingCP {
     seg({ x: W, y: H }, { x: 0, y: H }),
     seg({ x: 0, y: H }, { x: 0, y: 0 }),
   ];
-  const hr = propagateHinges(ridges, axialFamily, seeds, sheet, [...boundary, ...ridges, ...axialFamily]);
-  const hinges = clipAll(hr.hinges, W, H);
 
   const offGrid = offGridJunctions([...ridges, ...axialFamily]);
-  const adj = planarize([...boundary, ...ridges, ...axialFamily, ...hinges]);
-  const failing = failingJunctions(adj, sheet).map((f) => ({ x: f.x, y: f.y }));
 
-  // Stage D: M/V assignment. Build the molecule from the CLIPPED geometry so no
-  // off-paper crease (e.g. an edge flap's off-paper spine) leaks into the
-  // assignment as a dangling stub. Axial colour comes from the chain +
-  // parallel-alternation method (see box-pleated-axial-coloring), run on the same
-  // clipped family the assignment uses.
+  // Build the molecule from the CLIPPED geometry so no off-paper crease (e.g. an
+  // edge flap's off-paper spine) leaks into the assignment as a dangling stub.
+  // Hinges are routed later by assignMolecule (Phase 2), so start with none.
   const clippedFamily = [...axials, ...edgeAxials, ...pleats];
   const molecule: BoxPleatedMolecule = {
     sheet,
     boundary,
     ridges,
     axialFamily: clippedFamily,
-    hinges,
+    hinges: [],
     centers: seeds,
     ridgeSeeds: seeds,
     axialColorOf: axialChainColors(clippedFamily, ridges, sheet),
   };
+  return { molecule, gap, offGrid, axials, edgeAxials, pleats, seeds, W, H };
+}
+
+/** The axial+ridge molecule (no hinges) for a packing - the router's input. */
+export function buildPackingMolecule(packing: BoxPleatedPacking): BoxPleatedMolecule {
+  return packingGeometry(packing).molecule;
+}
+
+/** Build the crease pattern (Phase 1 colors + Phase 2 routed hinges) and its validity. */
+export function buildPackingCP(packing: BoxPleatedPacking): PackingCP {
+  const g = packingGeometry(packing);
+  const { molecule, gap, offGrid, axials, edgeAxials, pleats, seeds, W, H } = g;
+  const sheet = molecule.sheet;
+
   const assignment = assignMolecule(molecule, sheet);
+  const hinges = clipAll(assignment.molecule.hinges, W, H);
+
+  const adj = planarize([...molecule.boundary, ...molecule.ridges, ...molecule.axialFamily, ...hinges]);
+  const failing = failingJunctions(adj, sheet).map((f) => ({ x: f.x, y: f.y }));
 
   return {
     sheet,
-    ridges,
+    ridges: molecule.ridges,
     axials,
     edgeAxials,
     pleats,
