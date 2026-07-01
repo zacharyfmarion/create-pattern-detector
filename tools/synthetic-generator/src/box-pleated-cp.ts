@@ -21,14 +21,20 @@ import { repairFlapRidgeHole } from "./box-pleated-gap-fill.ts";
 import {
   propagateAxials,
   propagateAllAxialOffsets,
+  propagateAxialFamilyWithLevels,
   planarize,
   failingJunctions,
   offGridJunctions,
   ridgeJunctions,
+  segmentKey,
 } from "./box-pleated-molecule.ts";
 import {
   assignMolecule,
+  assignCreases,
+  routeHinges,
   type AssignedEdge,
+  type Assignment,
+  type CreaseType,
   type BoxPleatedMolecule,
 } from "./box-pleated-assignment.ts";
 import { axialChainColors } from "./box-pleated-axial-coloring.ts";
@@ -73,6 +79,64 @@ interface PackingGeometry {
 }
 
 /** The axial+ridge molecule (no hinges yet) plus the intermediates cp needs. */
+/** A named group of ridges by their source object (for generation tracing). */
+export interface RidgeGroup {
+  name: string;
+  ridges: OriSegment[];
+}
+
+/**
+ * Ridges from every flap/river, every stretch device, and the gap-fill fillers,
+ * grouped by source object in generation order. Shared by packingGeometry and the
+ * generation trace so the two can never drift.
+ */
+export function collectRidges(
+  packing: BoxPleatedPacking,
+  gap: ReturnType<typeof fillPackingGaps>,
+  W: number,
+  H: number,
+): { ridges: OriSegment[]; groups: RidgeGroup[] } {
+  const seg = (a: GridPoint, b: GridPoint): OriSegment => ({ a, b });
+  const bounds = { width: W, height: H };
+  const ridges: OriSegment[] = [];
+  const groups: RidgeGroup[] = [];
+  const counts: Record<string, number> = {};
+  // A ridge is a straight-skeleton bisector: 45-degree or a non-45 Pythagorean
+  // stretch edge - never axis-aligned. Axis-aligned segments in a source object's
+  // "ridges" are the flap ring/spine sides or paper-edge-coincident stubs; they are
+  // not ridges (the axials run along those directions), so omit them.
+  const pushRidge = (g: OriSegment[], a: GridPoint, b: GridPoint): void => {
+    if (Math.abs(b.x - a.x) < EPS || Math.abs(b.y - a.y) < EPS) return; // axis-aligned: not a ridge
+    pushClipped(g, a, b, W, H);
+  };
+  for (const object of packing.layout.objects) {
+    if (object.kind === "root" || object.kind === "stretch-device") continue;
+    const objRidges = object.ridges.map((line) => seg(line[0], line[1]));
+    const repaired = object.kind === "flap" ? repairFlapRidgeHole(objRidges, bounds) : objRidges;
+    const g: OriSegment[] = [];
+    for (const r of repaired) pushRidge(g, r.a, r.b);
+    ridges.push(...g);
+    counts[object.kind] = (counts[object.kind] ?? 0) + 1;
+    groups.push({ name: `${object.kind} ${counts[object.kind]}`, ridges: g });
+  }
+  for (const object of packing.layout.objects) {
+    if (object.kind !== "stretch-device") continue;
+    const g: OriSegment[] = [];
+    for (const line of object.ridges) pushRidge(g, line[0], line[1]);
+    for (const e of sharedContourEdges(object.contours)) pushRidge(g, e.a, e.b);
+    ridges.push(...g);
+    counts.stretch = (counts.stretch ?? 0) + 1;
+    groups.push({ name: `stretch ${counts.stretch}`, ridges: g });
+  }
+  const filler: OriSegment[] = [];
+  for (const r of gap.ridges) pushRidge(filler, r.a, r.b);
+  if (filler.length) {
+    ridges.push(...filler);
+    groups.push({ name: "gap fillers", ridges: filler });
+  }
+  return { ridges, groups };
+}
+
 function packingGeometry(packing: BoxPleatedPacking): PackingGeometry {
   const sheet = packing.sheet;
   const W = Math.round(sheet.width);
@@ -81,30 +145,7 @@ function packingGeometry(packing: BoxPleatedPacking): PackingGeometry {
 
   const gap = fillPackingGaps(packing);
 
-  // Ridges from every flap/river, EVERY stretch device, and the filler flaps.
-  // A non-square flap's BP Studio ridges are a hollow rectangular ring (the box
-  // diagonals stop at the ring corners). fillRidgeRectHole adds the straight
-  // skeleton that fills that interior (spine + corner diagonals) so no empty
-  // rectangle is left inside the flap. (We keep the ring sides: the pleats reflect
-  // off them and the M/V balance depends on them - deleting them is worse.)
-  const ridges: OriSegment[] = [];
-  for (const object of packing.layout.objects) {
-    if (object.kind === "root" || object.kind === "stretch-device") continue;
-    const objRidges = object.ridges.map((line) => seg(line[0], line[1]));
-    const repaired = object.kind === "flap" ? repairFlapRidgeHole(objRidges, sheet) : objRidges;
-    for (const r of repaired) pushClipped(ridges, r.a, r.b, W, H);
-  }
-  for (const object of packing.layout.objects) {
-    if (object.kind !== "stretch-device") continue;
-    for (const line of object.ridges) pushClipped(ridges, line[0], line[1], W, H);
-    // A stretch device split into two contours shares an interior edge between
-    // them. BP Studio emits each contour's other edges as ridges but drops the
-    // shared edge (it is the internal boundary between the two gadget halves),
-    // leaving its two endpoints under-creased. That edge is a real ridge, so add
-    // it back.
-    for (const e of sharedContourEdges(object.contours)) pushClipped(ridges, e.a, e.b, W, H);
-  }
-  for (const r of gap.ridges) pushClipped(ridges, r.a, r.b, W, H);
+  const { ridges } = collectRidges(packing, gap, W, H);
 
   // Seeds: the interior convergence points of each polygon's OWN straight
   // skeleton. A valid axial seed is a junction inside one polygon's skeleton; a
@@ -245,6 +286,72 @@ export function buildPackingCP(packing: BoxPleatedPacking): PackingCP {
 export async function generateValidCP(config: BoxPleatedPackingConfig): Promise<PackingCP | null> {
   const cp = buildPackingCP(await generateBoxPleatedPacking(config));
   return cp.valid ? cp : null;
+}
+
+// ---------------------------------------------------------------------------
+// Generation trace: an ordered, stage-by-stage record of the whole pipeline, for
+// debugging. Replays the SAME pipeline functions the build uses (nothing is
+// re-implemented), so what it shows is exactly what is generated.
+// ---------------------------------------------------------------------------
+
+export type CreaseKind = "boundary" | "ridge" | "axial" | "edge-axial" | "pleat" | CreaseType;
+
+export interface TracedCrease {
+  a: GridPoint;
+  b: GridPoint;
+  kind: CreaseKind;
+  level?: number;
+  mv?: Assignment | null;
+}
+
+/** One stage of generation: the creases it adds (or, if recolor, the full colored CP). */
+export interface GenStage {
+  name: string;
+  creases: TracedCrease[];
+  /** The final assignment stage replaces the whole CP with its M/V-coloured edges. */
+  recolor?: boolean;
+}
+
+/** Ordered stage-by-stage trace of building this (valid) packing's CP. */
+export function traceGeneration(packing: BoxPleatedPacking): { stages: GenStage[]; sheet: { width: number; height: number } } {
+  const g = packingGeometry(packing);
+  const reason = rejectionReason(g);
+  if (reason) throw new Error(`traceGeneration: rejected packing (${reason})`);
+  const { molecule, gap, W, H, axials, edgeAxials, seeds } = g;
+  const sheet = molecule.sheet;
+  const clip = (segs: OriSegment[]): OriSegment[] => {
+    const out: OriSegment[] = [];
+    for (const s of segs) pushClipped(out, s.a, s.b, W, H);
+    return out;
+  };
+
+  const stages: GenStage[] = [];
+  stages.push({ name: "paper boundary", creases: molecule.boundary.map((s) => ({ a: s.a, b: s.b, kind: "boundary" as const })) });
+
+  // Ridges, grouped by their source object (so an extra crease can be traced to it).
+  for (const grp of collectRidges(packing, gap, W, H).groups) {
+    stages.push({ name: `ridges: ${grp.name}`, creases: grp.ridges.map((s) => ({ a: s.a, b: s.b, kind: "ridge" as const })) });
+  }
+
+  stages.push({ name: "base axials", creases: axials.map((s) => ({ a: s.a, b: s.b, kind: "axial" as const })) });
+  stages.push({ name: "edge axials", creases: edgeAxials.map((s) => ({ a: s.a, b: s.b, kind: "edge-axial" as const })) });
+
+  // Pleats, one stage per offset level (levels come from the same offset pass).
+  const rawAx = propagateAxials(molecule.ridges, sheet, seeds);
+  const fam = propagateAxialFamilyWithLevels(molecule.ridges, sheet, rawAx.axials, rawAx.edgeAxials);
+  const levels = [...new Set(fam.pleats.map((p) => fam.level.get(segmentKey(p)) ?? 0))].sort((a, b) => a - b);
+  for (const L of levels) {
+    const lp = clip(fam.pleats.filter((p) => (fam.level.get(segmentKey(p)) ?? 0) === L));
+    if (lp.length) stages.push({ name: `pleats: level ${L}`, creases: lp.map((s) => ({ a: s.a, b: s.b, kind: "pleat" as const, level: L })) });
+  }
+
+  // Hinges (Phase 2), then the final M/V assignment (recolours the whole CP).
+  const hinges = routeHinges(molecule, sheet);
+  if (hinges.length) stages.push({ name: "hinges", creases: clip(hinges).map((s) => ({ a: s.a, b: s.b, kind: "hinge" as const })) });
+  const edges = assignCreases({ ...molecule, hinges });
+  stages.push({ name: "assignment (M/V)", creases: edges.map((e) => ({ a: e.a, b: e.b, kind: e.type, mv: e.mv })), recolor: true });
+
+  return { stages, sheet };
 }
 
 /**
