@@ -113,8 +113,155 @@ export function assignCreases(m: BoxPleatedMolecule): AssignedEdge[] {
     }
   }
 
+  // Derive ridge phase from the locked axials via the Big-Little-Big lemma. This
+  // overrides the center-out walk above wherever the lemma determines a ridge
+  // (which is everywhere it is connected to an axial through strict-local-min
+  // sectors); the walk's color only survives on edges the lemma leaves free.
+  applyBigLittleBig(m, edges);
+
   assignHinges(m, edges);
   return edges;
+}
+
+/**
+ * Big-Little-Big lemma (Hull): around a flat-foldable vertex, if a sector angle
+ * is a strict local minimum, the two creases bounding it have opposite M/V. With
+ * the axials locked, this pins every ridge's phase (Maekawa alone leaves it free).
+ *
+ * We build a signed union-find over the unit edges: each strict-local-min sector
+ * unions its two bounding edges as "opposite"; every axial edge is tied to a
+ * virtual Mountain ground by its locked color. Any ridge edge that ends up in the
+ * ground's component then reads its color off the accumulated parity.
+ */
+function applyBigLittleBig(m: BoxPleatedMolecule, edges: AssignedEdge[]): void {
+  const GROUND = edges.length;
+  const parent = new Map<number, number>();
+  const par = new Map<number, number>(); // parity from a node to its parent
+  const find = (x: number): [number, number] => {
+    let root = x;
+    let p = 0;
+    while ((parent.get(root) ?? root) !== root) {
+      p ^= par.get(root) ?? 0;
+      root = parent.get(root)!;
+    }
+    return [root, p];
+  };
+  const union = (a: number, b: number, rel: number): void => {
+    const [ra, pa] = find(a);
+    const [rb, pb] = find(b);
+    if (ra === rb) return; // already related (consistency conflicts are ignored)
+    parent.set(ra, rb);
+    par.set(ra, pa ^ pb ^ rel);
+  };
+
+  // Seed: each axial edge is tied to the Mountain ground by its locked color.
+  edges.forEach((e, i) => {
+    if (e.type === "axial" && (e.mv === "M" || e.mv === "V")) union(i, GROUND, e.mv === "M" ? 0 : 1);
+  });
+
+  // Incidence: edge directions at each vertex.
+  const key = (p: GridPoint): string => `${Math.round(p.x * 1e3) / 1e3},${Math.round(p.y * 1e3) / 1e3}`;
+  const inc = new Map<string, Array<{ i: number; ang: number }>>();
+  edges.forEach((e, i) => {
+    for (const [p, o] of [[e.a, e.b], [e.b, e.a]] as const) {
+      const k = key(p);
+      (inc.get(k) ?? inc.set(k, []).get(k)!).push({ i, ang: Math.atan2(o.y - p.y, o.x - p.x) });
+    }
+  });
+
+  for (const [k, list] of inc) {
+    if (list.length < 3) continue;
+    const L = [...list].sort((a, b) => a.ang - b.ang);
+    const n = L.length;
+    const gaps = L.map((_, j) => {
+      let g = L[(j + 1) % n].ang - L[j].ang;
+      if (g <= 0) g += 2 * Math.PI;
+      return g;
+    });
+    // Group the sectors into maximal runs of equal angle (cyclically). A run whose
+    // angle is strictly smaller than the sectors bounding it on both ends is a
+    // minimum (a crimp when it has length > 1); the creases spanning it alternate,
+    // so union every consecutive pair across the WHOLE run - not just its ends,
+    // which would break the alternation chain for runs of length >= 3.
+    const EPS_A = 1e-9;
+    const eq = (a: number, b: number): boolean => Math.abs(a - b) < EPS_A;
+    // Constrain only between two fold creases: at a paper-edge vertex the boundary
+    // half-edges shape the sector geometry but carry no M/V.
+    const link = (s: number): void => {
+      const a = L[s].i;
+      const b = L[(s + 1) % n].i;
+      if (edges[a].type !== "boundary" && edges[b].type !== "boundary") union(a, b, 1);
+    };
+    if (!gaps.every((g) => eq(g, gaps[0]))) {
+      // Start at a run boundary so runs do not wrap.
+      let s0 = 0;
+      while (eq(gaps[s0], gaps[(s0 - 1 + n) % n])) s0++;
+      let idx = s0;
+      do {
+        const val = gaps[idx];
+        const run = [idx];
+        let nx = (idx + 1) % n;
+        while (eq(gaps[nx], val)) {
+          run.push(nx);
+          nx = (nx + 1) % n;
+        }
+        const before = gaps[(run[0] - 1 + n) % n];
+        const after = gaps[nx];
+        if (val < before - EPS_A && val < after - EPS_A) for (const s of run) link(s);
+        idx = nx;
+      } while (idx !== s0);
+    }
+  }
+
+  const [rg, pg] = find(GROUND);
+  const walk = new Map<number, Assignment | null>();
+  edges.forEach((e, i) => {
+    if (e.type !== "ridge") return;
+    walk.set(i, e.mv); // remember the fallback walk color
+    const [r, p] = find(i);
+    e.mv = r === rg ? ((p ^ pg) === 0 ? "M" : "V") : null; // lemma color, else undetermined
+  });
+
+  // Maekawa completion: a ridge the lemma did not reach (e.g. a stretch ridge
+  // whose only anchor is the paper edge) is still forced once the other creases at
+  // an interior, even-degree vertex are known. Any valid M/V assignment is fine -
+  // we just need |M-V|=2 - so fill a single undetermined ridge wherever that forces
+  // a unique value, and iterate to a fixpoint.
+  const vEdges = new Map<string, number[]>();
+  for (const [k, list] of inc) vEdges.set(k, list.map((x) => x.i));
+  for (let pass = 0; pass < 64; pass++) {
+    let changed = false;
+    for (const [k, idxs] of vEdges) {
+      const [x, y] = k.split(",").map(Number);
+      if (isBoundaryVertex({ x, y }, m.sheet)) continue;
+      const fold = idxs.filter((i) => edges[i].type !== "boundary");
+      if (fold.length % 2 !== 0) continue;
+      let mk = 0;
+      let vk = 0;
+      const unknown: number[] = [];
+      for (const i of fold) {
+        if (edges[i].mv === "M") mk++;
+        else if (edges[i].mv === "V") vk++;
+        else unknown.push(i);
+      }
+      if (unknown.length !== 1 || edges[unknown[0]].type !== "ridge") continue;
+      const asM = Math.abs(mk + 1 - vk) === 2;
+      const asV = Math.abs(mk - (vk + 1)) === 2;
+      if (asM && !asV) {
+        edges[unknown[0]].mv = "M";
+        changed = true;
+      } else if (asV && !asM) {
+        edges[unknown[0]].mv = "V";
+        changed = true;
+      }
+    }
+    if (!changed) break;
+  }
+
+  // Anything still undetermined falls back to the walk color.
+  edges.forEach((e, i) => {
+    if (e.type === "ridge" && e.mv == null) e.mv = walk.get(i) ?? null;
+  });
 }
 
 export interface AssignmentResult {
@@ -335,7 +482,11 @@ function assignRidges(m: BoxPleatedMolecule): RidgeColors {
     // with flipped parity; the per-span seeds agree on shared boundaries.
     const centers = m.ridgeSeeds.filter((c) => pointOnSegment(c, ridge));
     if (centers.length === 0) {
-      emitRidgeArm(ridge.a, ridge.b, m, colors, spans);
+      // No flap center on this ridge (a stretch boundary, or a ridge whose seed
+      // is itself an axial crossing). Anchor the phase to the axial color at the
+      // ridge's start, so the first piece equals the axial color there.
+      const dir = { x: ridge.b.x - ridge.a.x, y: ridge.b.y - ridge.a.y };
+      emitRidgeArm(ridge.a, ridge.b, m, colors, spans, axialThrough(ridge.a, dir, m));
       continue;
     }
     const dir = { x: ridge.b.x - ridge.a.x, y: ridge.b.y - ridge.a.y };
@@ -363,12 +514,25 @@ function isCleanSeg(a: GridPoint, b: GridPoint): boolean {
   return Math.abs(dx) < EPS || Math.abs(dy) < EPS || Math.abs(Math.abs(dx) - Math.abs(dy)) < EPS;
 }
 
+/** Color of an axial that passes through `p` and is not collinear with the ridge. */
+function axialThrough(p: GridPoint, ridgeDir: GridPoint, m: BoxPleatedMolecule): Assignment | null {
+  for (const ax of m.axialFamily) {
+    if (!pointOnSegment(p, ax)) continue;
+    const ad = { x: ax.b.x - ax.a.x, y: ax.b.y - ax.a.y };
+    if (Math.abs(ad.x * ridgeDir.y - ad.y * ridgeDir.x) < EPS) continue; // runs along the ridge
+    const c = m.axialColorOf(ax);
+    if (c) return c;
+  }
+  return null;
+}
+
 function emitRidgeArm(
   center: GridPoint,
   far: GridPoint,
   m: BoxPleatedMolecule,
   colors: Map<string, Assignment>,
   spans: RidgeSpan[],
+  seedColor: Assignment | null = null,
 ): void {
   // Axial-family crossings along center -> far, with the axial's color, sorted
   // outward from the center. Keep the actual intersection point (not a
@@ -391,13 +555,13 @@ function emitRidgeArm(
   // Clean pieces colour their unit edges by exact key (preserving the original
   // first-write-wins behaviour); every piece is also recorded as a span so a
   // non-45 piece (whose unit edges miss the lattice) can be coloured by midpoint.
-  const color0: Assignment = unique.length ? (unique[0].color ?? "M") : "M";
+  const color0: Assignment = seedColor ?? (unique.length ? (unique[0].color ?? "M") : "M");
   let color: Assignment = color0;
   for (let i = 0; i < bounds.length - 1; i++) {
     spans.push({ a: bounds[i], b: bounds[i + 1], color });
+    const p = snapPoint(bounds[i]);
+    const q = snapPoint(bounds[i + 1]);
     if (isCleanSeg(bounds[i], bounds[i + 1])) {
-      const p = snapPoint(bounds[i]);
-      const q = snapPoint(bounds[i + 1]);
       const sd = { x: Math.sign(q.x - p.x), y: Math.sign(q.y - p.y) };
       const n = Math.round(Math.max(Math.abs(q.x - p.x), Math.abs(q.y - p.y)));
       for (let j = 0; j < n; j++) {
@@ -406,6 +570,14 @@ function emitRidgeArm(
         const k = segKey(a, b);
         if (!colors.has(k)) colors.set(k, color);
       }
+    } else if (!samePoint(p, q)) {
+      // A non-45 (Pythagorean stretch) ridge's planar edge runs exactly between
+      // two consecutive crossings, i.e. this whole span. Its unit edges miss the
+      // lattice so there is nothing to step; register the span's own endpoints as
+      // an exact color key so it resolves like a clean edge instead of via the
+      // fragile first-geometric-match span fallback.
+      const k = segKey(p, q);
+      if (!colors.has(k)) colors.set(k, color);
     }
     color = color === "M" ? "V" : "M";
   }
