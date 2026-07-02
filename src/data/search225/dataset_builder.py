@@ -1,7 +1,22 @@
-"""Build a standard synthetic dataset root from ExplOri 22.5 tilings.
+"""Build a standard synthetic dataset root from local SEARCH-22.5 FOLD files.
 
-Output layout (mirrors ``treemaker_tree_v1`` / ``rabbit_ear_fold_program_v1`` so the
-result drops straight into ``scripts/data/build_synthetic_training_mix.py``)::
+SEARCH-22.5 / ExplOri 22.5 (https://225.designorigami.net) is a database of
+mathematically exact, flat-foldable crease patterns on the 22.5-degree grid. The
+per-(N, symmetry) SQLite databases (``tilings_{N}_{sym}.db``) were provided directly
+by the project's author.
+
+IMPORTANT: this pipeline is strictly offline. Do NOT fetch from the public site —
+it is served from a single home machine. Acquisition is:
+
+1. Convert the local ``.db`` files to FOLD with ``db_to_fold.py`` in the SEARCH-22.5
+   repo (requires that repo's venv with the compiled ``math225_core`` extension)::
+
+       cd ~/Documents/code/SEARCH-22.5
+       .venv/bin/python db_to_fold.py <tilings_N_sym.db> --out <staging-dir>
+
+2. Run :func:`build_search225_dataset_from_folds` (or the CLI wrapper
+   ``scripts/data/build_search225_dataset.py``) over the staging dir(s) to produce
+   the project's standard dataset-root layout::
 
     <out>/
       folds/<id>.fold
@@ -10,10 +25,7 @@ result drops straight into ``scripts/data/build_synthetic_training_mix.py``)::
       recipe.json
       qa.json
 
-Acquisition is a polite, sequential, stratified random sample across the populated
-(N, sym) databases — not a full mirror — because the full site is ~2.5M patterns and
-the server is single-flight. Weighting presets let you bias toward higher-N/denser
-patterns (the harder cases for the detector).
+The result drops straight into ``scripts/data/build_synthetic_training_mix.py``.
 """
 
 from __future__ import annotations
@@ -22,44 +34,20 @@ from collections import Counter
 from dataclasses import dataclass, field
 import json
 from pathlib import Path
-import random
-import time
+import re
 from typing import Any, Callable
 
 from src.data.fold_parser import FOLDParser
 
-from .fetch import ALL_COMBOS, Combo, TilingClient, TilingNotFound
-
 FAMILY = "search225-tiling"
-DATASET_VERSION = "search225/v0.1.0"
+DATASET_VERSION = "search225/v0.2.0-local-db"
 
 DEFAULT_SPLITS = {"train": 0.85, "val": 0.10, "test": 0.05}
 
-# Per-combo sampling weights for each preset. Keys are ``Combo.key`` ("N_sym").
-# Combos absent from a preset get weight 0. Weights are normalized at runtime.
-WEIGHT_PRESETS: dict[str, dict[str, float]] = {
-    # Favor N=4,5,6 / denser patterns (the detector's hard cases).
-    "higher-n": {
-        "3_none": 0.03, "3_diag": 0.04, "3_book": 0.03,
-        "4_none": 0.12, "4_diag": 0.12, "4_book": 0.11,
-        "5_diag": 0.25, "5_book": 0.20,
-        "6_book": 0.10,
-    },
-    # Favor N=2,3,4 / simpler patterns.
-    "lower-n": {
-        "2_none": 0.01, "2_diag": 0.01, "2_book": 0.01,
-        "3_none": 0.13, "3_diag": 0.14, "3_book": 0.13,
-        "4_none": 0.16, "4_diag": 0.16, "4_book": 0.15,
-        "5_diag": 0.05, "5_book": 0.03, "6_book": 0.02,
-    },
-    # Roughly even across the useful (N>=3) combos.
-    "balanced": {
-        "3_none": 0.11, "3_diag": 0.11, "3_book": 0.11,
-        "4_none": 0.11, "4_diag": 0.11, "4_book": 0.11,
-        "5_diag": 0.12, "5_book": 0.11,
-        "6_book": 0.11,
-    },
-}
+SYM_CHARS = {"none": "n", "diag": "d", "book": "b"}
+
+# db_to_fold.py output naming: search225_{N}{sym}{tiling_id}.fold
+FOLD_NAME_RE = re.compile(r"^search225_(\d+)(none|diag|book)(\d+)$")
 
 # Bucket by total edge count. Aligns with the complexity buckets in the existing
 # recipes (which counted creases); "tiny" captures the smallest N=2/3 patterns.
@@ -68,8 +56,27 @@ BUCKET_THRESHOLDS = [
     ("small", 60, 180),
     ("medium", 180, 500),
     ("dense", 500, 1200),
-    ("superdense", 1200, 10 ** 9),
+    ("superdense", 1200, 10**9),
 ]
+
+
+@dataclass(frozen=True)
+class Combo:
+    """A (grid size N, symmetry) database combination, e.g. N=3, sym='diag'."""
+
+    N: int
+    sym: str
+
+    @property
+    def key(self) -> str:
+        return f"{self.N}_{self.sym}"
+
+    @property
+    def char(self) -> str:
+        return SYM_CHARS.get(self.sym, self.sym[:1])
+
+    def view_id(self, tiling_id: int) -> str:
+        return f"{self.N}{self.char}{tiling_id}"
 
 
 def bucket_for_edges(num_edges: int) -> str:
@@ -92,87 +99,54 @@ def split_for_index(index: int, splits: dict[str, float]) -> str:
     return "test"
 
 
-def allocate_counts(weights: dict[str, float], total: int) -> dict[str, int]:
-    """Split ``total`` across combos proportionally to (normalized) weights."""
-    active = {k: w for k, w in weights.items() if w > 0}
-    weight_sum = sum(active.values())
-    if weight_sum <= 0:
-        raise ValueError("All sampling weights are zero")
-    raw = {k: (w / weight_sum) * total for k, w in active.items()}
-    floored = {k: int(v) for k, v in raw.items()}
-    remainder = total - sum(floored.values())
-    # Hand out the rounding remainder to the largest fractional parts.
-    fractions = sorted(active, key=lambda k: raw[k] - floored[k], reverse=True)
-    for k in fractions[:remainder]:
-        floored[k] += 1
-    return {k: v for k, v in floored.items() if v > 0}
+def parse_fold_name(path: Path) -> tuple[Combo, int] | None:
+    match = FOLD_NAME_RE.match(path.stem)
+    if match is None:
+        return None
+    return Combo(N=int(match.group(1)), sym=match.group(2)), int(match.group(3))
 
 
 @dataclass
 class BuildSummary:
     out: str
-    requested: int
+    scanned: int
     saved: int
-    skipped_existing: int
+    skipped_unparseable_name: int = 0
+    skipped_invalid: int = 0
     per_combo: dict[str, int] = field(default_factory=dict)
-    max_ids: dict[str, int] = field(default_factory=dict)
     bucket_counts: dict[str, int] = field(default_factory=dict)
     assignment_totals: dict[str, int] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, Any]:
         return {
             "out": self.out,
-            "requested": self.requested,
+            "scanned": self.scanned,
             "saved": self.saved,
-            "skippedExisting": self.skipped_existing,
+            "skippedUnparseableName": self.skipped_unparseable_name,
+            "skippedInvalid": self.skipped_invalid,
             "perCombo": self.per_combo,
-            "maxIds": self.max_ids,
             "bucketCounts": self.bucket_counts,
             "assignmentTotals": self.assignment_totals,
             "datasetVersion": DATASET_VERSION,
         }
 
 
-def _resolve_combos(combo_keys: list[str] | None) -> dict[str, Combo]:
-    by_key = {c.key: c for c in ALL_COMBOS}
-    if not combo_keys:
-        return by_key
-    selected: dict[str, Combo] = {}
-    for key in combo_keys:
-        if key not in by_key:
-            raise ValueError(f"Unknown combo {key!r}; choices: {sorted(by_key)}")
-        selected[key] = by_key[key]
-    return selected
-
-
-def build_search225_dataset(
+def build_search225_dataset_from_folds(
     out: str | Path,
+    fold_dirs: list[str | Path],
     *,
-    target_count: int = 10_000,
-    weights_preset: str = "higher-n",
-    weights_override: dict[str, float] | None = None,
-    combo_keys: list[str] | None = None,
     dataset_name: str = "search225_v1",
-    delay: float = 0.2,
-    seed: int = 1234,
-    max_misses_factor: int = 40,
-    resume: bool = True,
-    client: TilingClient | None = None,
+    splits: dict[str, float] | None = None,
     progress: Callable[[str], None] = print,
 ) -> BuildSummary:
-    """Sample tilings from the site and write a standard dataset root.
+    """Ingest local db_to_fold output dirs into a standard dataset root.
 
     Args:
-        out: dataset root directory to create/update.
-        target_count: total number of patterns to fetch across all combos.
-        weights_preset: one of WEIGHT_PRESETS ("higher-n", "lower-n", "balanced").
-        weights_override: explicit ``{combo_key: weight}`` map (wins over preset).
-        combo_keys: restrict to these combos (e.g. ["4_diag", "5_book"]).
-        delay: per-request politeness delay in seconds (sequential client).
-        seed: RNG seed for reproducible id sampling.
-        max_misses_factor: give up on a combo after this * its target consecutive
-            missing-id draws (guards against over-estimated id ranges).
-        resume: skip ids whose .fold already exists on disk.
+        out: dataset root directory to create.
+        fold_dirs: directories containing ``search225_{N}{sym}{id}.fold`` files
+            produced by the SEARCH-22.5 repo's ``db_to_fold.py``.
+        dataset_name: sample id prefix (also recorded in recipe.json).
+        splits: split fractions (default 85/10/5 train/val/test).
     """
     out = Path(out).expanduser()
     folds_dir = out / "folds"
@@ -180,113 +154,72 @@ def build_search225_dataset(
     qa_dir = out / "qa"
     for d in (folds_dir, metadata_dir, qa_dir):
         d.mkdir(parents=True, exist_ok=True)
+    splits = dict(splits or DEFAULT_SPLITS)
 
-    combos = _resolve_combos(combo_keys)
-    weights = dict(weights_override or WEIGHT_PRESETS.get(weights_preset, {}))
-    if not weights:
-        raise ValueError(f"Unknown weights preset {weights_preset!r}")
-    # Keep only weights for combos we actually have / selected.
-    weights = {k: w for k, w in weights.items() if k in combos}
-    per_combo_targets = allocate_counts(weights, target_count)
+    sources: list[tuple[Combo, int, Path]] = []
+    summary = BuildSummary(out=str(out), scanned=0, saved=0)
+    for fold_dir in fold_dirs:
+        fold_dir = Path(fold_dir).expanduser()
+        for path in sorted(fold_dir.glob("*.fold")):
+            summary.scanned += 1
+            parsed = parse_fold_name(path)
+            if parsed is None:
+                summary.skipped_unparseable_name += 1
+                progress(f"  warn: cannot parse combo/id from {path.name}; skipped")
+                continue
+            combo, tiling_id = parsed
+            sources.append((combo, tiling_id, path))
 
-    client = client or TilingClient(delay=delay)
+    # Deterministic order regardless of input dir order; dedupe on (combo, id).
+    sources.sort(key=lambda item: (item[0].N, item[0].sym, item[1]))
+    seen: set[tuple[str, int]] = set()
+
     parser = FOLDParser()
-    rng = random.Random(seed)
-
-    manifest_path = out / "raw-manifest.jsonl"
     rows: list[dict[str, Any]] = []
-    existing_ids: set[str] = set()
-    if resume and manifest_path.exists():
-        for line in manifest_path.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if line:
-                rows.append(json.loads(line))
-        existing_ids = {r["id"] for r in rows}
-        progress(f"Resuming: {len(rows)} existing rows in manifest")
+    for combo, tiling_id, path in sources:
+        key = (combo.key, tiling_id)
+        if key in seen:
+            continue
+        seen.add(key)
+        try:
+            fold = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            summary.skipped_invalid += 1
+            progress(f"  warn: {path.name}: {exc}")
+            continue
+        sample_id = f"{dataset_name}-{combo.view_id(tiling_id)}"
+        row = _write_sample(
+            fold=fold,
+            sample_id=sample_id,
+            combo=combo,
+            tiling_id=tiling_id,
+            fold_path=folds_dir / f"{sample_id}.fold",
+            metadata_dir=metadata_dir,
+            parser=parser,
+        )
+        if row is None:
+            summary.skipped_invalid += 1
+            progress(f"  warn: {path.name}: invalid geometry; skipped")
+            continue
+        rows.append(row)
+        summary.saved += 1
+        summary.per_combo[combo.key] = summary.per_combo.get(combo.key, 0) + 1
+        summary.bucket_counts[row["bucket"]] = summary.bucket_counts.get(row["bucket"], 0) + 1
+        for assign, count in row["assignments"].items():
+            summary.assignment_totals[assign] = summary.assignment_totals.get(assign, 0) + count
+        if summary.saved % 500 == 0:
+            progress(f"  saved {summary.saved}")
 
-    summary = BuildSummary(out=str(out), requested=target_count, saved=0, skipped_existing=0)
-
-    for combo_key, target in per_combo_targets.items():
-        combo = combos[combo_key]
-        progress(f"\n=== {combo_key}: target {target} ===")
-        max_id = client.discover_max_id(combo)  # uses MAX_ID_HINTS, no requests
-        summary.max_ids[combo_key] = max_id
-        progress(f"  id sampling ceiling = {max_id}")
-
-        seen_ids: set[int] = set()
-        got = 0
-        misses = 0
-        miss_limit = max(200, target * max_misses_factor)
-        t0 = time.monotonic()
-
-        while got < target and misses < miss_limit:
-            tiling_id = rng.randint(1, max_id)
-            if tiling_id in seen_ids:
-                continue
-            seen_ids.add(tiling_id)
-
-            sample_id = f"{dataset_name}-{combo.view_id(tiling_id)}"
-            fold_path = folds_dir / f"{sample_id}.fold"
-            if sample_id in existing_ids or fold_path.exists():
-                summary.skipped_existing += 1
-                got += 1
-                continue
-
-            try:
-                fold = client.fetch_fold(tiling_id, combo)
-            except TilingNotFound:
-                misses += 1
-                continue
-            except Exception as exc:  # noqa: BLE001 - log and keep going
-                progress(f"  warn: {sample_id}: {exc}")
-                misses += 1
-                continue
-
-            if fold is None:
-                misses += 1
-                continue
-
-            row = _write_sample(
-                fold=fold,
-                sample_id=sample_id,
-                combo=combo,
-                tiling_id=tiling_id,
-                fold_path=fold_path,
-                metadata_dir=metadata_dir,
-                parser=parser,
-            )
-            if row is None:
-                misses += 1
-                continue
-
-            rows.append(row)
-            existing_ids.add(sample_id)
-            summary.saved += 1
-            summary.per_combo[combo_key] = summary.per_combo.get(combo_key, 0) + 1
-            summary.bucket_counts[row["bucket"]] = summary.bucket_counts.get(row["bucket"], 0) + 1
-            for assign, count in row["assignments"].items():
-                summary.assignment_totals[assign] = summary.assignment_totals.get(assign, 0) + count
-            got += 1
-            misses = 0
-
-            if summary.saved % 100 == 0:
-                rate = summary.saved / max(1e-6, time.monotonic() - t0)
-                progress(f"  saved {summary.saved} total ({rate:.1f}/s)")
-
-        if misses >= miss_limit:
-            progress(f"  stopped {combo_key} at {got}/{target} (hit miss limit; range likely exhausted)")
-
-    # Assign global splits deterministically, then persist everything.
     for index, row in enumerate(rows):
-        row["split"] = split_for_index(index, DEFAULT_SPLITS)
+        row["split"] = split_for_index(index, splits)
 
-    _write_manifest(manifest_path, rows)
-    _write_recipe(out, dataset_name, target_count, weights_preset, weights, per_combo_targets, seed)
+    _write_manifest(out / "raw-manifest.jsonl", rows)
+    _write_recipe(out, dataset_name, fold_dirs, splits, summary)
     _write_qa(out, qa_dir, rows, summary)
 
     progress(
-        f"\nDone. saved={summary.saved} skipped={summary.skipped_existing} "
-        f"manifest_rows={len(rows)} -> {out}"
+        f"\nDone. scanned={summary.scanned} saved={summary.saved} "
+        f"skipped={summary.skipped_unparseable_name + summary.skipped_invalid} -> {out}"
     )
     return summary
 
@@ -321,9 +254,10 @@ def _write_sample(
         "labelSource": "search225-exact",
         "trainingEligible": True,
         "notes": [
-            "Exact 22.5-degree flat-foldable tiling from ExplOri 22.5 (SEARCH-22.5).",
-            "M/V/B assignments are mathematically valid by construction; auxiliary/hinge "
-            "creases are preserved as F.",
+            "Exact 22.5-degree flat-foldable tiling from ExplOri 22.5 (SEARCH-22.5), "
+            "reconstructed offline from author-provided tilings databases.",
+            "M/V/B assignments are mathematically valid by construction; hinge "
+            "creases with undetermined M/V are preserved as F.",
         ],
     }
     search225_metadata = {
@@ -388,28 +322,23 @@ def _write_manifest(path: Path, rows: list[dict[str, Any]]) -> None:
 def _write_recipe(
     out: Path,
     dataset_name: str,
-    target_count: int,
-    weights_preset: str,
-    weights: dict[str, float],
-    per_combo_targets: dict[str, int],
-    seed: int,
+    fold_dirs: list[str | Path],
+    splits: dict[str, float],
+    summary: BuildSummary,
 ) -> None:
     recipe = {
         "name": dataset_name,
-        "source": "search225",
-        "sourceUrl": "https://225.designorigami.net",
+        "source": "search225-local-db",
         "adapterVersion": DATASET_VERSION,
-        "seed": seed,
-        "targetCount": target_count,
-        "weightsPreset": weights_preset,
-        "weights": weights,
-        "perComboTargets": per_combo_targets,
-        "splits": DEFAULT_SPLITS,
+        "foldDirs": [str(Path(d).expanduser()) for d in fold_dirs],
+        "splits": splits,
         "family": FAMILY,
         "buckets": [{"name": n, "minEdges": lo, "maxEdges": hi} for n, lo, hi in BUCKET_THRESHOLDS],
+        "perCombo": summary.per_combo,
         "notes": [
-            "Exact flat-foldable 22.5-degree tilings scraped politely (sequentially) from "
-            "the public ExplOri 22.5 API and normalized into the standard dataset-root layout.",
+            "Exact flat-foldable 22.5-degree tilings reconstructed OFFLINE from "
+            "author-provided SEARCH-22.5 tilings databases via db_to_fold.py.",
+            "Never fetch from the public site; it runs on the author's single home machine.",
         ],
     }
     (out / "recipe.json").write_text(json.dumps(recipe, indent=2) + "\n", encoding="utf-8")
@@ -424,7 +353,6 @@ def _write_qa(out: Path, qa_dir: Path, rows: list[dict[str, Any]], summary: Buil
         "splitCounts": _clean_counter(Counter(r.get("split") for r in rows)),
         "assignmentTotals": summary.assignment_totals,
         "perCombo": summary.per_combo,
-        "maxIds": summary.max_ids,
     }
     payload = json.dumps(qa, indent=2, sort_keys=True) + "\n"
     (out / "qa.json").write_text(payload, encoding="utf-8")
