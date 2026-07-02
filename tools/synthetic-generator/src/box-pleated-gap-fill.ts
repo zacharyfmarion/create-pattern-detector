@@ -143,7 +143,7 @@ const RIDGE_EPS = 1e-6;
  * hole. Detect that ring and return its rectangle, or null when the ridges have
  * no 2D ring (a flap whose skeleton already collapses to a point or segment).
  */
-function ringRect(ridges: OriSegment[]): GapRect | null {
+export function ringRect(ridges: OriSegment[]): GapRect | null {
   const horizontal = ridges.filter((s) => Math.abs(s.a.y - s.b.y) < RIDGE_EPS);
   const vertical = ridges.filter((s) => Math.abs(s.a.x - s.b.x) < RIDGE_EPS);
   if (horizontal.length === 0 || vertical.length === 0) return null;
@@ -207,26 +207,28 @@ function onRectSide(s: OriSegment, r: GapRect): boolean {
 }
 
 /**
- * Repair a flap's ridge set. Always fill the rectangular donut hole with the true
- * straight skeleton (spine + the diagonals from each ring corner to the spine).
- * Additionally DELETE the four ring sides when the ring lies entirely on the
- * paper - a true interior donut hole, where the ring is a BP Studio artifact, not
- * a straight-skeleton ridge. An edge/corner flap's box runs off the sheet, so its
- * ring straddles the paper edge; we keep that ring (only adding the fill) because
- * its on-paper side coincides with the edge and removing it breaks the gadget.
+ * Repair a flap's ridge set. BP Studio emits a stretched flap as a small inner
+ * hole wrapped by a river, drawing a rectangular ring for that internal boundary
+ * with the flap's 45-degree bisectors terminating on the ring's corners. That ring
+ * is NOT part of the straight skeleton - conceptually the hole and its surrounding
+ * river are one flap. So when we detect the ring we DELETE its four sides and
+ * rebuild the ring's true straight skeleton (spine + the diagonals from each ring
+ * corner to the spine). With the ring sides gone, each ring corner is just a
+ * collinear pass-through - the outer bisector continues straight into the inner
+ * diagonal - so it stops being a junction, and axial seeds land only on the spine
+ * ends. We always delete the ring sides now, whether the ring sits inside the
+ * paper or straddles an edge (an edge/corner flap): they are axis-aligned and are
+ * omitted from the crease set downstream regardless, so removing them here only
+ * cleans up the axial seeding. `bounds` is unused now but kept for callers.
  */
 export function repairFlapRidgeHole(
   ridges: OriSegment[],
   bounds: { width: number; height: number },
 ): OriSegment[] {
+  void bounds;
   const rect = ringRect(ridges);
   if (!rect) return ridges;
-  const onPaper =
-    rect.x0 >= -RIDGE_EPS &&
-    rect.y0 >= -RIDGE_EPS &&
-    rect.x1 <= bounds.width + RIDGE_EPS &&
-    rect.y1 <= bounds.height + RIDGE_EPS;
-  const kept = onPaper ? ridges.filter((s) => !onRectSide(s, rect)) : ridges;
+  const kept = ridges.filter((s) => !onRectSide(s, rect));
   return [...kept, ...flapRidges(rect)];
 }
 

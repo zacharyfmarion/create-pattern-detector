@@ -101,12 +101,11 @@ export function collectRidges(
   const ridges: OriSegment[] = [];
   const groups: RidgeGroup[] = [];
   const counts: Record<string, number> = {};
-  // A ridge is a straight-skeleton bisector: 45-degree or a non-45 Pythagorean
-  // stretch edge - never axis-aligned. Axis-aligned segments in a source object's
-  // "ridges" are the flap ring/spine sides or paper-edge-coincident stubs; they are
-  // not ridges (the axials run along those directions), so omit them.
+  // Keep every ridge segment, clipped to the paper. Axis-aligned (0/90-degree)
+  // segments are legitimate straight-skeleton ridges too (e.g. a non-square flap's
+  // spine), so we do NOT filter them - the ring-hole repair already drops BP
+  // Studio's spurious ring sides at their source.
   const pushRidge = (g: OriSegment[], a: GridPoint, b: GridPoint): void => {
-    if (Math.abs(b.x - a.x) < EPS || Math.abs(b.y - a.y) < EPS) return; // axis-aligned: not a ridge
     pushClipped(g, a, b, W, H);
   };
   for (const object of packing.layout.objects) {
