@@ -243,6 +243,10 @@ def _write_sample(
         return None
 
     assignment_counts = Counter(fold["edges_assignment"])
+    # A handful of db rows are the "empty tiling" of their symmetry class:
+    # a bare border square with zero creases. Not a crease pattern; skip.
+    if assignment_counts.get("M", 0) + assignment_counts.get("V", 0) == 0:
+        return None
     assignments = {k: int(v) for k, v in sorted(assignment_counts.items())}
     num_edges = len(fold["edges_vertices"])
     num_vertices = len(fold["vertices_coords"])
