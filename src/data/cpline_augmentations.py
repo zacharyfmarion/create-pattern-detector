@@ -135,11 +135,33 @@ V3_NO_GUIDE_GRID_REPLAY_MIX = (
     ("v2-combined-no-grid", 0.05, None),
     ("v2-dark-combined-no-grid", 0.05, None),
 )
+# V4: scope geometry-obfuscating profiles OUT of junction training. In the v3
+# replay mix, 19% of samples had every non-border crease dashed and 27% carried
+# at least one obfuscator (dashes/text/watermark), while the dense line/junction
+# targets stayed full solid geometry — i.e. the model was trained to fire
+# junctions with no ink at the junction point (dash gaps land on vertices ~half
+# the time by construction of _draw_dashed_line). Keeps the photometric/style
+# variety (stage-balanced, line-style) and the ink-preserving issue profiles
+# (faint, ambiguous-mv). Note: with no dashed samples, the line_style head's
+# "dashed" class receives no positives under this mix.
+V4_SOLID_GEOMETRY_REPLAY_MIX = (
+    *(
+        (profile, weight * 0.40, style_variant)
+        for profile, weight, style_variant in AUGMENT_MIXES["stage-balanced"]
+    ),
+    ("line-style", 0.25, None),
+    ("clean", 0.05, None),
+    ("v2-faint", 0.075, None),
+    ("v2-dark-faint", 0.075, None),
+    ("v2-ambiguous-mv", 0.075, None),
+    ("v2-dark-ambiguous-mv", 0.075, None),
+)
 AUGMENT_MIXES["v2-issue-mix"] = V2_AUGMENT_MIX
 AUGMENT_MIXES["v2-dark-issue-mix"] = V2_DARK_AUGMENT_MIX
 AUGMENT_MIXES["v2-all-issue-mix"] = V2_ALL_AUGMENT_MIX
 AUGMENT_MIXES["v2-replay-corrective"] = V2_REPLAY_CORRECTIVE_MIX
 AUGMENT_MIXES["v3-no-guide-grid-replay"] = V3_NO_GUIDE_GRID_REPLAY_MIX
+AUGMENT_MIXES["v4-solid-geometry-replay"] = V4_SOLID_GEOMETRY_REPLAY_MIX
 MIXED_PROFILE_ENTRIES = AUGMENT_MIXES["stage-balanced"]
 MIXED_AUGMENT_PROFILES = tuple(AUGMENT_MIXES) + ("mixed",)
 AUGMENT_PROFILES = (
