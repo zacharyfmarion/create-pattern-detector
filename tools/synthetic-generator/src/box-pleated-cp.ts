@@ -133,7 +133,70 @@ export function collectRidges(
     ridges.push(...filler);
     groups.push({ name: "gap fillers", ridges: filler });
   }
+  // A filler polygon (added after BP packed) can have a bisector that dead-ends in
+  // the paper interior right beside a Pythagorean stretch: the filler did not
+  // exist when BP computed the stretch, so the two were never connected. Ridges
+  // must never terminate in the interior, so connect each such dangling filler
+  // endpoint to the nearest stretch-ridge vertex.
+  const stretchRidges = groups.filter((g) => g.name.startsWith("stretch")).flatMap((g) => g.ridges);
+  const stitches = stitchFillerDangles(filler, stretchRidges, ridges, W, H);
+  if (stitches.length) {
+    ridges.push(...stitches);
+    groups.push({ name: "stitches", ridges: stitches });
+  }
   return { ridges, groups };
+}
+
+/**
+ * Connect dangling filler ridge endpoints to the stretch structure. A dangling
+ * endpoint is an interior (off-paper-edge), degree-1 endpoint of a gap-filler
+ * ridge - a bisector tip with nothing on its far side. For each, add a ridge to
+ * the nearest stretch-ridge vertex, so no ridge terminates in the paper interior.
+ */
+function stitchFillerDangles(
+  fillerRidges: OriSegment[],
+  stretchRidges: OriSegment[],
+  allRidges: OriSegment[],
+  W: number,
+  H: number,
+): OriSegment[] {
+  if (fillerRidges.length === 0 || stretchRidges.length === 0) return [];
+  const E = 1e-6;
+  const same = (a: GridPoint, b: GridPoint): boolean => Math.abs(a.x - b.x) < E && Math.abs(a.y - b.y) < E;
+  const onEdge = (q: GridPoint): boolean =>
+    Math.abs(q.x) < E || Math.abs(q.x - W) < E || Math.abs(q.y) < E || Math.abs(q.y - H) < E;
+  const degree = (q: GridPoint): number => {
+    let d = 0;
+    for (const s of allRidges) {
+      if (same(s.a, q)) d++;
+      if (same(s.b, q)) d++;
+    }
+    return d;
+  };
+  const stretchVerts: GridPoint[] = [];
+  for (const s of stretchRidges) for (const q of [s.a, s.b]) if (!stretchVerts.some((v) => same(v, q))) stretchVerts.push(q);
+
+  const stitches: OriSegment[] = [];
+  const handled = new Set<string>();
+  for (const s of fillerRidges) {
+    for (const q of [s.a, s.b]) {
+      const key = `${q.x},${q.y}`;
+      if (handled.has(key) || onEdge(q) || degree(q) !== 1) continue;
+      let best = Infinity;
+      let target: GridPoint | null = null;
+      for (const v of stretchVerts) {
+        const d = Math.hypot(v.x - q.x, v.y - q.y);
+        if (d < best) {
+          best = d;
+          target = v;
+        }
+      }
+      if (!target) continue;
+      handled.add(key);
+      stitches.push({ a: q, b: target });
+    }
+  }
+  return stitches;
 }
 
 function packingGeometry(packing: BoxPleatedPacking): PackingGeometry {
