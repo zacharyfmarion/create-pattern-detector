@@ -29,11 +29,12 @@ const packing = await generateBoxPleatedPacking({
 const m = buildPackingMolecule(packing); // throws on a rejected packing (nothing to trace)
 
 const events: HingeTraceEvent[] = [];
-const hinges = routeHinges(m, m.sheet, (e) => {
+const rays = routeHinges(m, m.sheet, (e) => {
   if (events.length < maxFrames) events.push(e);
 });
+const nHinges = rays.flatMap((r) => r.path).length;
 const solved = events.some((e) => e.kind === "solved");
-console.log(`routeHinges: ${events.length}${events.length >= maxFrames ? "+ (capped)" : ""} events, ${hinges.length} hinges placed, solved=${solved}`);
+console.log(`routeHinges: ${events.length}${events.length >= maxFrames ? "+ (capped)" : ""} events, ${nHinges} hinge segments, ${rays.length} rays, solved=${solved}`);
 
 const frames = renderHingeTraceFrames(events, m, { pixels });
 const dir = `/tmp/hinge-trace-${seed}`;

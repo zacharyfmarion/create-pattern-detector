@@ -1027,6 +1027,7 @@ export function traceHingeRay(
   hinges: OriSegment[],
   axials: OriSegment[],
   sheet: { width: number; height: number },
+  opts: { allowOffGrid?: boolean } = {},
 ): HingeTrace | null {
   const path: OriSegment[] = [];
   let cur = from;
@@ -1060,8 +1061,9 @@ export function traceHingeRay(
     const hingeDist = hinge ? Math.hypot(hinge.point.x - cur.x, hinge.point.y - cur.y) : Infinity;
 
     if (hinge && hingeDist < rideDist - EPS) {
-      const pt = snapToGrid(hinge.point);
-      if (!pt) return null;
+      const snapped = snapToGrid(hinge.point);
+      if (!snapped && !opts.allowOffGrid) return null;
+      const pt = snapped ?? hinge.point;
       path.push({ a: cur, b: pt });
       return { path, terminus: pt, terminusType: "hinge", steps: steps + stepLen(cur, pt) };
     }
@@ -1070,8 +1072,12 @@ export function traceHingeRay(
       path.push({ a: cur, b: ride.point });
       return { path, terminus: ride.point, terminusType: "edge", steps: steps + stepLen(cur, ride.point) };
     }
-    const pt = snapToGrid(ride.point);
-    if (!pt) return null; // off-grid reflection or junction
+    // A reflection off a non-45 Pythagorean stretch ridge can land sub-grid; such a
+    // hinge is still valid (it reflects over the stretch), so allowOffGrid keeps the
+    // raw point and marches on instead of discarding the whole ray.
+    const snapped = snapToGrid(ride.point);
+    if (!snapped && !opts.allowOffGrid) return null; // off-grid reflection or junction
+    const pt = snapped ?? ride.point;
     path.push({ a: cur, b: pt });
     steps += stepLen(cur, pt);
     if (ride.type === "junction") return { path, terminus: pt, terminusType: "junction", steps };

@@ -413,9 +413,10 @@ export function traceGeneration(packing: BoxPleatedPacking): { stages: GenStage[
   }
 
   // Hinges (Phase 2), then the final M/V assignment (recolours the whole CP).
-  const hinges = routeHinges(molecule, sheet);
+  const hingeRays = routeHinges(molecule, sheet);
+  const hinges = hingeRays.flatMap((r) => r.path);
   if (hinges.length) stages.push({ name: "hinges", creases: clip(hinges).map((s) => ({ a: s.a, b: s.b, kind: "hinge" as const })) });
-  const edges = assignCreases({ ...molecule, hinges });
+  const edges = assignCreases({ ...molecule, hinges }, hingeRays);
   stages.push({ name: "assignment (M/V)", creases: edges.map((e) => ({ a: e.a, b: e.b, kind: e.type, mv: e.mv })), recolor: true });
 
   return { stages, sheet };
