@@ -503,7 +503,28 @@ export function routeHingesSteps(m: BoxPleatedMolecule, sheet: { width: number; 
  * resulting-frontier order (edge-terminating routes tend to sort first). Falls back
  * to the best partial hinge set seen if no full solution is found within budget.
  */
-export function routeHinges(m: BoxPleatedMolecule, sheet: { width: number; height: number }): OriSegment[] {
+/** One recorded event of the hinge router's backtracking search (for tracing). */
+export interface HingeTraceEvent {
+  /** enter=descend into a node · try=commit a placement and recurse · backtrack=that
+   * placement failed, undo it · solved=frontier empty · exhausted=budget hit. */
+  kind: "enter" | "try" | "backtrack" | "solved" | "exhausted";
+  depth: number;
+  budget: number;
+  /** Hinges committed at this node (before the placement). */
+  hinges: OriSegment[];
+  /** Failing vertices still to resolve. */
+  frontier: GridPoint[];
+  /** The frontier vertex being worked (try/backtrack). */
+  vertex: GridPoint | null;
+  /** The placement (rays) being tried / undone (try/backtrack). */
+  placement: OriSegment[];
+}
+
+export function routeHinges(
+  m: BoxPleatedMolecule,
+  sheet: { width: number; height: number },
+  onEvent?: (e: HingeTraceEvent) => void,
+): OriSegment[] {
   let budget = 2500;
   let best: { hinges: OriSegment[]; score: number } = { hinges: [], score: Infinity };
 
@@ -517,10 +538,17 @@ export function routeHinges(m: BoxPleatedMolecule, sheet: { width: number; heigh
       .map((t) => t.path);
   };
 
-  const solve = (hinges: OriSegment[], edges: AssignedEdge[], fr: GridPoint[]): OriSegment[] | null => {
+  const solve = (hinges: OriSegment[], edges: AssignedEdge[], fr: GridPoint[], depth: number): OriSegment[] | null => {
+    onEvent?.({ kind: "enter", depth, budget, hinges: [...hinges], frontier: [...fr], vertex: null, placement: [] });
     if (fr.length < best.score) best = { hinges: [...hinges], score: fr.length };
-    if (fr.length === 0) return hinges;
-    if (budget-- <= 0) return null;
+    if (fr.length === 0) {
+      onEvent?.({ kind: "solved", depth, budget, hinges: [...hinges], frontier: [...fr], vertex: null, placement: [] });
+      return hinges;
+    }
+    if (budget-- <= 0) {
+      onEvent?.({ kind: "exhausted", depth, budget, hinges: [...hinges], frontier: [...fr], vertex: null, placement: [] });
+      return null;
+    }
 
     // Branch on the first frontier vertex that has a placement resolving it; a
     // vertex with none is (for now) unroutable and deferred like the saturated
@@ -537,7 +565,7 @@ export function routeHinges(m: BoxPleatedMolecule, sheet: { width: number; heigh
         .map((add) => {
           const next = [...hinges, ...add];
           const nedges = assignCreases({ ...m, hinges: next });
-          return { next, nedges, nfr: hingeFrontier(m, next, nedges, sheet) };
+          return { add, next, nedges, nfr: hingeFrontier(m, next, nedges, sheet) };
         })
         .filter((c) => !c.nfr.some((p) => samePoint(p, v))) // must discharge v
         .sort((a, b) => a.nfr.length - b.nfr.length);
@@ -545,8 +573,10 @@ export function routeHinges(m: BoxPleatedMolecule, sheet: { width: number; heigh
       if (scored.length === 0) continue; // v not resolvable now - try another vertex
 
       for (const c of scored) {
-        const r = solve(c.next, c.nedges, c.nfr);
+        onEvent?.({ kind: "try", depth, budget, hinges: [...hinges], frontier: [...fr], vertex: v, placement: c.add });
+        const r = solve(c.next, c.nedges, c.nfr, depth + 1);
         if (r) return r;
+        onEvent?.({ kind: "backtrack", depth, budget, hinges: [...hinges], frontier: [...fr], vertex: v, placement: c.add });
         if (budget <= 0) return null;
       }
       return null; // committed to v, exhausted its options -> backtrack
@@ -555,7 +585,7 @@ export function routeHinges(m: BoxPleatedMolecule, sheet: { width: number; heigh
   };
 
   const edges0 = assignCreases({ ...m, hinges: [] });
-  const solved = solve([], edges0, hingeFrontier(m, [], edges0, sheet));
+  const solved = solve([], edges0, hingeFrontier(m, [], edges0, sheet), 0);
   return solved ?? best.hinges;
 }
 
