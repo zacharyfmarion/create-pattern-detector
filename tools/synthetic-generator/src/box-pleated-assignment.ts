@@ -829,14 +829,19 @@ function assignHinges(m: BoxPleatedMolecule, edges: AssignedEdge[]): void {
       byVertex.get(k)!.push(e);
     }
   }
-  const byKey = new Map<string, AssignedEdge>();
-  for (const e of edges) byKey.set(segKey(e.a, e.b), e);
-
   for (const hinge of m.hinges) {
     // The hinge originates where it was created (hinge.a, the failing junction).
     const origin = hinge.a;
-    const units = unitsAlong(hinge.a, hinge.b).filter((u) => byKey.get(segKey(u.a, u.b))?.type === "hinge");
-    units.sort((u, v) => distTo(midpoint(u), origin) - distTo(midpoint(v), origin));
+    // Walk the hinge's ACTUAL creases: the hinge-type edges lying on the hinge
+    // segment, ordered outward from the origin. planarize splits a hinge at every
+    // crossing, and those crossings are sub-grid when the hinge runs along a non-45
+    // Pythagorean stretch direction (e.g. a hinge reflected off a stretch ridge). So
+    // we must break the hinge at its real crossings and alternate colours over those
+    // pieces, rather than step along a synthetic integer axis/45-degree grid (which
+    // walks off a non-45 hinge and matches nothing, leaving it unassigned).
+    const parts = edges
+      .filter((e) => e.type === "hinge" && onSegment(e.a, hinge.a, hinge.b) && onSegment(e.b, hinge.a, hinge.b))
+      .sort((e, f) => distTo(midpoint(e), origin) - distTo(midpoint(f), origin));
 
     // First color satisfies Maekawa at the origin given already-assigned creases.
     const incident = byVertex.get(pointKey(origin)) ?? [];
@@ -851,12 +856,24 @@ function assignHinges(m: BoxPleatedMolecule, edges: AssignedEdge[]): void {
     else if (Math.abs(M - (V + 1)) === 2) color = "V";
     else color = M <= V ? "M" : "V";
 
-    for (const u of units) {
-      const e = byKey.get(segKey(u.a, u.b));
-      if (e && e.mv == null) e.mv = color; // keep any color the constraint solve already set
+    // Alternate M/V outward along the hinge; keep any color the constraint solve set.
+    for (const part of parts) {
+      if (part.mv == null) part.mv = color;
       color = color === "M" ? "V" : "M";
     }
   }
+}
+
+/** True when point p lies on the segment [a,b] (collinear and within its extent). */
+function onSegment(p: GridPoint, a: GridPoint, b: GridPoint): boolean {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const len2 = dx * dx + dy * dy;
+  if (len2 < EPS) return false;
+  const cross = (p.x - a.x) * dy - (p.y - a.y) * dx;
+  if (Math.abs(cross) > EPS * Math.sqrt(len2)) return false; // off the line
+  const t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2;
+  return t >= -EPS && t <= 1 + EPS;
 }
 
 // ---------------------------------------------------------------------------
@@ -921,16 +938,6 @@ function mergeCollinear(ridges: OriSegment[]): OriSegment[] {
         b: snapPoint({ x: base.x + u.x * (hi - t0base), y: base.y + u.y * (hi - t0base) }),
       });
     }
-  }
-  return out;
-}
-
-function unitsAlong(a: GridPoint, b: GridPoint): OriSegment[] {
-  const sd = { x: Math.sign(b.x - a.x), y: Math.sign(b.y - a.y) };
-  const n = Math.round(Math.max(Math.abs(b.x - a.x), Math.abs(b.y - a.y)));
-  const out: OriSegment[] = [];
-  for (let i = 0; i < n; i++) {
-    out.push({ a: { x: a.x + sd.x * i, y: a.y + sd.y * i }, b: { x: a.x + sd.x * (i + 1), y: a.y + sd.y * (i + 1) } });
   }
   return out;
 }
