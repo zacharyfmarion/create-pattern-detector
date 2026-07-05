@@ -84,7 +84,13 @@ export function propagateAxials(
     p.x >= -EPS && p.y >= -EPS && p.x <= sheet.width + EPS && p.y <= sheet.height + EPS;
 
   for (const seed of seeds) {
-    for (const dir of AXIS_DIRS) {
+    // A seed that sits on a stretch corner is the tip of a stretched (non-45)
+    // flap whose axis runs into the parallelogram along an OFF-axis direction.
+    // marchRay ignores ridges at a ray's own origin (t<=EPS), so an axis-aligned
+    // ray fired from the seed can never reflect off the arm it starts on - the
+    // stretch axis would be missing. Emit it explicitly: reflect the axis dirs
+    // off each incident arm and keep the ones pointing into the stretch sector.
+    for (const dir of [...AXIS_DIRS, ...stretchSeedDirs(seed, ridges)]) {
       let from = seed;
       let d = dir;
       for (let bounce = 0; bounce < MAX_BOUNCES; bounce++) {
@@ -131,6 +137,62 @@ export function propagateAxials(
   // an axial). Revisit when we wire crease assignment.
   const axials = subtractRidgeOverlaps(interior, ridges);
   return { axials, edgeAxials, seeds, junctionTerminations, offGrid, reflections };
+}
+
+/**
+ * Extra axial launch directions for a seed sitting on a Pythagorean-stretch
+ * corner. The stretch flap's axis runs into the parallelogram along an off-axis
+ * direction that is the reflection of an axis-aligned ray across one of the two
+ * arms meeting at the corner. We reflect all four axis dirs across each incident
+ * stretch arm (non-axis AND non-45 ridge) and keep a reflected direction only if
+ * it points strictly INTO the sector spanned by the two arms (the parallelogram
+ * interior) - that keeps the stretch axis (e.g. (4,3)) and drops the mirror-image
+ * directions that reflect back out of the stretch. Returns [] for ordinary seeds.
+ */
+function stretchSeedDirs(seed: GridPoint, ridges: OriSegment[]): GridPoint[] {
+  const arms: GridPoint[] = [];
+  for (const r of ridges) {
+    let o: GridPoint | null = null;
+    if (samePoint(r.a, seed)) o = r.b;
+    else if (samePoint(r.b, seed)) o = r.a;
+    if (!o) continue;
+    const dx = o.x - seed.x;
+    const dy = o.y - seed.y;
+    const len = Math.hypot(dx, dy);
+    if (len < EPS) continue;
+    if (Math.abs(dx) < EPS || Math.abs(dy) < EPS) continue; // axis-aligned: not a stretch arm
+    if (Math.abs(Math.abs(dx) - Math.abs(dy)) < EPS) continue; // 45-degree: not a stretch arm
+    arms.push({ x: dx / len, y: dy / len });
+  }
+  if (arms.length < 2) return [];
+  const ang = (p: GridPoint): number => Math.atan2(p.y, p.x);
+  const inSector = (d: GridPoint): boolean => {
+    const da = ang(d);
+    for (let i = 0; i < arms.length; i++) {
+      for (let j = i + 1; j < arms.length; j++) {
+        let lo = ang(arms[i]);
+        let hi = ang(arms[j]);
+        if (lo > hi) [lo, hi] = [hi, lo];
+        if (hi - lo >= Math.PI - EPS) continue; // reflex span: interior is the other side
+        if (da > lo + EPS && da < hi - EPS) return true;
+      }
+    }
+    return false;
+  };
+  const out: GridPoint[] = [];
+  const seen = new Set<string>();
+  for (const arm of arms) {
+    for (const ax of AXIS_DIRS) {
+      const d = reflect(ax, arm);
+      if (Math.abs(d.x) < EPS || Math.abs(d.y) < EPS) continue; // reflected back to an axis dir
+      if (!inSector(d)) continue;
+      const key = `${Math.round(d.x * 1e5)},${Math.round(d.y * 1e5)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(d);
+    }
+  }
+  return out;
 }
 
 /** Snap a point to the integer grid if it is within float-dust tolerance, else null. */
