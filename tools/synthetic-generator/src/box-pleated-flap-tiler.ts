@@ -15,7 +15,7 @@
 //
 // Regions are small, so an exact top-left-anchored backtracking tiler suffices.
 
-import type { OriSegment } from "./ori-parser.ts";
+import type { GridPoint, OriSegment } from "./ori-parser.ts";
 import type { RegionEdges } from "./box-pleated-region-fixtures.ts";
 import { flapRidges, type GapRect } from "./box-pleated-gap-fill.ts";
 
@@ -29,6 +29,14 @@ export interface TilingResult {
    * boundary (a point interior to neither skeleton).
    */
   ridgesByFlap: OriSegment[][];
+  /**
+   * Axial-seed centers per filler flap (parallel to `flaps`): the straight-skeleton
+   * convergence points (spine endpoints) of each flap's REFLECTED full rectangle.
+   * For an edge/corner flap these land on (or beyond) the paper boundary - the
+   * real flap center, which the clipped `ridgesByFlap` no longer carries because
+   * its on-edge spine is dropped. propagateAxials marches an off-paper center in.
+   */
+  centersByFlap: GridPoint[][];
   solved: boolean;
 }
 
@@ -80,16 +88,17 @@ export function tileEmptyCells(occupied: boolean[][], W: number, H: number): Til
   // only be tiled by even-area flaps, so an odd total area is untileable. Cheap
   // reject avoids exhausting the backtracker on the common odd-interior void.
   if (!touchesSheetEdge(grid, W, H) && emptyArea(grid, W, H) % 2 === 1) {
-    return { flaps: [], ridges: [], ridgesByFlap: [], solved: false };
+    return { flaps: [], ridges: [], ridgesByFlap: [], centersByFlap: [], solved: false };
   }
   return tile(grid, W, H, freeFn);
 }
 
 function tile(occupied: boolean[][], W: number, H: number, freeFn: FreeSidesFn): TilingResult {
   const flaps = solve(occupied, W, H, freeFn, { nodes: 0 });
-  if (!flaps) return { flaps: [], ridges: [], ridgesByFlap: [], solved: false };
-  const ridgesByFlap = flaps.map((f) => croppedFlapRidges(f, freeFn));
-  return { flaps, ridges: ridgesByFlap.flat(), ridgesByFlap, solved: true };
+  if (!flaps) return { flaps: [], ridges: [], ridgesByFlap: [], centersByFlap: [], solved: false };
+  const ridgesByFlap = flaps.map((f) => croppedFlapRidges(f, freeFn(f)));
+  const centersByFlap = flaps.map((f) => flapCenters(f, freeFn(f)));
+  return { flaps, ridges: ridgesByFlap.flat(), ridgesByFlap, centersByFlap, solved: true };
 }
 
 /** Backtracking exact tiling. Returns the flap list, or null if untileable / budget exhausted. */
@@ -136,23 +145,43 @@ function flapValid(r: GapRect, freeFn: FreeSidesFn): boolean {
   return Math.min(fullW, fullH) % 2 === 0;
 }
 
-/** Ridge creases of a placed flap: skeleton of the reflected full rect, cropped to the flap. */
-function croppedFlapRidges(r: GapRect, freeFn: FreeSidesFn): OriSegment[] {
+/** The flap reflected across its paper-boundary (free) sides - its true full rectangle. */
+function fullRect(r: GapRect, free: FreeSides): GapRect {
   const w = r.x1 - r.x0;
   const h = r.y1 - r.y0;
-  const free = freeFn(r);
-  const full: GapRect = {
+  return {
     x0: free.left ? r.x0 - w : r.x0,
     x1: free.right ? r.x1 + w : r.x1,
     y0: free.top ? r.y0 - h : r.y0,
     y1: free.bottom ? r.y1 + h : r.y1,
   };
+}
+
+/** Ridge creases of a placed flap: skeleton of the reflected full rect, cropped to the flap. */
+function croppedFlapRidges(r: GapRect, free: FreeSides): OriSegment[] {
+  const full = fullRect(r, free);
   const out: OriSegment[] = [];
   for (const ridge of flapRidges(full)) {
     const seg = clipToRect(ridge, r);
     if (seg && !onFreeBoundary(seg, r, free)) out.push(seg);
   }
   return out;
+}
+
+/**
+ * The flap's axial-seed centers: the straight-skeleton convergence points of its
+ * full (reflected) rectangle - the endpoints of the skeleton spine, or the single
+ * meeting point of a square flap. These are the true flap centers (on-paper for a
+ * valid flap); a corner flap's off-paper spine endpoint is kept so propagateAxials
+ * can march it inward.
+ */
+function flapCenters(r: GapRect, free: FreeSides): GridPoint[] {
+  const full = fullRect(r, free);
+  const spine = flapRidges(full).find(
+    (s) => Math.abs(s.a.x - s.b.x) < EPS || Math.abs(s.a.y - s.b.y) < EPS,
+  );
+  if (spine) return [spine.a, spine.b];
+  return [{ x: (full.x0 + full.x1) / 2, y: (full.y0 + full.y1) / 2 }];
 }
 
 // ---------------------------------------------------------------------------

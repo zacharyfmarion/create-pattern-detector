@@ -7,7 +7,7 @@ import {
   type GapRect,
   type OccupiedPolygon,
 } from "./box-pleated-gap-fill.ts";
-import type { OriSegment } from "./ori-parser.ts";
+import type { GridPoint, OriSegment } from "./ori-parser.ts";
 
 const EPS = 1e-9;
 import type { BpOptimizerHierarchy, BpOptimizerRequest, BpOptimizerResult } from "./bp-studio-optimizer.ts";
@@ -277,6 +277,13 @@ export interface PackingGapFill {
    * fillers merely touch on their shared boundary is never seeded.
    */
   ridgesByFlap: OriSegment[][];
+  /**
+   * Axial-seed centers for the filler flaps (flattened): each filler's straight-
+   * skeleton convergence points, computed from its reflected full rectangle. These
+   * are the authoritative centers - an edge/corner filler's center sits on (or just
+   * beyond) the paper boundary, which the clipped `ridgesByFlap` no longer carries.
+   */
+  centers: GridPoint[];
   /** True when all empty paper was filled (the packing is complete, rule #4). */
   complete: boolean;
   /** Empty regions that could not be filled (the packing should be rejected). */
@@ -296,6 +303,7 @@ export function fillPackingGaps(packing: BoxPleatedPacking): PackingGapFill {
     flaps: result.flaps,
     ridges: result.ridges,
     ridgesByFlap: result.ridgesByFlap,
+    centers: result.centersByFlap.flat(),
     complete: result.resolved,
     unresolved: result.unresolved,
   };

@@ -224,7 +224,12 @@ function packingGeometry(packing: BoxPleatedPacking): PackingGeometry {
     // real convergence points instead of the (now-deleted) ring corners.
     rawSeeds.push(...ridgeJunctions(repairFlapRidgeHole(object.ridges.map((l) => seg(l[0], l[1])), sheet)));
   }
-  for (const group of gap.ridgesByFlap) rawSeeds.push(...ridgeJunctions(group));
+  // Filler flaps: seed from the centers the tiler carried out (the convergence
+  // points of each filler's reflected full rectangle). These subsume what
+  // ridgeJunctions(ridgesByFlap) used to find - identical for interior fillers,
+  // and additionally recovering the on/off-paper center of an edge/corner filler,
+  // whose clipped ridges dropped their on-edge spine.
+  rawSeeds.push(...gap.centers);
   const seenSeed = new Set<string>();
   const seeds = rawSeeds.filter((s) => {
     const k = `${s.x},${s.y}`;
