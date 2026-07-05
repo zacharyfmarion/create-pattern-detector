@@ -171,18 +171,22 @@ function applyBigLittleBig(m: BoxPleatedMolecule, edges: AssignedEdge[]): void {
     }
   });
 
-  // Rule Y - Y-junction: at a degree-3 vertex of two ridges + one axial (the ridge
-  // bends rather than crossing straight through), both ridge arms take the axial's
-  // colour. Neither the bisector nor Big-Little-Big applies at a degree-3 vertex,
-  // so this is the anchor there. Apply first so it wins over any far-end colour.
+  // Rule Y - Y-junction: at a vertex of two ridges + one axial, both ridge arms
+  // take the axial's colour. Neither the bisector nor Big-Little-Big applies there,
+  // so this is the anchor. Apply first so it wins over any far-end colour. We allow
+  // any number of hinges at the same vertex (a hinge often emanates from the same
+  // flap-center junction): the ridge/axial relationship is unchanged, and requiring
+  // strict degree 3 previously skipped these, leaving an edge-ward ridge uncoloured.
+  // The vertex must be ridges + axial + hinges only (a boundary vertex is handled
+  // elsewhere).
   for (const [, list] of inc) {
-    if (list.length !== 3) continue;
-    const ridgeIdx = list.filter((x) => edges[x.i].type === "ridge").map((x) => x.i);
-    const axialIdx = list.filter((x) => edges[x.i].type === "axial").map((x) => x.i);
-    if (ridgeIdx.length === 2 && axialIdx.length === 1) {
-      union(ridgeIdx[0], axialIdx[0], 0);
-      union(ridgeIdx[1], axialIdx[0], 0);
-    }
+    const ridges = list.filter((x) => edges[x.i].type === "ridge");
+    const axials = list.filter((x) => edges[x.i].type === "axial");
+    const hinges = list.filter((x) => edges[x.i].type === "hinge");
+    if (ridges.length !== 2 || axials.length !== 1) continue;
+    if (ridges.length + axials.length + hinges.length !== list.length) continue;
+    union(ridges[0].i, axials[0].i, 0);
+    union(ridges[1].i, axials[0].i, 0);
   }
 
   // Rule 0 - Axial-bisector anchor: a ridge that bisects the angle between its two
