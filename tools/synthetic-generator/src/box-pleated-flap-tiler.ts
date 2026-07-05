@@ -157,13 +157,23 @@ function fullRect(r: GapRect, free: FreeSides): GapRect {
   };
 }
 
-/** Ridge creases of a placed flap: skeleton of the reflected full rect, cropped to the flap. */
+/**
+ * Ridge creases of a placed flap: skeleton of the reflected full rect, cropped to
+ * the flap. We KEEP the ridge pieces that lie along a free (paper-boundary) side -
+ * an edge/corner flap's on-edge spine. It is not a fold, but it must stay in the
+ * ridge set through axial + pleat propagation so it behaves like an interior
+ * spine: subtractRidgeOverlaps removes the axial that runs along it, and the
+ * offset guard "do not offset from a point on a ridge" stops it spawning pleats.
+ * Dropping it early is what let an edge flap's spine leak a spurious edge-axial and
+ * pleat. It is classified as "boundary" (not a fold) at the final assignment, since
+ * its midpoint lies on the paper edge.
+ */
 function croppedFlapRidges(r: GapRect, free: FreeSides): OriSegment[] {
   const full = fullRect(r, free);
   const out: OriSegment[] = [];
   for (const ridge of flapRidges(full)) {
     const seg = clipToRect(ridge, r);
-    if (seg && !onFreeBoundary(seg, r, free)) out.push(seg);
+    if (seg) out.push(seg);
   }
   return out;
 }
@@ -237,19 +247,4 @@ function clipToRect(seg: OriSegment, r: GapRect): OriSegment | null {
     a: { x: seg.a.x + t0 * dx, y: seg.a.y + t0 * dy },
     b: { x: seg.a.x + t1 * dx, y: seg.a.y + t1 * dy },
   };
-}
-
-/** A ridge piece lying along a free (paper-boundary) side is the on-edge spine - not a fold. */
-function onFreeBoundary(
-  seg: OriSegment,
-  r: GapRect,
-  free: { left: boolean; right: boolean; top: boolean; bottom: boolean },
-): boolean {
-  const vertical = Math.abs(seg.a.x - seg.b.x) < EPS;
-  const horizontal = Math.abs(seg.a.y - seg.b.y) < EPS;
-  if (vertical && free.left && Math.abs(seg.a.x - r.x0) < EPS) return true;
-  if (vertical && free.right && Math.abs(seg.a.x - r.x1) < EPS) return true;
-  if (horizontal && free.top && Math.abs(seg.a.y - r.y0) < EPS) return true;
-  if (horizontal && free.bottom && Math.abs(seg.a.y - r.y1) < EPS) return true;
-  return false;
 }
