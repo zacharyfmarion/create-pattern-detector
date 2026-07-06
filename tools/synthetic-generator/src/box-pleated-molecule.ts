@@ -286,7 +286,12 @@ function offsetRound(
     // pleats live in the rotated grid (not handled yet), so skip it as a source.
     if (Math.abs(dir.x) > EPS && Math.abs(dir.y) > EPS) continue;
     const perp = { x: -dir.y, y: dir.x };
-    const steps = Math.round(Math.hypot(src.b.x - src.a.x, src.b.y - src.a.y));
+    // Walk only integer points that lie ON the source. A pleat that reflected off a
+    // non-45 stretch arm ends off-grid (non-integer length, e.g. 4.5), and rounding
+    // that UP would place the last walk point PAST the arm - inside the stretch -
+    // seeding a phantom pleat there. floor keeps the walk on the segment (unchanged
+    // for the integer-length on-grid sources, where round == floor).
+    const steps = Math.floor(Math.hypot(src.b.x - src.a.x, src.b.y - src.a.y) + EPS);
     for (let i = 0; i <= steps; i++) {
       const base = { x: src.a.x + dir.x * i, y: src.a.y + dir.y * i };
       // Do not offset from a walk point that lies on a ridge - that is where the
@@ -344,8 +349,11 @@ function marchPleat(
     for (let bounce = 0; bounce < MAX_BOUNCES; bounce++) {
       const hit = marchPleatRay(from, d, ridges, creases, sheet);
       if (!hit) break;
-      const point = snapToGrid(hit.point);
-      if (!point) break; // off-grid reflection: stop rather than emit a sub-grid crease
+      // Reflecting over a non-45 stretch ridge sends the pleat off-axis, so its next
+      // landing is off-grid. That is a real (rotated-grid) pleat over the stretch, so
+      // keep the raw point and march on rather than dropping it - the pleat analog of
+      // the axial/hinge allowOffGrid handling. Snap away float dust when on-grid.
+      const point = snapToGrid(hit.point) ?? hit.point;
       addSegment(out, seen, from, point);
       if (hit.type !== "ridge") break; // crease or boundary: stop
       d = reflect(d, hit.ridgeDir!);
@@ -1080,12 +1088,22 @@ export function failingJunctions(adj: Map<string, GridPoint[]>, sheet: { width: 
  * or an off-grid river crossing the grid between lattice points) and should be
  * rejected.
  */
-export function offGridJunctions(creases: OriSegment[]): GridPoint[] {
+export function offGridJunctions(creases: OriSegment[], ridges: OriSegment[] = []): GridPoint[] {
   const adj = planarize(creases);
+  // Stretch arms: non-axis, non-45 ridges. When an axial or pleat reflects over one it
+  // lands ON the arm at a fractional (off-grid) point - a legitimate reflection vertex,
+  // not a lattice break (the crease returns to the grid past it). So an off-grid vertex
+  // lying on a stretch arm is allowed; every other off-grid junction is still rejected.
+  const stretchRidges = ridges.filter((r) => {
+    const dx = Math.abs(r.b.x - r.a.x);
+    const dy = Math.abs(r.b.y - r.a.y);
+    return dx > EPS && dy > EPS && Math.abs(dx - dy) > EPS;
+  });
   const out: GridPoint[] = [];
   for (const [vk, neighbors] of adj) {
     const v = parseKey(vk);
     if (Math.abs(v.x - Math.round(v.x)) < GRID_EPS && Math.abs(v.y - Math.round(v.y)) < GRID_EPS) continue;
+    if (stretchRidges.some((r) => pointOnSegment(v, r))) continue; // reflection over a stretch arm
     // Count distinct undirected edge directions; >= 2 means a real junction.
     const dirs: GridPoint[] = [];
     for (const n of neighbors) {

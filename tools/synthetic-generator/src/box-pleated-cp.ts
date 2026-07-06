@@ -256,7 +256,7 @@ function packingGeometry(packing: BoxPleatedPacking): PackingGeometry {
     seg({ x: 0, y: H }, { x: 0, y: 0 }),
   ];
 
-  const offGrid = offGridJunctions([...ridges, ...axialFamily]);
+  const offGrid = offGridJunctions([...ridges, ...axialFamily], ridges);
 
   // Build the molecule from the CLIPPED geometry so no off-paper crease (e.g. an
   // edge flap's off-paper spine) leaks into the assignment as a dangling stub.
