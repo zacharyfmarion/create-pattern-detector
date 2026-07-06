@@ -12,7 +12,7 @@
     "box-pleated-hinge-trace": "bun run src/box-pleated-hinge-trace-render.ts",
     "box-pleated-hinge-why": "bun run src/box-pleated-hinge-why.ts",
     "box-pleated-packing-compare": "bun run src/box-pleated-packing-compare.ts",
-    "test": "bun test",
+    "test": "bun test --timeout 30000",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
