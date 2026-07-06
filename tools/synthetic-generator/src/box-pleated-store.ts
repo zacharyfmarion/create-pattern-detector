@@ -75,6 +75,49 @@ export async function packForSeed(seed: number): Promise<BoxPleatedPacking> {
   return generateBoxPleatedPacking(configForSeed(seed));
 }
 
+/**
+ * Scale a packing's geometry by an integer factor (the "grid doubling" lever). All
+ * coordinates and lengths multiply by k, so the packing stays valid (integers stay
+ * integers) but its molecule fills the finer grid with more pleats - pushing it up
+ * the grid/complexity axis for near-free (assignment is budget-bound, ~1x slower).
+ */
+export function scalePacking(packing: BoxPleatedPacking, k: number): BoxPleatedPacking {
+  const sp = <T extends { x: number; y: number }>(p: T): T => ({ ...p, x: p.x * k, y: p.y * k });
+  const sl = (l: [{ x: number; y: number }, { x: number; y: number }]): unknown => [sp(l[0]), sp(l[1])];
+  return {
+    ...packing,
+    id: `${packing.id}-${k}x`,
+    sheet: { ...packing.sheet, width: packing.sheet.width * k, height: packing.sheet.height * k },
+    flaps: packing.flaps.map((f) => ({ ...f, x: f.x * k, y: f.y * k, width: f.width * k, height: f.height * k, radius: f.radius * k })),
+    tree: {
+      ...packing.tree,
+      nodes: packing.tree.nodes.map((n) => {
+        const wh = n as unknown as { width?: number; height?: number };
+        return { ...n, lengthToParent: n.lengthToParent * k, ...(wh.width !== undefined ? { width: wh.width * k, height: wh.height! * k } : {}) };
+      }),
+    },
+    layout: {
+      ...packing.layout,
+      objects: packing.layout.objects.map((o) => ({
+        ...o,
+        ridges: o.ridges.map(sl) as typeof o.ridges,
+        axisParallel: (o.axisParallel ?? []).map(sl) as typeof o.axisParallel,
+        contours: o.contours.map((c) => ({ outer: c.outer.map(sp), inner: c.inner?.map((ring) => ring.map(sp)) })),
+      })),
+    },
+  };
+}
+
+/** Deterministic [0,1) hash of a seed (uncorrelated with seed%3 leaf-count). */
+function seedHash(seed: number): number {
+  return (Math.imul(seed ^ 0x9e3779b9, 2654435761) >>> 0) / 4294967296;
+}
+
+/** Deterministically decide whether to emit this seed's packing doubled (Stage B). */
+export function shouldDouble(seed: number, fraction: number): boolean {
+  return fraction > 0 && seedHash(seed) < fraction;
+}
+
 /** All seeds currently in the store (from the sharded file names). */
 export async function* storedSeeds(store: string = PACKING_STORE): AsyncGenerator<number> {
   const glob = new Bun.Glob("*/bp-*.json.gz");

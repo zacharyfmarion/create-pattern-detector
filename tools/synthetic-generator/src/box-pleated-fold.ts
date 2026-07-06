@@ -12,6 +12,8 @@ export interface BoxPleatedFoldMeta {
   id: string;
   seed: number;
   leafCount: number;
+  /** Grid-scale factor applied to the packing (1 = as generated, 2 = doubled). */
+  scale: number;
 }
 
 /** Quality summary of a box-pleat CP (also embedded in the FOLD metadata). */
@@ -83,6 +85,7 @@ export function boxPleatedCpToFold(cp: PackingCP, meta: BoxPleatedFoldMeta): FOL
       id: meta.id,
       seed: meta.seed,
       leafCount: meta.leafCount,
+      scale: meta.scale,
       sheet: { width: W, height: H },
       quality,
     },

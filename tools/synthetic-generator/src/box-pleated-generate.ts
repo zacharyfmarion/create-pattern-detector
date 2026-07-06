@@ -1,26 +1,28 @@
-// Batch generator for box-pleat crease-pattern training data.
+// Stage B: read packings from the store, assign M/V, and write box-pleat crease
+// patterns as FOLD training data. This is the RE-RUNNABLE step - improving the
+// assignment/geometry never requires regenerating packings (Stage A owns those).
 //
-//   bun run src/box-pleated-generate.ts --count 1000 --out data/output/box-pleated [--seed 60000]
+//   bun run src/box-pleated-generate.ts --out data/output/box-pleated
+//   bun run src/box-pleated-generate.ts --out … --double-fraction 0.5 --limit 5000
 //
-// Deterministically walks seeds from --seed, builds each packing's CP, and for
-// every VALID one writes a normalized FOLD to <out>/folds/<id>.fold plus a
-// per-CP metadata JSON, appending a row to <out>/manifest.jsonl. Invalid
-// candidates are counted by rejection reason (incomplete / off-grid). A run
-// summary (yield, rejection breakdown, quality distribution) is written to
-// <out>/summary.json. Crash-safe: a throwing candidate is counted and skipped.
+// For each stored packing it deterministically decides (by seed hash) whether to
+// emit a DOUBLED variant (--double-fraction, default 0.5) - the grid-doubling lever
+// that pushes a packing up the complexity axis while staying valid. Valid CPs go to
+// <out>/folds/<id>.fold (id gains a -2x suffix when doubled) with per-CP quality in
+// the manifest; invalid ones are counted by reason. Store: $BP_PACKING_STORE.
 
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { generateBoxPleatedPacking, type BoxPleatedPackingConfig } from "./box-pleated-packing.ts";
 import { buildPackingCP } from "./box-pleated-cp.ts";
 import { boxPleatedCpToFold, boxPleatedQuality } from "./box-pleated-fold.ts";
+import { PACKING_STORE, leafCountForSeed, readPacking, scalePacking, shouldDouble, storedSeeds } from "./box-pleated-store.ts";
 import type { EdgeAssignment } from "./types.ts";
 
 interface Args {
-  count: number;
+  store: string;
   out: string;
-  seed: number;
-  maxAttempts: number;
+  doubleFraction: number;
+  limit: number | null;
 }
 
 function parseArgs(argv: string[]): Args {
@@ -28,28 +30,14 @@ function parseArgs(argv: string[]): Args {
     const i = argv.indexOf(flag);
     return i >= 0 ? argv[i + 1] : undefined;
   };
-  const count = Number(get("--count") ?? 100);
+  const limitRaw = get("--limit");
   return {
-    count,
+    store: get("--store") ?? PACKING_STORE,
     out: get("--out") ?? "data/output/box-pleated",
-    seed: Number(get("--seed") ?? 60000),
-    maxAttempts: Number(get("--max-attempts") ?? count * 20),
+    doubleFraction: Number(get("--double-fraction") ?? 0.5),
+    limit: limitRaw !== undefined ? Number(limitRaw) : null,
   };
 }
-
-/** Standard leaf-count convention (shared with the debug tooling). */
-const leafCountForSeed = (seed: number): number => [4, 5, 6][seed % 3];
-
-const configForSeed = (seed: number): BoxPleatedPackingConfig => ({
-  id: `bp-${seed}`,
-  seed,
-  numCreases: 300,
-  bucket: "s",
-  symmetry: "none",
-  targetLeafCount: leafCountForSeed(seed),
-  tight: true,
-  tightRestarts: 14,
-});
 
 const splitForIndex = (i: number): "train" | "val" | "test" => {
   const r = i % 20;
@@ -62,24 +50,38 @@ async function writeJson(path: string, value: unknown): Promise<void> {
 
 async function main(): Promise<void> {
   const args = parseArgs(Bun.argv.slice(2));
+  console.log(`Stage B: store ${args.store} -> ${args.out} (double-fraction ${args.doubleFraction})`);
   await mkdir(join(args.out, "folds"), { recursive: true });
   await mkdir(join(args.out, "metadata"), { recursive: true });
 
+  const seeds: number[] = [];
+  for await (const s of storedSeeds(args.store)) seeds.push(s);
+  seeds.sort((a, b) => a - b);
+  if (seeds.length === 0) {
+    console.log("No packings in the store. Run box-pleated-pack first.");
+    return;
+  }
+
   const manifest: string[] = [];
   const rejections: Record<string, number> = { incomplete: 0, "off-grid": 0, throw: 0 };
-  let accepted = 0;
-  let clean = 0;
-  let attempts = 0;
   const conflictHist: Record<number, number> = {};
-
+  let accepted = 0;
+  let doubled = 0;
+  let clean = 0;
   const t0 = performance.now();
-  for (let seed = args.seed; accepted < args.count && attempts < args.seed + args.maxAttempts; seed++) {
-    attempts++;
-    const config = configForSeed(seed);
+  let lastLog = t0;
+
+  for (const seed of seeds) {
+    if (args.limit !== null && accepted >= args.limit) break;
+    const raw = await readPacking(seed, args.store);
+    if (!raw) continue;
+    const scale = shouldDouble(seed, args.doubleFraction) ? 2 : 1;
+    const packing = scale === 2 ? scalePacking(raw, 2) : raw;
+
     let cp;
     try {
-      cp = buildPackingCP(await generateBoxPleatedPacking(config));
-    } catch (e) {
+      cp = buildPackingCP(packing);
+    } catch {
       rejections.throw++;
       continue;
     }
@@ -88,8 +90,8 @@ async function main(): Promise<void> {
       continue;
     }
 
-    const id = config.id;
-    const fold = boxPleatedCpToFold(cp, { id, seed, leafCount: config.targetLeafCount ?? leafCountForSeed(seed) });
+    const id = `bp-${seed}${scale === 2 ? "-2x" : ""}`;
+    const fold = boxPleatedCpToFold(cp, { id, seed, leafCount: leafCountForSeed(seed), scale });
     const q = boxPleatedQuality(cp);
     const assignments = fold.edges_assignment.reduce<Record<EdgeAssignment, number>>((acc, a) => {
       acc[a] = (acc[a] ?? 0) + 1;
@@ -98,39 +100,42 @@ async function main(): Promise<void> {
 
     const foldPath = join("folds", `${id}.fold`);
     await writeJson(join(args.out, foldPath), fold);
-    await writeJson(join(args.out, "metadata", `${id}.json`), { id, seed, config, quality: q });
+    await writeJson(join(args.out, "metadata", `${id}.json`), { id, seed, scale, quality: q });
 
     manifest.push(JSON.stringify({
-      id,
-      seed,
-      leafCount: config.targetLeafCount,
-      split: splitForIndex(accepted),
-      foldPath,
+      id, seed, scale, leafCount: leafCountForSeed(seed),
+      split: splitForIndex(accepted), foldPath,
+      grid: Math.round(cp.sheet.width),
       vertices: fold.vertices_coords.length,
       edges: fold.edges_vertices.length,
-      assignments,
-      quality: q,
+      assignments, quality: q,
     }));
     conflictHist[q.conflicts] = (conflictHist[q.conflicts] ?? 0) + 1;
     accepted++;
+    if (scale === 2) doubled++;
     if (q.clean) clean++;
+
+    if (performance.now() - lastLog > 5000) {
+      console.log(`  seed ${seed} · accepted ${accepted} (${doubled} doubled) · clean ${clean}`);
+      lastLog = performance.now();
+    }
   }
 
   await Bun.write(join(args.out, "manifest.jsonl"), manifest.join("\n") + (manifest.length ? "\n" : ""));
-  const ms = performance.now() - t0;
+  const secs = (performance.now() - t0) / 1000;
   const summary = {
-    requested: args.count,
+    storedPackings: seeds.length,
     accepted,
+    doubled,
+    doubleFraction: args.doubleFraction,
     clean,
-    attempts,
-    yield: attempts ? +(accepted / attempts).toFixed(3) : 0,
     rejections,
     conflictHistogram: conflictHist,
-    seconds: +(ms / 1000).toFixed(1),
-    cpsPerSec: +(accepted / (ms / 1000)).toFixed(2),
+    seconds: +secs.toFixed(1),
+    cpsPerSec: +(accepted / Math.max(secs, 1e-6)).toFixed(2),
   };
   await writeJson(join(args.out, "summary.json"), summary);
-  console.log(`box-pleat generation -> ${args.out}`);
+  console.log(`Stage B done -> ${args.out}`);
   console.log(JSON.stringify(summary, null, 2));
 }
 
