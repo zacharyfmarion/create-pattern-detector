@@ -588,7 +588,12 @@ export function routeHinges(
   sheet: { width: number; height: number },
   onEvent?: (e: HingeTraceEvent) => void,
 ): HingeRay[] {
-  let budget = 2500;
+  // Node budget for the backtracking search. Since the per-segment axial fix opened up
+  // far more valid hinges, unsolved hard seeds now run the full budget and planarize
+  // (O(n^2), per placement) dominates - the set can take minutes at 2500. Until
+  // incremental planarization lands, HINGE_BUDGET is a temporary escape hatch to cap
+  // exploration (e.g. HINGE_BUDGET=300) so the render tools stay usable.
+  let budget = Number(process.env.HINGE_BUDGET ?? 2500);
   let best: { rays: HingeRay[]; score: number } = { rays: [], score: Infinity };
   // The boundary + ridges + axial family are constant across the whole search; only
   // hinges change. Each search state planarizes [base, hinges] exactly once and

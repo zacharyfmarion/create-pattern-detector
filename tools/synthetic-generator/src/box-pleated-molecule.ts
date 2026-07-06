@@ -1100,20 +1100,32 @@ export function traceHingeRay(
   let steps = 0;
   const stepLen = (a: GridPoint, b: GridPoint): number =>
     Math.round(Math.max(Math.abs(b.x - a.x), Math.abs(b.y - a.y)));
-  // A hinge is perpendicular to axials - it can never run coincident with one. If
-  // the ray leaves `cur` along an axial (the direction "toward an axial"), the
-  // route is invalid; that is the direction excluded at every vertex (max 3 remain).
-  const alongAxial = (o: GridPoint, dd: GridPoint): boolean =>
-    axials.some((c) => {
+  // A hinge is perpendicular to axials and can never run COINCIDENT with one. The
+  // test is per produced SEGMENT (cur -> pt), not the infinite forward ray: a segment
+  // is invalid only if it actually overlaps an axial along its own extent. This lets a
+  // hinge cross an empty gap toward a collinear axial and reflect off a ridge BEFORE
+  // ever reaching it (touching an axial endpoint is a zero-length overlap, allowed),
+  // while still forbidding a segment that truly runs down an axial.
+  const segOverlapsAxial = (a: GridPoint, bpt: GridPoint): boolean => {
+    const sx = bpt.x - a.x;
+    const sy = bpt.y - a.y;
+    const len2 = sx * sx + sy * sy;
+    if (len2 < EPS) return false;
+    const proj = (p: GridPoint): number => ((p.x - a.x) * sx + (p.y - a.y) * sy) / len2;
+    return axials.some((c) => {
       const ex = c.b.x - c.a.x;
       const ey = c.b.y - c.a.y;
-      if (Math.abs(ex * dd.y - ey * dd.x) > EPS) return false; // not parallel
-      if (Math.abs((c.a.x - o.x) * dd.y - (c.a.y - o.y) * dd.x) > EPS) return false; // not on the ray's line
-      return Math.max((c.a.x - o.x) * dd.x + (c.a.y - o.y) * dd.y, (c.b.x - o.x) * dd.x + (c.b.y - o.y) * dd.y) > EPS;
+      if (Math.abs(ex * sy - ey * sx) > EPS) return false; // axial not parallel to segment
+      if (Math.abs((c.a.x - a.x) * sy - (c.a.y - a.y) * sx) > EPS) return false; // axial not on the segment's line
+      const u0 = proj(c.a);
+      const u1 = proj(c.b);
+      const lo = Math.max(0, Math.min(u0, u1));
+      const hi = Math.min(1, Math.max(u0, u1));
+      return hi - lo > EPS; // overlapping sub-interval of positive length
     });
+  };
 
   for (let bounce = 0; bounce < MAX_BOUNCES; bounce++) {
-    if (alongAxial(cur, d)) return null; // would run coincident with an axial
     const ride = marchRay(cur, d, ridges, sheet);
     let hinge: { t: number; point: GridPoint } | null = null;
     for (const h of hinges) {
@@ -1129,11 +1141,13 @@ export function traceHingeRay(
       const snapped = snapToGrid(hinge.point);
       if (!snapped && !opts.allowOffGrid) return null;
       const pt = snapped ?? hinge.point;
+      if (segOverlapsAxial(cur, pt)) return null; // this segment would run along an axial
       path.push({ a: cur, b: pt });
       return { path, terminus: pt, terminusType: "hinge", steps: steps + stepLen(cur, pt) };
     }
     if (!ride) return null;
     if (ride.type === "boundary") {
+      if (segOverlapsAxial(cur, ride.point)) return null;
       path.push({ a: cur, b: ride.point });
       return { path, terminus: ride.point, terminusType: "edge", steps: steps + stepLen(cur, ride.point) };
     }
@@ -1143,6 +1157,7 @@ export function traceHingeRay(
     const snapped = snapToGrid(ride.point);
     if (!snapped && !opts.allowOffGrid) return null; // off-grid reflection or junction
     const pt = snapped ?? ride.point;
+    if (segOverlapsAxial(cur, pt)) return null;
     path.push({ a: cur, b: pt });
     steps += stepLen(cur, pt);
     if (ride.type === "junction") return { path, terminus: pt, terminusType: "junction", steps };
