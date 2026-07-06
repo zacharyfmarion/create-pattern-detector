@@ -3,26 +3,24 @@
 // assignment/geometry never requires regenerating packings (Stage A owns those).
 //
 //   bun run src/box-pleated-generate.ts --out data/output/box-pleated
-//   bun run src/box-pleated-generate.ts --out … --double-fraction 0.5 --limit 5000
+//   bun run src/box-pleated-generate.ts --out … --double-fraction 0.5 --workers 8 --limit 5000
 //
-// For each stored packing it deterministically decides (by seed hash) whether to
-// emit a DOUBLED variant (--double-fraction, default 0.5) - the grid-doubling lever
-// that pushes a packing up the complexity axis while staying valid. Valid CPs go to
-// <out>/folds/<id>.fold (id gains a -2x suffix when doubled) with per-CP quality in
-// the manifest; invalid ones are counted by reason. Store: $BP_PACKING_STORE.
+// Runs a Bun worker pool over the stored seeds (default = CPU count). Each worker
+// assigns its stride and writes FOLDs + a manifest shard; the main thread merges
+// shards into manifest.jsonl and writes summary.json. Doubling (--double-fraction)
+// and rescue-fallback (retry a 1x-invalid packing at 2x) happen in the workers.
+// Store: $BP_PACKING_STORE.
 
-import { mkdir } from "node:fs/promises";
+import { mkdir, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { buildPackingCP } from "./box-pleated-cp.ts";
-import { boxPleatedCpToFold, boxPleatedQuality } from "./box-pleated-fold.ts";
-import { PACKING_STORE, leafCountForSeed, readPacking, scalePacking, shouldDouble, storedSeeds } from "./box-pleated-store.ts";
-import type { EdgeAssignment } from "./types.ts";
+import { PACKING_STORE } from "./box-pleated-store.ts";
 
 interface Args {
   store: string;
   out: string;
   doubleFraction: number;
   limit: number | null;
+  workers: number;
 }
 
 function parseArgs(argv: string[]): Args {
@@ -36,105 +34,84 @@ function parseArgs(argv: string[]): Args {
     out: get("--out") ?? "data/output/box-pleated",
     doubleFraction: Number(get("--double-fraction") ?? 0.5),
     limit: limitRaw !== undefined ? Number(limitRaw) : null,
+    workers: Number(get("--workers") ?? navigator.hardwareConcurrency ?? 8),
   };
 }
 
-const splitForIndex = (i: number): "train" | "val" | "test" => {
-  const r = i % 20;
-  return r < 17 ? "train" : r < 19 ? "val" : "test";
-};
-
-async function writeJson(path: string, value: unknown): Promise<void> {
-  await Bun.write(path, JSON.stringify(value));
+interface Stats {
+  accepted: number;
+  doubled: number;
+  rescued: number;
+  clean: number;
+  incomplete: number;
+  offgrid: number;
+  thrown: number;
+  hist: Record<number, number>;
+}
+const zero = (): Stats => ({ accepted: 0, doubled: 0, rescued: 0, clean: 0, incomplete: 0, offgrid: 0, thrown: 0, hist: {} });
+function add(a: Stats, b: Stats): Stats {
+  const hist = { ...a.hist };
+  for (const [k, v] of Object.entries(b.hist)) hist[Number(k)] = (hist[Number(k)] ?? 0) + v;
+  return { accepted: a.accepted + b.accepted, doubled: a.doubled + b.doubled, rescued: a.rescued + b.rescued, clean: a.clean + b.clean, incomplete: a.incomplete + b.incomplete, offgrid: a.offgrid + b.offgrid, thrown: a.thrown + b.thrown, hist };
 }
 
 async function main(): Promise<void> {
   const args = parseArgs(Bun.argv.slice(2));
-  console.log(`Stage B: store ${args.store} -> ${args.out} (double-fraction ${args.doubleFraction})`);
   await mkdir(join(args.out, "folds"), { recursive: true });
   await mkdir(join(args.out, "metadata"), { recursive: true });
+  const workers = Math.max(1, args.workers);
+  console.log(`Stage B: store ${args.store} -> ${args.out} · double-fraction ${args.doubleFraction} · ${workers} workers`);
 
-  const seeds: number[] = [];
-  for await (const s of storedSeeds(args.store)) seeds.push(s);
-  seeds.sort((a, b) => a - b);
-  if (seeds.length === 0) {
-    console.log("No packings in the store. Run box-pleated-pack first.");
-    return;
-  }
-
-  const manifest: string[] = [];
-  const rejections: Record<string, number> = { incomplete: 0, "off-grid": 0, throw: 0 };
-  const conflictHist: Record<number, number> = {};
-  let accepted = 0;
-  let doubled = 0;
-  let clean = 0;
+  const perWorkerLimit = args.limit !== null ? Math.ceil(args.limit / workers) : null;
+  const latest: Stats[] = Array.from({ length: workers }, zero);
   const t0 = performance.now();
-  let lastLog = t0;
+  let done = 0;
 
-  for (const seed of seeds) {
-    if (args.limit !== null && accepted >= args.limit) break;
-    const raw = await readPacking(seed, args.store);
-    if (!raw) continue;
-    const scale = shouldDouble(seed, args.doubleFraction) ? 2 : 1;
-    const packing = scale === 2 ? scalePacking(raw, 2) : raw;
-
-    let cp;
-    try {
-      cp = buildPackingCP(packing);
-    } catch {
-      rejections.throw++;
-      continue;
+  await new Promise<void>((resolve) => {
+    for (let w = 0; w < workers; w++) {
+      const worker = new Worker(new URL("./box-pleated-generate-worker.ts", import.meta.url).href, { type: "module" });
+      worker.onmessage = (e: MessageEvent<Stats & { type: string }>): void => {
+        const { type, ...s } = e.data;
+        latest[w] = s;
+        if (type === "done") {
+          worker.terminate();
+          if (++done === workers) resolve();
+        }
+      };
+      worker.postMessage({ store: args.store, out: args.out, doubleFraction: args.doubleFraction, workers, workerId: w, limit: perWorkerLimit });
     }
-    if (!cp.valid) {
-      rejections[cp.complete ? "off-grid" : "incomplete"]++;
-      continue;
-    }
+    const timer = setInterval(() => {
+      const s = latest.reduce(add, zero());
+      const secs = (performance.now() - t0) / 1000;
+      console.log(`  accepted ${s.accepted} (${s.doubled} doubled, ${s.rescued} rescued) · clean ${s.clean} · ${(s.accepted / secs).toFixed(2)}/s`);
+      if (done === workers) clearInterval(timer);
+    }, 5000);
+  });
 
-    const id = `bp-${seed}${scale === 2 ? "-2x" : ""}`;
-    const fold = boxPleatedCpToFold(cp, { id, seed, leafCount: leafCountForSeed(seed), scale });
-    const q = boxPleatedQuality(cp);
-    const assignments = fold.edges_assignment.reduce<Record<EdgeAssignment, number>>((acc, a) => {
-      acc[a] = (acc[a] ?? 0) + 1;
-      return acc;
-    }, {} as Record<EdgeAssignment, number>);
-
-    const foldPath = join("folds", `${id}.fold`);
-    await writeJson(join(args.out, foldPath), fold);
-    await writeJson(join(args.out, "metadata", `${id}.json`), { id, seed, scale, quality: q });
-
-    manifest.push(JSON.stringify({
-      id, seed, scale, leafCount: leafCountForSeed(seed),
-      split: splitForIndex(accepted), foldPath,
-      grid: Math.round(cp.sheet.width),
-      vertices: fold.vertices_coords.length,
-      edges: fold.edges_vertices.length,
-      assignments, quality: q,
-    }));
-    conflictHist[q.conflicts] = (conflictHist[q.conflicts] ?? 0) + 1;
-    accepted++;
-    if (scale === 2) doubled++;
-    if (q.clean) clean++;
-
-    if (performance.now() - lastLog > 5000) {
-      console.log(`  seed ${seed} · accepted ${accepted} (${doubled} doubled) · clean ${clean}`);
-      lastLog = performance.now();
-    }
+  // Merge manifest shards.
+  const shards = (await readdir(args.out)).filter((f) => /^manifest\.w\d+\.jsonl$/.test(f)).sort();
+  const parts: string[] = [];
+  for (const shard of shards) {
+    parts.push((await Bun.file(join(args.out, shard)).text()).trimEnd());
+    await rm(join(args.out, shard));
   }
+  const manifest = parts.filter((p) => p.length).join("\n");
+  await Bun.write(join(args.out, "manifest.jsonl"), manifest + (manifest.length ? "\n" : ""));
 
-  await Bun.write(join(args.out, "manifest.jsonl"), manifest.join("\n") + (manifest.length ? "\n" : ""));
+  const total = latest.reduce(add, zero());
   const secs = (performance.now() - t0) / 1000;
   const summary = {
-    storedPackings: seeds.length,
-    accepted,
-    doubled,
+    accepted: total.accepted,
+    doubled: total.doubled,
+    rescued: total.rescued,
     doubleFraction: args.doubleFraction,
-    clean,
-    rejections,
-    conflictHistogram: conflictHist,
+    clean: total.clean,
+    rejections: { incomplete: total.incomplete, "off-grid": total.offgrid, throw: total.thrown },
+    conflictHistogram: total.hist,
     seconds: +secs.toFixed(1),
-    cpsPerSec: +(accepted / Math.max(secs, 1e-6)).toFixed(2),
+    cpsPerSec: +(total.accepted / Math.max(secs, 1e-6)).toFixed(2),
   };
-  await writeJson(join(args.out, "summary.json"), summary);
+  await Bun.write(join(args.out, "summary.json"), JSON.stringify(summary));
   console.log(`Stage B done -> ${args.out}`);
   console.log(JSON.stringify(summary, null, 2));
 }

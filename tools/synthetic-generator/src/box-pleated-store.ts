@@ -118,6 +118,12 @@ export function shouldDouble(seed: number, fraction: number): boolean {
   return fraction > 0 && seedHash(seed) < fraction;
 }
 
+/** Deterministic train/val/test split by seed (85/10/5), independent of workers. */
+export function splitForSeed(seed: number): "train" | "val" | "test" {
+  const h = (Math.imul(seed ^ 0x85ebca6b, 0xc2b2ae35) >>> 0) / 4294967296;
+  return h < 0.85 ? "train" : h < 0.95 ? "val" : "test";
+}
+
 /** All seeds currently in the store (from the sharded file names). */
 export async function* storedSeeds(store: string = PACKING_STORE): AsyncGenerator<number> {
   const glob = new Bun.Glob("*/bp-*.json.gz");
