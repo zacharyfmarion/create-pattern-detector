@@ -103,11 +103,14 @@ export function buildMolecule(f: OriFixture): BoxPleatedMolecule {
  * walk from the origin; without it we fall back to treating each stored hinge
  * segment as its own ray (origin = its first point).
  */
-export function assignCreases(m: BoxPleatedMolecule, hingeRays?: HingeRay[]): AssignedEdge[] {
+export function assignCreases(m: BoxPleatedMolecule, hingeRays?: HingeRay[], adj?: Map<string, GridPoint[]>): AssignedEdge[] {
   const ridge = assignRidges(m);
 
-  const adj = planarize([...m.boundary, ...m.ridges, ...m.axialFamily, ...m.hinges]);
-  const edges = planarUnitEdges(adj);
+  // The planarization of [boundary, ridges, axialFamily, hinges] is shared with
+  // hingeFrontier / failingVertexKeys during the hinge search (same segment set),
+  // so callers may pass it in to avoid recomputing this O(n^2) step 2-3x per state.
+  const padj = adj ?? planarize([...m.boundary, ...m.ridges, ...m.axialFamily, ...m.hinges]);
+  const edges = planarUnitEdges(padj);
 
   for (const e of edges) {
     const mid = midpoint(e);
@@ -424,10 +427,11 @@ function failingVertexKeys(
   hinges: OriSegment[],
   edges: AssignedEdge[],
   sheet: { width: number; height: number },
+  adj?: Map<string, GridPoint[]>,
 ): Set<string> {
-  const adj = planarize([...m.boundary, ...m.ridges, ...m.axialFamily, ...hinges]);
+  const padj = adj ?? planarize([...m.boundary, ...m.ridges, ...m.axialFamily, ...hinges]);
   const s = new Set<string>();
-  for (const v of failingJunctions(adj, sheet)) s.add(vkey(v));
+  for (const v of failingJunctions(padj, sheet)) s.add(vkey(v));
   for (const v of maekawaConflicts(edges, sheet)) s.add(vkey(v));
   return s;
 }
@@ -438,9 +442,10 @@ function hingeFrontier(
   hinges: OriSegment[],
   edges: AssignedEdge[],
   sheet: { width: number; height: number },
+  adj?: Map<string, GridPoint[]>,
 ): GridPoint[] {
-  const adj = planarize([...m.boundary, ...m.ridges, ...m.axialFamily, ...hinges]);
-  const geom = failingJunctions(adj, sheet).map((f) => ({ x: f.x, y: f.y }));
+  const padj = adj ?? planarize([...m.boundary, ...m.ridges, ...m.axialFamily, ...hinges]);
+  const geom = failingJunctions(padj, sheet).map((f) => ({ x: f.x, y: f.y }));
   const mae = maekawaConflicts(edges, sheet);
   const seen = new Set<string>();
   const out: GridPoint[] = [];
@@ -568,6 +573,10 @@ export function routeHinges(
 ): HingeRay[] {
   let budget = 2500;
   let best: { rays: HingeRay[]; score: number } = { rays: [], score: Infinity };
+  // The boundary + ridges + axial family are constant across the whole search; only
+  // hinges change. Each search state planarizes [base, hinges] exactly once and
+  // shares that adjacency across assignCreases / hingeFrontier / failingVertexKeys.
+  const base = [...m.boundary, ...m.ridges, ...m.axialFamily];
 
   const candidateRays = (v: GridPoint, hinges: OriSegment[], failing: Set<string>): OriSegment[][] => {
     return freeAxes(v, m, hinges)
@@ -583,7 +592,7 @@ export function routeHinges(
       .map((t) => t.path);
   };
 
-  const solve = (rays: HingeRay[], edges: AssignedEdge[], fr: GridPoint[], depth: number): HingeRay[] | null => {
+  const solve = (rays: HingeRay[], edges: AssignedEdge[], adj: Map<string, GridPoint[]>, fr: GridPoint[], depth: number): HingeRay[] | null => {
     const hinges = rays.flatMap((r) => r.path);
     onEvent?.({ kind: "enter", depth, budget, hingeRays: [...rays], hinges: [...hinges], frontier: [...fr], vertex: null, placement: [] });
     if (fr.length < best.score) best = { rays: [...rays], score: fr.length };
@@ -597,7 +606,7 @@ export function routeHinges(
     }
 
     // Junctions a hinge may legitimately terminate on (must themselves be failing).
-    const failing = failingVertexKeys(m, hinges, edges, sheet);
+    const failing = failingVertexKeys(m, hinges, edges, sheet, adj);
 
     // Branch on the first frontier vertex that has a placement resolving it; a
     // vertex with none is (for now) unroutable and deferred like the saturated
@@ -615,8 +624,9 @@ export function routeHinges(
         .map((addRays) => {
           const nextRays = [...rays, ...addRays];
           const next = nextRays.flatMap((r) => r.path);
-          const nedges = assignCreases({ ...m, hinges: next }, nextRays);
-          return { addSegs: addRays.flatMap((r) => r.path), nextRays, nedges, nfr: hingeFrontier(m, next, nedges, sheet) };
+          const nadj = planarize([...base, ...next]); // one planarization, shared below
+          const nedges = assignCreases({ ...m, hinges: next }, nextRays, nadj);
+          return { addSegs: addRays.flatMap((r) => r.path), nextRays, nadj, nedges, nfr: hingeFrontier(m, next, nedges, sheet, nadj) };
         })
         .filter((c) => !c.nfr.some((p) => samePoint(p, v))) // must discharge v
         .sort((a, b) => a.nfr.length - b.nfr.length);
@@ -625,7 +635,7 @@ export function routeHinges(
 
       for (const c of scored) {
         onEvent?.({ kind: "try", depth, budget, hingeRays: [...rays], hinges: [...hinges], frontier: [...fr], vertex: v, placement: c.addSegs });
-        const r = solve(c.nextRays, c.nedges, c.nfr, depth + 1);
+        const r = solve(c.nextRays, c.nedges, c.nadj, c.nfr, depth + 1);
         if (r) return r;
         onEvent?.({ kind: "backtrack", depth, budget, hingeRays: [...rays], hinges: [...hinges], frontier: [...fr], vertex: v, placement: c.addSegs });
         if (budget <= 0) return null;
@@ -635,9 +645,117 @@ export function routeHinges(
     return null; // no frontier vertex resolvable
   };
 
-  const edges0 = assignCreases({ ...m, hinges: [] }, []);
-  const solved = solve([], edges0, hingeFrontier(m, [], edges0, sheet), 0);
+  const adj0 = planarize(base);
+  const edges0 = assignCreases({ ...m, hinges: [] }, [], adj0);
+  const solved = solve([], edges0, adj0, hingeFrontier(m, [], edges0, sheet, adj0), 0);
   return solved ?? best.rays;
+}
+
+// ---------------------------------------------------------------------------
+// Diagnostics: why does the hinge search stop?
+// ---------------------------------------------------------------------------
+
+/** One candidate hinge direction from a stuck vertex, with why it was kept/rejected. */
+export interface HingeCandidateDiag {
+  dir: GridPoint;
+  terminusType: "edge" | "hinge" | "junction" | null;
+  terminus: GridPoint | null;
+  /** Survives the candidateRays filter (traceable + junction-terminus is failing). */
+  accepted: boolean;
+  /** If this ray is committed on its own, does v leave the frontier? (meaningful for odd degree) */
+  dischargesV: boolean;
+  reason: string;
+}
+
+/** Why a single frontier vertex could (not) be discharged in a given hinge state. */
+export interface HingeVertexDiag {
+  vertex: GridPoint;
+  degree: number;
+  parity: "odd" | "even";
+  freeAxes: number;
+  candidates: HingeCandidateDiag[];
+  /** True if some placement (single ray for odd, ray-pair for even) discharges v. */
+  resolvable: boolean;
+  summary: string;
+}
+
+/**
+ * Explain, for a vertex v in a given committed-hinge state, exactly why the router
+ * can or cannot discharge it: enumerate every free-axis hinge ray, whether it is
+ * accepted (traceable and, if it lands on a junction, that junction is itself
+ * failing), and whether a placement built from the accepted rays actually removes v
+ * from the frontier. This mirrors candidateRays / hingePlacements / the discharge
+ * filter in routeHinges, so its verdict matches the real search.
+ */
+export function explainHingeVertex(
+  m: BoxPleatedMolecule,
+  v: GridPoint,
+  hinges: OriSegment[],
+  sheet: { width: number; height: number },
+): HingeVertexDiag {
+  const edges = assignCreases({ ...m, hinges });
+  const failing = failingVertexKeys(m, hinges, edges, sheet);
+  const degree = vertexDegree(v, edges);
+  const axes = freeAxes(v, m, hinges);
+  const acceptedPaths: OriSegment[][] = [];
+  const candidates: HingeCandidateDiag[] = [];
+
+  for (const dir of axes) {
+    const t = traceHingeRay(v, dir, m.ridges, hinges, m.axialFamily, sheet, { allowOffGrid: true });
+    if (!t) {
+      candidates.push({ dir, terminusType: null, terminus: null, accepted: false, dischargesV: false,
+        reason: "traceHingeRay=null (ray runs along an axial or never lands a valid terminus)" });
+      continue;
+    }
+    if (t.terminusType === "junction" && !failing.has(vkey(t.terminus))) {
+      candidates.push({ dir, terminusType: t.terminusType, terminus: t.terminus, accepted: false, dischargesV: false,
+        reason: `terminates on HEALTHY junction (${t.terminus.x},${t.terminus.y}) - only failing junctions may be hit` });
+      continue;
+    }
+    const next = [...hinges, ...t.path];
+    const nfr = hingeFrontier(m, next, assignCreases({ ...m, hinges: next }), sheet);
+    const dischargesV = !nfr.some((p) => samePoint(p, v));
+    acceptedPaths.push(t.path);
+    candidates.push({ dir, terminusType: t.terminusType, terminus: t.terminus, accepted: true, dischargesV,
+      reason: dischargesV ? "OK - single ray discharges v"
+        : `accepted, but alone leaves v failing (needs a pair, or a different ray) -> terminus (${t.terminus.x},${t.terminus.y})` });
+  }
+
+  // Resolvable = does the real placement set (single ray if odd, ray-pair if even)
+  // contain one that discharges v?
+  const placements: OriSegment[][] =
+    degree % 2 === 1
+      ? acceptedPaths.map((p) => p)
+      : acceptedPaths.flatMap((a, i) => acceptedPaths.slice(i + 1).map((b) => [...a, ...b]));
+  let resolvable = false;
+  for (const pl of placements) {
+    const next = [...hinges, ...pl];
+    const nfr = hingeFrontier(m, next, assignCreases({ ...m, hinges: next }), sheet);
+    if (!nfr.some((p) => samePoint(p, v))) { resolvable = true; break; }
+  }
+
+  const nAcc = candidates.filter((c) => c.accepted).length;
+  const summary = resolvable
+    ? "resolvable"
+    : `STUCK: degree ${degree} (${degree % 2 === 1 ? "odd->1 ray" : "even->ray pair"}), ` +
+      `${axes.length} free axes, ${nAcc} accepted, but no ${degree % 2 === 1 ? "ray" : "pair"} discharges it`;
+  return { vertex: v, degree, parity: degree % 2 === 1 ? "odd" : "even", freeAxes: axes.length, candidates, resolvable, summary };
+}
+
+/**
+ * The stuck nodes in a recorded search: an ENTER whose next event is a BACKTRACK at a
+ * shallower depth (the node returned null without ever committing a placement - i.e.
+ * no frontier vertex was resolvable). These are where the search dead-ends; the
+ * committed hinges + frontier they carry can be fed to explainHingeVertex.
+ */
+export function stuckNodes(events: HingeTraceEvent[]): HingeTraceEvent[] {
+  const out: HingeTraceEvent[] = [];
+  for (let i = 0; i < events.length - 1; i++) {
+    const e = events[i];
+    const n = events[i + 1];
+    if (e.kind === "enter" && e.frontier.length > 0 && n.kind === "backtrack" && n.depth < e.depth) out.push(e);
+  }
+  return out;
 }
 
 export function assignMolecule(m: BoxPleatedMolecule, sheet: { width: number; height: number }): AssignmentResult {

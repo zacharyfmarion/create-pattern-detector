@@ -903,7 +903,10 @@ export function propagateHinges(
 }
 
 /** Planarize a set of segments into a vertex adjacency map (split at every crossing/T-junction). */
+export let PLANARIZE_CALLS = 0;
+export function resetPlanarizeCalls(): void { PLANARIZE_CALLS = 0; }
 export function planarize(segments: OriSegment[]): Map<string, GridPoint[]> {
+  PLANARIZE_CALLS++;
   const edges = new Set<string>();
   for (let i = 0; i < segments.length; i++) {
     const a = segments[i].a;
