@@ -64,7 +64,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--split", default="val")
     parser.add_argument("--val-count", type=int, default=512)
-    parser.add_argument("--max-edges", type=int, default=1200)
+    parser.add_argument("--max-edges", type=int, default=2500)
     parser.add_argument("--image-size", type=int, default=1024)
     parser.add_argument("--backbone", type=str, default="hrnet_w18")
     parser.add_argument("--hidden-channels", type=int, default=128)

@@ -37,7 +37,12 @@ export FULL_INIT_CHECKPOINT="${FULL_INIT_CHECKPOINT:-$INIT_CHECKPOINT}"
 export CHECKPOINT_LOAD_MODE="${CHECKPOINT_LOAD_MODE:-init}"
 export REINIT_HEADS="${REINIT_HEADS:-}"
 
-export MAX_EDGES="${MAX_EDGES:-1200}"
+# 2500 covers everything in the v4 mix (max 2337; the old 1200 cap silently
+# excluded 965 rows incl. 942 dense tessellations — the very data added for
+# dense-BP coverage). Native hard-BP medians 1,376 edges (p90 3,478), so the
+# v5 BP-generator run should raise this to ~5000. Cost is render throughput
+# only (dense targets are fixed-size); bump NUM_WORKERS for dense-heavy runs.
+export MAX_EDGES="${MAX_EDGES:-2500}"
 export JUNCTION_SIGMA_PX="${JUNCTION_SIGMA_PX:-1.5}"
 export JUNCTION_OFFSET_RADIUS_PX="${JUNCTION_OFFSET_RADIUS_PX:-3.0}"
 export JUNCTION_OFFSET_WEIGHT="${JUNCTION_OFFSET_WEIGHT:-0.5}"
