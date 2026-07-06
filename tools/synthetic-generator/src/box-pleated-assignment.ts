@@ -80,6 +80,13 @@ export interface BoxPleatedMolecule {
 }
 
 const EPS = 1e-6;
+// Tolerance for matching a planarized unit edge back to the crease it lies on.
+// planarize snaps vertices to a 1e-4 grid (see round() in box-pleated-molecule), so an
+// exact crease through an off-grid Pythagorean-stretch point (e.g. 25/3) misses its own
+// planar vertex by up to ~3e-5. This tolerance sits comfortably above that and far below
+// a grid unit, so classification/colouring recognises those sub-edges instead of
+// dropping them to unassigned. Applied length-relative (perpendicular distance).
+const ON_TOL = 1e-3;
 
 /** Build the full crease geometry plus the axial color function. */
 export function buildMolecule(f: OriFixture): BoxPleatedMolecule {
@@ -1120,10 +1127,13 @@ function onSegment(p: GridPoint, a: GridPoint, b: GridPoint): boolean {
   const dy = b.y - a.y;
   const len2 = dx * dx + dy * dy;
   if (len2 < EPS) return false;
+  const len = Math.sqrt(len2);
+  // Tolerant of the ~3e-5 off-grid rounding so a hinge unit whose endpoint sits at an
+  // off-grid stretch point (t just past 1) is still collected onto its ray segment.
   const cross = (p.x - a.x) * dy - (p.y - a.y) * dx;
-  if (Math.abs(cross) > EPS * Math.sqrt(len2)) return false; // off the line
+  if (Math.abs(cross) > ON_TOL * len) return false; // off the line
   const t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2;
-  return t >= -EPS && t <= 1 + EPS;
+  return t >= -ON_TOL / len && t <= 1 + ON_TOL / len;
 }
 
 // ---------------------------------------------------------------------------
@@ -1210,11 +1220,18 @@ function onAny(p: GridPoint, segs: OriSegment[]): boolean {
 }
 
 function pointOnSegment(p: GridPoint, s: OriSegment): boolean {
-  const cross = (s.b.x - s.a.x) * (p.y - s.a.y) - (s.b.y - s.a.y) * (p.x - s.a.x);
-  if (Math.abs(cross) > EPS) return false;
-  const dot = (p.x - s.a.x) * (s.b.x - s.a.x) + (p.y - s.a.y) * (s.b.y - s.a.y);
-  const len2 = (s.b.x - s.a.x) ** 2 + (s.b.y - s.a.y) ** 2;
-  return dot > -EPS && dot < len2 + EPS;
+  const dx = s.b.x - s.a.x;
+  const dy = s.b.y - s.a.y;
+  const len2 = dx * dx + dy * dy;
+  if (len2 < EPS) return false;
+  const len = Math.sqrt(len2);
+  // Collinearity by perpendicular distance (cross / len), tolerant of the ~3e-5 off-grid
+  // rounding; the old absolute `|cross| > EPS` test was un-normalized and so failed on
+  // long stretch creases even when the point clearly lay on them.
+  const cross = dx * (p.y - s.a.y) - dy * (p.x - s.a.x);
+  if (Math.abs(cross) > ON_TOL * len) return false;
+  const t = ((p.x - s.a.x) * dx + (p.y - s.a.y) * dy) / len2;
+  return t > -ON_TOL / len && t < 1 + ON_TOL / len;
 }
 
 function isBoundaryVertex(v: GridPoint, sheet: { width: number; height: number }): boolean {
