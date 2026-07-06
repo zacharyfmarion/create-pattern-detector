@@ -107,7 +107,7 @@ export function assignCreases(m: BoxPleatedMolecule, hingeRays?: HingeRay[], adj
   const ridge = assignRidges(m);
 
   // The planarization of [boundary, ridges, axialFamily, hinges] is shared with
-  // hingeFrontier / failingVertexKeys during the hinge search (same segment set),
+  // hingeFrontier / unrecoverableCount during the hinge search (same segment set),
   // so callers may pass it in to avoid recomputing this O(n^2) step 2-3x per state.
   const padj = adj ?? planarize([...m.boundary, ...m.ridges, ...m.axialFamily, ...m.hinges]);
   const edges = planarUnitEdges(padj);
@@ -410,30 +410,37 @@ export function freeAxes(v: GridPoint, m: BoxPleatedMolecule, hinges: OriSegment
   return HINGE_AXES.filter((d) => !dirOccupied(v, d, segs));
 }
 
-/** Rounded key for a vertex, tolerant of the sub-grid points a stretch reflection makes. */
-function vkey(p: GridPoint): string {
-  return `${Math.round(p.x * 1e6) / 1e6},${Math.round(p.y * 1e6) / 1e6}`;
-}
 
 /**
- * Keys of every vertex that currently needs a hinge - geometry-failing (odd degree
- * / not flat-foldable) or Maekawa-failing. Unlike hingeFrontier this is NOT filtered
- * for boundary/saturation: it answers "is a hinge supposed to start here?", used to
- * decide whether a ray may terminate on a ridge junction (only if that junction is
- * itself a failing vertex - otherwise the ray would break a healthy junction).
+ * Partition the interior failing vertices (Kawasaki geometry or Maekawa) of a state
+ * into the two buckets the router needs, in a single pass over failingJunctions +
+ * maekawaConflicts (which the hot scoring loop would otherwise compute twice):
+ *   - frontier: still has a free hinge axis, so it's a resolvable obligation.
+ *   - unrecoverable: saturated on hinge axes, so no further hinge can fix it. A
+ *     placement that grows this count broke a junction it can't repair (tier-3
+ *     reject); a saturated-but-Maekawa-valid junction never fails, so it's never
+ *     counted (tier-3 accept). Comparing counts before/after tolerates pre-existing
+ *     structural unrecoverables (e.g. an odd-degree stretch corner).
  */
-function failingVertexKeys(
+function failingPartition(
   m: BoxPleatedMolecule,
   hinges: OriSegment[],
   edges: AssignedEdge[],
   sheet: { width: number; height: number },
-  adj?: Map<string, GridPoint[]>,
-): Set<string> {
-  const padj = adj ?? planarize([...m.boundary, ...m.ridges, ...m.axialFamily, ...hinges]);
-  const s = new Set<string>();
-  for (const v of failingJunctions(padj, sheet)) s.add(vkey(v));
-  for (const v of maekawaConflicts(edges, sheet)) s.add(vkey(v));
-  return s;
+  adj: Map<string, GridPoint[]>,
+): { frontier: GridPoint[]; unrecoverable: number } {
+  const seen = new Set<string>();
+  const frontier: GridPoint[] = [];
+  let unrecoverable = 0;
+  for (const v of [...failingJunctions(adj, sheet), ...maekawaConflicts(edges, sheet)]) {
+    const k = `${v.x},${v.y}`;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    if (isBoundaryVertex(v, sheet)) continue;
+    if (freeAxes(v, m, hinges).length === 0) unrecoverable++;
+    else frontier.push({ x: v.x, y: v.y });
+  }
+  return { frontier, unrecoverable };
 }
 
 /** Vertices still needing a hinge: geometry- or Maekawa-failing, interior, non-saturated. */
@@ -445,19 +452,7 @@ function hingeFrontier(
   adj?: Map<string, GridPoint[]>,
 ): GridPoint[] {
   const padj = adj ?? planarize([...m.boundary, ...m.ridges, ...m.axialFamily, ...hinges]);
-  const geom = failingJunctions(padj, sheet).map((f) => ({ x: f.x, y: f.y }));
-  const mae = maekawaConflicts(edges, sheet);
-  const seen = new Set<string>();
-  const out: GridPoint[] = [];
-  for (const v of [...geom, ...mae]) {
-    const k = `${v.x},${v.y}`;
-    if (seen.has(k)) continue;
-    seen.add(k);
-    if (isBoundaryVertex(v, sheet)) continue;
-    if (freeAxes(v, m, hinges).length === 0) continue; // saturated: deferred
-    out.push(v);
-  }
-  return out;
+  return failingPartition(m, hinges, edges, sheet, padj).frontier;
 }
 
 /** Degree of vertex v in the current planar graph (count of incident unit edges). */
@@ -467,17 +462,29 @@ function vertexDegree(v: GridPoint, edges: AssignedEdge[]): number {
   return n;
 }
 
-/** Reflecting hinge rays from v that discharge cleanly (terminate at edge or hinge). */
+/** Count of interior failing junctions that are saturated on hinge axes (see failingPartition). */
+function unrecoverableCount(
+  m: BoxPleatedMolecule,
+  hinges: OriSegment[],
+  edges: AssignedEdge[],
+  sheet: { width: number; height: number },
+  adj: Map<string, GridPoint[]>,
+): number {
+  return failingPartition(m, hinges, edges, sheet, adj).unrecoverable;
+}
+
+/** Reflecting hinge rays from v (geometry only): any ray that lands a valid terminus
+ * (paper edge / another hinge / a ridge junction). Whether a junction terminus is
+ * acceptable is decided later, after colouring, by unrecoverableCount. */
 function hingeRays(
   v: GridPoint,
   m: BoxPleatedMolecule,
   hinges: OriSegment[],
   sheet: { width: number; height: number },
 ): OriSegment[][] {
-  const failing = failingVertexKeys(m, hinges, assignCreases({ ...m, hinges }), sheet);
   return freeAxes(v, m, hinges)
     .map((d) => traceHingeRay(v, d, m.ridges, hinges, m.axialFamily, sheet, { allowOffGrid: true }))
-    .filter((t): t is NonNullable<typeof t> => t !== null && (t.terminusType !== "junction" || failing.has(vkey(t.terminus))))
+    .filter((t): t is NonNullable<typeof t> => t !== null)
     .map((t) => t.path);
 }
 
@@ -513,14 +520,24 @@ export interface HingeStep {
 export function routeHingesSteps(m: BoxPleatedMolecule, sheet: { width: number; height: number }): HingeStep[] {
   const steps: HingeStep[] = [];
   let hinges: OriSegment[] = [];
+  const base = [...m.boundary, ...m.ridges, ...m.axialFamily];
   for (let i = 0; i < 200; i++) {
-    const edges = assignCreases({ ...m, hinges });
-    const fr = hingeFrontier(m, hinges, edges, sheet);
+    const adj = planarize([...base, ...hinges]);
+    const edges = assignCreases({ ...m, hinges }, undefined, adj);
+    const fr = hingeFrontier(m, hinges, edges, sheet, adj);
+    const badBefore = unrecoverableCount(m, hinges, edges, sheet, adj);
     let chosen: { v: GridPoint; add: OriSegment[] } | null = null;
     for (const v of fr) {
       const scored = hingePlacements(v, m, hinges, edges, sheet)
-        .map((add) => ({ add, nfr: hingeFrontier(m, [...hinges, ...add], assignCreases({ ...m, hinges: [...hinges, ...add] }), sheet) }))
+        .map((add) => {
+          const next = [...hinges, ...add];
+          const nadj = planarize([...base, ...next]);
+          const nedges = assignCreases({ ...m, hinges: next }, undefined, nadj);
+          const part = failingPartition(m, next, nedges, sheet, nadj);
+          return { add, nfr: part.frontier, bad: part.unrecoverable };
+        })
         .filter((c) => !c.nfr.some((p) => samePoint(p, v)))
+        .filter((c) => c.bad <= badBefore) // must not create a new unrecoverable junction
         .sort((a, b) => a.nfr.length - b.nfr.length);
       if (scored.length) {
         chosen = { v, add: scored[0].add };
@@ -575,27 +592,29 @@ export function routeHinges(
   let best: { rays: HingeRay[]; score: number } = { rays: [], score: Infinity };
   // The boundary + ridges + axial family are constant across the whole search; only
   // hinges change. Each search state planarizes [base, hinges] exactly once and
-  // shares that adjacency across assignCreases / hingeFrontier / failingVertexKeys.
+  // shares that adjacency across assignCreases / hingeFrontier / unrecoverableCount.
   const base = [...m.boundary, ...m.ridges, ...m.axialFamily];
 
-  const candidateRays = (v: GridPoint, hinges: OriSegment[], failing: Set<string>): OriSegment[][] => {
+  const candidateRays = (v: GridPoint, hinges: OriSegment[]): OriSegment[][] => {
     return freeAxes(v, m, hinges)
-      // Off-grid reflections over a Pythagorean stretch are still valid hinges, so
-      // trace with allowOffGrid. A ray may terminate at the paper edge, another
-      // hinge, or a ridge junction. A junction terminus is accepted ONLY when that
-      // junction is itself a failing vertex (a place a hinge should start) - then it
-      // discharges both at once, and if the junction still needs a further hinge for
-      // Maekawa the backtracking below resolves it. Terminating on a healthy junction
-      // would just break it, so those rays are rejected.
+      // Geometry only: off-grid reflections over a Pythagorean stretch are valid, so
+      // trace with allowOffGrid, and a ray may terminate at the paper edge, another
+      // hinge, or ANY ridge junction. Whether a junction terminus is acceptable is
+      // decided after colouring by the unrecoverableCount gate in the scorer below -
+      // that is where tier-3 (saturating but Maekawa-valid) terminations are allowed.
       .map((d) => traceHingeRay(v, d, m.ridges, hinges, m.axialFamily, sheet, { allowOffGrid: true }))
-      .filter((t): t is NonNullable<typeof t> => t !== null && (t.terminusType !== "junction" || failing.has(vkey(t.terminus))))
+      .filter((t): t is NonNullable<typeof t> => t !== null)
       .map((t) => t.path);
   };
 
   const solve = (rays: HingeRay[], edges: AssignedEdge[], adj: Map<string, GridPoint[]>, fr: GridPoint[], depth: number): HingeRay[] | null => {
     const hinges = rays.flatMap((r) => r.path);
     onEvent?.({ kind: "enter", depth, budget, hingeRays: [...rays], hinges: [...hinges], frontier: [...fr], vertex: null, placement: [] });
-    if (fr.length < best.score) best = { rays: [...rays], score: fr.length };
+    // Track the best partial by residual Maekawa conflicts (what we ultimately report),
+    // not by frontier size: relaxed junction termini can shrink the frontier while
+    // leaving a saturated junction broken, so frontier size no longer tracks quality.
+    const conflicts = maekawaConflicts(edges, sheet).length;
+    if (conflicts < best.score) best = { rays: [...rays], score: conflicts };
     if (fr.length === 0) {
       onEvent?.({ kind: "solved", depth, budget, hingeRays: [...rays], hinges: [...hinges], frontier: [...fr], vertex: null, placement: [] });
       return rays;
@@ -605,14 +624,15 @@ export function routeHinges(
       return null;
     }
 
-    // Junctions a hinge may legitimately terminate on (must themselves be failing).
-    const failing = failingVertexKeys(m, hinges, edges, sheet, adj);
+    // Unrecoverable (saturated + failing) junctions already present here; a placement
+    // may not add to this count (it would mean breaking a junction it cannot repair).
+    const badBefore = unrecoverableCount(m, hinges, edges, sheet, adj);
 
     // Branch on the first frontier vertex that has a placement resolving it; a
     // vertex with none is (for now) unroutable and deferred like the saturated
     // ones - skip it rather than failing the whole search.
     for (const v of fr) {
-      const single = candidateRays(v, hinges, failing);
+      const single = candidateRays(v, hinges);
       // One ray for an odd-degree vertex, a pair of rays for an even-degree one.
       // Both rays of a pair originate at v (each is coloured from v independently).
       const placements: HingeRay[][] =
@@ -626,9 +646,11 @@ export function routeHinges(
           const next = nextRays.flatMap((r) => r.path);
           const nadj = planarize([...base, ...next]); // one planarization, shared below
           const nedges = assignCreases({ ...m, hinges: next }, nextRays, nadj);
-          return { addSegs: addRays.flatMap((r) => r.path), nextRays, nadj, nedges, nfr: hingeFrontier(m, next, nedges, sheet, nadj) };
+          const part = failingPartition(m, next, nedges, sheet, nadj); // frontier + unrecoverable in one pass
+          return { addSegs: addRays.flatMap((r) => r.path), nextRays, nadj, nedges, nfr: part.frontier, bad: part.unrecoverable };
         })
         .filter((c) => !c.nfr.some((p) => samePoint(p, v))) // must discharge v
+        .filter((c) => c.bad <= badBefore) // must not create a new unrecoverable junction (tier-3 reject)
         .sort((a, b) => a.nfr.length - b.nfr.length);
 
       if (scored.length === 0) continue; // v not resolvable now - try another vertex
@@ -681,11 +703,11 @@ export interface HingeVertexDiag {
 
 /**
  * Explain, for a vertex v in a given committed-hinge state, exactly why the router
- * can or cannot discharge it: enumerate every free-axis hinge ray, whether it is
- * accepted (traceable and, if it lands on a junction, that junction is itself
- * failing), and whether a placement built from the accepted rays actually removes v
- * from the frontier. This mirrors candidateRays / hingePlacements / the discharge
- * filter in routeHinges, so its verdict matches the real search.
+ * can or cannot discharge it: enumerate every free-axis hinge ray and, evaluating it
+ * as the router would (colour the placement, then check it discharges v and does not
+ * create a new unrecoverable saturated+failing junction), report the verdict. This
+ * mirrors candidateRays / the placement gate in routeHinges, so it matches the real
+ * search - including tier-3 terminations, which are accepted when Maekawa still holds.
  */
 export function explainHingeVertex(
   m: BoxPleatedMolecule,
@@ -693,11 +715,13 @@ export function explainHingeVertex(
   hinges: OriSegment[],
   sheet: { width: number; height: number },
 ): HingeVertexDiag {
-  const edges = assignCreases({ ...m, hinges });
-  const failing = failingVertexKeys(m, hinges, edges, sheet);
+  const base = [...m.boundary, ...m.ridges, ...m.axialFamily];
+  const adj = planarize([...base, ...hinges]);
+  const edges = assignCreases({ ...m, hinges }, undefined, adj);
   const degree = vertexDegree(v, edges);
   const axes = freeAxes(v, m, hinges);
-  const acceptedPaths: OriSegment[][] = [];
+  const badBefore = unrecoverableCount(m, hinges, edges, sheet, adj);
+  const rays: OriSegment[][] = [];
   const candidates: HingeCandidateDiag[] = [];
 
   for (const dir of axes) {
@@ -707,31 +731,33 @@ export function explainHingeVertex(
         reason: "traceHingeRay=null (ray runs along an axial or never lands a valid terminus)" });
       continue;
     }
-    if (t.terminusType === "junction" && !failing.has(vkey(t.terminus))) {
-      candidates.push({ dir, terminusType: t.terminusType, terminus: t.terminus, accepted: false, dischargesV: false,
-        reason: `terminates on HEALTHY junction (${t.terminus.x},${t.terminus.y}) - only failing junctions may be hit` });
-      continue;
-    }
+    rays.push(t.path);
+    // Evaluate this ray as a single-ray placement (colouring included) for its verdict.
     const next = [...hinges, ...t.path];
-    const nfr = hingeFrontier(m, next, assignCreases({ ...m, hinges: next }), sheet);
+    const nadj = planarize([...base, ...next]);
+    const nedges = assignCreases({ ...m, hinges: next }, [{ origin: v, path: t.path }], nadj);
+    const nfr = hingeFrontier(m, next, nedges, sheet, nadj);
     const dischargesV = !nfr.some((p) => samePoint(p, v));
-    acceptedPaths.push(t.path);
-    candidates.push({ dir, terminusType: t.terminusType, terminus: t.terminus, accepted: true, dischargesV,
-      reason: dischargesV ? "OK - single ray discharges v"
-        : `accepted, but alone leaves v failing (needs a pair, or a different ray) -> terminus (${t.terminus.x},${t.terminus.y})` });
+    const breaks = unrecoverableCount(m, next, nedges, sheet, nadj) > badBefore;
+    candidates.push({ dir, terminusType: t.terminusType, terminus: t.terminus, accepted: !breaks, dischargesV,
+      reason: breaks ? `breaks a junction it can't repair (new saturated+failing junction) -> terminus (${t.terminus.x},${t.terminus.y})`
+        : dischargesV ? "OK - single ray discharges v"
+        : `valid, but alone leaves v failing (needs a pair) -> terminus (${t.terminus.x},${t.terminus.y})` });
   }
 
   // Resolvable = does the real placement set (single ray if odd, ray-pair if even)
-  // contain one that discharges v?
-  const placements: OriSegment[][] =
+  // contain one that discharges v without adding an unrecoverable junction?
+  const placements: HingeRay[][] =
     degree % 2 === 1
-      ? acceptedPaths.map((p) => p)
-      : acceptedPaths.flatMap((a, i) => acceptedPaths.slice(i + 1).map((b) => [...a, ...b]));
+      ? rays.map((p) => [{ origin: v, path: p }])
+      : rays.flatMap((a, i) => rays.slice(i + 1).map((b) => [{ origin: v, path: a }, { origin: v, path: b }]));
   let resolvable = false;
   for (const pl of placements) {
-    const next = [...hinges, ...pl];
-    const nfr = hingeFrontier(m, next, assignCreases({ ...m, hinges: next }), sheet);
-    if (!nfr.some((p) => samePoint(p, v))) { resolvable = true; break; }
+    const next = [...hinges, ...pl.flatMap((r) => r.path)];
+    const nadj = planarize([...base, ...next]);
+    const nedges = assignCreases({ ...m, hinges: next }, pl, nadj);
+    const nfr = hingeFrontier(m, next, nedges, sheet, nadj);
+    if (!nfr.some((p) => samePoint(p, v)) && unrecoverableCount(m, next, nedges, sheet, nadj) <= badBefore) { resolvable = true; break; }
   }
 
   const nAcc = candidates.filter((c) => c.accepted).length;
