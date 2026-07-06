@@ -5,7 +5,7 @@
 // its onEvent callback, so the trace is exactly the production search - including
 // every backtrack.
 
-import { generateBoxPleatedPacking } from "./box-pleated-packing.ts";
+import { cachedPacking } from "./box-pleated-packing-cache.ts";
 import { buildPackingMolecule } from "./box-pleated-cp.ts";
 import { routeHinges, type HingeTraceEvent } from "./box-pleated-assignment.ts";
 import { renderHingeTraceFrames } from "./box-pleated-hinge-trace.ts";
@@ -13,18 +13,8 @@ import { renderHingeTraceFrames } from "./box-pleated-hinge-trace.ts";
 const seed = Number(Bun.argv[2] ?? 60115);
 const maxFrames = Number(Bun.argv[3] ?? 500);
 const pixels = Number(Bun.argv[4] ?? 900);
-const leafCount = [4, 5, 6][seed % 3];
 
-const packing = await generateBoxPleatedPacking({
-  id: `s${seed}`,
-  seed,
-  numCreases: 300,
-  bucket: "s",
-  symmetry: "none",
-  targetLeafCount: leafCount,
-  tight: true,
-  tightRestarts: 14,
-});
+const packing = await cachedPacking(seed);
 
 const m = buildPackingMolecule(packing); // throws on a rejected packing (nothing to trace)
 
