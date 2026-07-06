@@ -56,7 +56,7 @@ export async function writePacking(seed: number, packing: BoxPleatedPacking, sto
   const path = packingPath(seed, store);
   await mkdir(dirname(path), { recursive: true });
   const gz = Bun.gzipSync(new TextEncoder().encode(JSON.stringify(packing)), { level: 9 });
-  const tmp = `${path}.${process.pid}.tmp`;
+  const tmp = `${path}.${process.pid}-${Math.random().toString(36).slice(2)}.tmp`;
   await Bun.write(tmp, gz);
   await rename(tmp, path);
   return gz.byteLength;
