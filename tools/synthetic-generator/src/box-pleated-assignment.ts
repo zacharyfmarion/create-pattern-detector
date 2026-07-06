@@ -24,6 +24,8 @@ import {
   findFlapCenters,
   hingeEndpoint,
   planarize,
+  precomputeBasePlanarization,
+  planarizeWithBase,
   propagateAxials,
   propagateAllAxialOffsets,
   propagateHinges,
@@ -521,8 +523,9 @@ export function routeHingesSteps(m: BoxPleatedMolecule, sheet: { width: number; 
   const steps: HingeStep[] = [];
   let hinges: OriSegment[] = [];
   const base = [...m.boundary, ...m.ridges, ...m.axialFamily];
+  const basePlan = precomputeBasePlanarization(base);
   for (let i = 0; i < 200; i++) {
-    const adj = planarize([...base, ...hinges]);
+    const adj = planarizeWithBase(basePlan, hinges);
     const edges = assignCreases({ ...m, hinges }, undefined, adj);
     const fr = hingeFrontier(m, hinges, edges, sheet, adj);
     const badBefore = unrecoverableCount(m, hinges, edges, sheet, adj);
@@ -531,7 +534,7 @@ export function routeHingesSteps(m: BoxPleatedMolecule, sheet: { width: number; 
       const scored = hingePlacements(v, m, hinges, edges, sheet)
         .map((add) => {
           const next = [...hinges, ...add];
-          const nadj = planarize([...base, ...next]);
+          const nadj = planarizeWithBase(basePlan, next);
           const nedges = assignCreases({ ...m, hinges: next }, undefined, nadj);
           const part = failingPartition(m, next, nedges, sheet, nadj);
           return { add, nfr: part.frontier, bad: part.unrecoverable };
@@ -598,7 +601,9 @@ export function routeHinges(
   // The boundary + ridges + axial family are constant across the whole search; only
   // hinges change. Each search state planarizes [base, hinges] exactly once and
   // shares that adjacency across assignCreases / hingeFrontier / unrecoverableCount.
+  // The base is planarized once and reused; each state only splices in its hinges.
   const base = [...m.boundary, ...m.ridges, ...m.axialFamily];
+  const basePlan = precomputeBasePlanarization(base);
 
   const candidateRays = (v: GridPoint, hinges: OriSegment[]): OriSegment[][] => {
     return freeAxes(v, m, hinges)
@@ -649,7 +654,7 @@ export function routeHinges(
         .map((addRays) => {
           const nextRays = [...rays, ...addRays];
           const next = nextRays.flatMap((r) => r.path);
-          const nadj = planarize([...base, ...next]); // one planarization, shared below
+          const nadj = planarizeWithBase(basePlan, next); // one planarization, shared below
           const nedges = assignCreases({ ...m, hinges: next }, nextRays, nadj);
           const part = failingPartition(m, next, nedges, sheet, nadj); // frontier + unrecoverable in one pass
           return { addSegs: addRays.flatMap((r) => r.path), nextRays, nadj, nedges, nfr: part.frontier, bad: part.unrecoverable };
@@ -672,7 +677,7 @@ export function routeHinges(
     return null; // no frontier vertex resolvable
   };
 
-  const adj0 = planarize(base);
+  const adj0 = planarizeWithBase(basePlan, []);
   const edges0 = assignCreases({ ...m, hinges: [] }, [], adj0);
   const solved = solve([], edges0, adj0, hingeFrontier(m, [], edges0, sheet, adj0), 0);
   return solved ?? best.rays;
@@ -721,7 +726,8 @@ export function explainHingeVertex(
   sheet: { width: number; height: number },
 ): HingeVertexDiag {
   const base = [...m.boundary, ...m.ridges, ...m.axialFamily];
-  const adj = planarize([...base, ...hinges]);
+  const basePlan = precomputeBasePlanarization(base);
+  const adj = planarizeWithBase(basePlan, hinges);
   const edges = assignCreases({ ...m, hinges }, undefined, adj);
   const degree = vertexDegree(v, edges);
   const axes = freeAxes(v, m, hinges);
@@ -739,7 +745,7 @@ export function explainHingeVertex(
     rays.push(t.path);
     // Evaluate this ray as a single-ray placement (colouring included) for its verdict.
     const next = [...hinges, ...t.path];
-    const nadj = planarize([...base, ...next]);
+    const nadj = planarizeWithBase(basePlan, next);
     const nedges = assignCreases({ ...m, hinges: next }, [{ origin: v, path: t.path }], nadj);
     const nfr = hingeFrontier(m, next, nedges, sheet, nadj);
     const dischargesV = !nfr.some((p) => samePoint(p, v));
@@ -759,7 +765,7 @@ export function explainHingeVertex(
   let resolvable = false;
   for (const pl of placements) {
     const next = [...hinges, ...pl.flatMap((r) => r.path)];
-    const nadj = planarize([...base, ...next]);
+    const nadj = planarizeWithBase(basePlan, next);
     const nedges = assignCreases({ ...m, hinges: next }, pl, nadj);
     const nfr = hingeFrontier(m, next, nedges, sheet, nadj);
     if (!nfr.some((p) => samePoint(p, v)) && unrecoverableCount(m, next, nedges, sheet, nadj) <= badBefore) { resolvable = true; break; }

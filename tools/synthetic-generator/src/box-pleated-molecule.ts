@@ -941,6 +941,117 @@ export function planarize(segments: OriSegment[]): Map<string, GridPoint[]> {
   return adj;
 }
 
+/**
+ * Precomputed planarization of the constant part of a molecule (boundary + ridges +
+ * axial family). planarize is O(n^2) and the base is ~150 segments that never change
+ * during hinge routing, so its self-intersections are computed once and reused. Pair
+ * with planarizeWithBase, which only adds the (few) hinge segments each call.
+ */
+export interface BasePlanarization {
+  segs: OriSegment[];
+  /** Per base segment: its point list from base x base only (endpoints + crossings). */
+  splits: GridPoint[][];
+  /** Per base segment: cached sub-edge keys, used verbatim when no hinge crosses it. */
+  subEdges: string[][];
+}
+
+/** Emit the sub-edges of segment a-b given its split points (mutates/sorts `points`). */
+function emitSubEdges(edges: Set<string>, a: GridPoint, b: GridPoint, points: GridPoint[]): void {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  points.sort((p, q) => (p.x - a.x) * dx + (p.y - a.y) * dy - ((q.x - a.x) * dx + (q.y - a.y) * dy));
+  for (let k = 0; k + 1 < points.length; k++) {
+    const u = points[k];
+    const v = points[k + 1];
+    if (key(u) === key(v)) continue;
+    edges.add(segKey(u, v));
+  }
+}
+
+/** Precompute the base (constant) planarization; see BasePlanarization. */
+export function precomputeBasePlanarization(base: OriSegment[]): BasePlanarization {
+  const splits: GridPoint[][] = [];
+  const subEdges: string[][] = [];
+  for (let i = 0; i < base.length; i++) {
+    const a = base[i].a;
+    const b = base[i].b;
+    const points: GridPoint[] = [a, b];
+    for (let j = 0; j < base.length; j++) {
+      if (i === j) continue;
+      const x = segmentIntersection(a, b, base[j].a, base[j].b);
+      if (x) points.push(x);
+      for (const e of [base[j].a, base[j].b]) {
+        if (pointOnSegmentStrict(e, a, b)) points.push(e);
+      }
+    }
+    splits.push([...points]); // keep the (unsorted) point set to merge with hinge points later
+    const se = new Set<string>();
+    emitSubEdges(se, a, b, points); // sorts a copy's worth in place; points no longer needed
+    subEdges.push([...se]);
+  }
+  return { segs: base, splits, subEdges };
+}
+
+/**
+ * Planarize base + hinges reusing the precomputed base. Produces output byte-identical
+ * to planarize([...base, ...hinges]) (same edges, inserted base-first then hinges, so
+ * even neighbor ordering matches), at a fraction of the cost: base segments not crossed
+ * by any hinge reuse their cached sub-edges, and only hinge x base / hinge x hinge
+ * intersections are recomputed.
+ */
+export function planarizeWithBase(bp: BasePlanarization, hinges: OriSegment[]): Map<string, GridPoint[]> {
+  PLANARIZE_CALLS++;
+  const base = bp.segs;
+  const edges = new Set<string>();
+  // Base segments: reuse cache unless a hinge crosses / touches them.
+  for (let i = 0; i < base.length; i++) {
+    const a = base[i].a;
+    const b = base[i].b;
+    let extra: GridPoint[] | null = null;
+    for (const h of hinges) {
+      const x = segmentIntersection(a, b, h.a, h.b);
+      if (x) (extra ??= []).push(x);
+      for (const e of [h.a, h.b]) {
+        if (pointOnSegmentStrict(e, a, b)) (extra ??= []).push(e);
+      }
+    }
+    if (!extra) {
+      for (const s of bp.subEdges[i]) edges.add(s);
+      continue;
+    }
+    emitSubEdges(edges, a, b, [...bp.splits[i], ...extra]);
+  }
+  // Hinge segments: intersect against all base + other hinge segments.
+  for (let i = 0; i < hinges.length; i++) {
+    const a = hinges[i].a;
+    const b = hinges[i].b;
+    const points: GridPoint[] = [a, b];
+    for (let j = 0; j < base.length; j++) {
+      const x = segmentIntersection(a, b, base[j].a, base[j].b);
+      if (x) points.push(x);
+      for (const e of [base[j].a, base[j].b]) {
+        if (pointOnSegmentStrict(e, a, b)) points.push(e);
+      }
+    }
+    for (let j = 0; j < hinges.length; j++) {
+      if (i === j) continue;
+      const x = segmentIntersection(a, b, hinges[j].a, hinges[j].b);
+      if (x) points.push(x);
+      for (const e of [hinges[j].a, hinges[j].b]) {
+        if (pointOnSegmentStrict(e, a, b)) points.push(e);
+      }
+    }
+    emitSubEdges(edges, a, b, points);
+  }
+  const adj = new Map<string, GridPoint[]>();
+  for (const edge of edges) {
+    const [uk, vk] = edge.split("|");
+    pushNeighbor(adj, uk, parseKey(vk));
+    pushNeighbor(adj, vk, parseKey(uk));
+  }
+  return adj;
+}
+
 function pushNeighbor(adj: Map<string, GridPoint[]>, vk: string, n: GridPoint): void {
   const list = adj.get(vk);
   if (!list) {
