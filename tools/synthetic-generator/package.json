@@ -9,6 +9,7 @@
     "box-pleated-preview": "bun run src/box-pleated-preview.ts",
     "box-pleated-debug": "bun run src/box-pleated-debug.ts",
     "box-pleated-gen-trace": "bun run src/box-pleated-trace-render.ts",
+    "box-pleated-generate": "bun run src/box-pleated-generate.ts",
     "box-pleated-hinge-trace": "bun run src/box-pleated-hinge-trace-render.ts",
     "box-pleated-hinge-why": "bun run src/box-pleated-hinge-why.ts",
     "box-pleated-packing-compare": "bun run src/box-pleated-packing-compare.ts",
