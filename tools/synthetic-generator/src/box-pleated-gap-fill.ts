@@ -40,6 +40,13 @@ export interface GapFillResult {
   flaps: GapRect[];
   /** Straight-skeleton ridge creases for every new flap. */
   ridges: OriSegment[];
+  /**
+   * Ridges grouped per filler flap (parallel to `flaps`), so axial seeds can be
+   * taken from each flap's OWN straight skeleton rather than the fused union.
+   */
+  ridgesByFlap: OriSegment[][];
+  /** Axial-seed centers per filler flap (parallel to `flaps`); see TilingResult. */
+  centersByFlap: GridPoint[][];
   /** True when every empty region was filled. */
   resolved: boolean;
   /** Bounding rectangles of empty regions that could not be filled. */
@@ -54,11 +61,24 @@ export function fillBoxPleatedGaps(
 ): GapFillResult {
   const W = Math.round(sheet.width);
   const H = Math.round(sheet.height);
-  const empty = emptyGrid(W, H, occupied);
+  return fillEmptyGrid(W, H, emptyGrid(W, H, occupied));
+}
+
+/** Tile a pre-computed empty grid (true = empty cell) with filler flaps. */
+export function fillBoxPleatedGapsFromGrid(
+  sheet: { width: number; height: number },
+  empty: boolean[][],
+): GapFillResult {
+  return fillEmptyGrid(Math.round(sheet.width), Math.round(sheet.height), empty);
+}
+
+function fillEmptyGrid(W: number, H: number, empty: boolean[][]): GapFillResult {
   const regions = connectedRegions(empty, W, H);
 
   const flaps: GapRect[] = [];
   const ridges: OriSegment[] = [];
+  const ridgesByFlap: OriSegment[][] = [];
+  const centersByFlap: GridPoint[][] = [];
   const unresolved: GapRect[] = [];
   for (const region of regions) {
     // Tile this region's actual cells (in sheet coordinates), so non-rectangular
@@ -70,12 +90,14 @@ export function fillBoxPleatedGaps(
     if (tiling.solved) {
       flaps.push(...tiling.flaps);
       ridges.push(...tiling.ridges);
+      ridgesByFlap.push(...tiling.ridgesByFlap);
+      centersByFlap.push(...tiling.centersByFlap);
     } else {
       unresolved.push(boundingRect(region));
     }
   }
 
-  return { flaps, ridges, resolved: unresolved.length === 0, unresolved };
+  return { flaps, ridges, ridgesByFlap, centersByFlap, resolved: unresolved.length === 0, unresolved };
 }
 
 /** Straight-skeleton ridge creases of a rectangular flap. */
@@ -115,6 +137,105 @@ export function flapRidges(r: GapRect): OriSegment[] {
     { a: top, b: bottom },
   ];
 }
+
+const RIDGE_EPS = 1e-6;
+
+/**
+ * BP Studio emits a non-square flap's ridges as a rectangular "ring" (four
+ * axis-aligned sides) with the box's four 45-degree diagonals terminating on the
+ * ring's corners - leaving the ring's interior un-creased: a rectangular donut
+ * hole. Detect that ring and return its rectangle, or null when the ridges have
+ * no 2D ring (a flap whose skeleton already collapses to a point or segment).
+ */
+export function ringRect(ridges: OriSegment[]): GapRect | null {
+  const horizontal = ridges.filter((s) => Math.abs(s.a.y - s.b.y) < RIDGE_EPS);
+  const vertical = ridges.filter((s) => Math.abs(s.a.x - s.b.x) < RIDGE_EPS);
+  if (horizontal.length === 0 || vertical.length === 0) return null;
+
+  // The ring is the bounding rectangle of the axis-aligned ridges.
+  let x0 = Infinity;
+  let y0 = Infinity;
+  let x1 = -Infinity;
+  let y1 = -Infinity;
+  for (const s of [...horizontal, ...vertical]) {
+    x0 = Math.min(x0, s.a.x, s.b.x);
+    y0 = Math.min(y0, s.a.y, s.b.y);
+    x1 = Math.max(x1, s.a.x, s.b.x);
+    y1 = Math.max(y1, s.a.y, s.b.y);
+  }
+  // No 2D interior (a 1D spine, already a clean skeleton) - no ring.
+  if (x1 - x0 < 1 - RIDGE_EPS || y1 - y0 < 1 - RIDGE_EPS) return null;
+
+  // Confirm it is a closed rectangular ring: each of the four sides is covered by
+  // an axis-aligned ridge spanning it. Otherwise these axis-aligned ridges are
+  // not a flap's straight-skeleton core.
+  const spansH = (y: number): boolean =>
+    horizontal.some(
+      (s) =>
+        Math.abs(s.a.y - y) < RIDGE_EPS &&
+        Math.min(s.a.x, s.b.x) <= x0 + RIDGE_EPS &&
+        Math.max(s.a.x, s.b.x) >= x1 - RIDGE_EPS,
+    );
+  const spansV = (x: number): boolean =>
+    vertical.some(
+      (s) =>
+        Math.abs(s.a.x - x) < RIDGE_EPS &&
+        Math.min(s.a.y, s.b.y) <= y0 + RIDGE_EPS &&
+        Math.max(s.a.y, s.b.y) >= y1 - RIDGE_EPS,
+    );
+  if (!spansH(y0) || !spansH(y1) || !spansV(x0) || !spansV(x1)) return null;
+  return { x0, y0, x1, y1 };
+}
+
+/**
+ * The straight-skeleton creases that fill a non-square flap's rectangular donut
+ * hole (spine + the four diagonals from the ring corners to the spine), or an
+ * empty list when the ridges have no 2D ring.
+ */
+export function fillRidgeRectHole(ridges: OriSegment[]): OriSegment[] {
+  const rect = ringRect(ridges);
+  return rect ? flapRidges(rect) : [];
+}
+
+/** True when a segment lies on one of the rectangle's four sides. */
+function onRectSide(s: OriSegment, r: GapRect): boolean {
+  const horizontal = Math.abs(s.a.y - s.b.y) < RIDGE_EPS;
+  const vertical = Math.abs(s.a.x - s.b.x) < RIDGE_EPS;
+  const within = (lo: number, hi: number, a: number, b: number): boolean =>
+    Math.min(a, b) >= lo - RIDGE_EPS && Math.max(a, b) <= hi + RIDGE_EPS;
+  if (horizontal && (Math.abs(s.a.y - r.y0) < RIDGE_EPS || Math.abs(s.a.y - r.y1) < RIDGE_EPS))
+    return within(r.x0, r.x1, s.a.x, s.b.x);
+  if (vertical && (Math.abs(s.a.x - r.x0) < RIDGE_EPS || Math.abs(s.a.x - r.x1) < RIDGE_EPS))
+    return within(r.y0, r.y1, s.a.y, s.b.y);
+  return false;
+}
+
+/**
+ * Repair a flap's ridge set. BP Studio emits a stretched flap as a small inner
+ * hole wrapped by a river, drawing a rectangular ring for that internal boundary
+ * with the flap's 45-degree bisectors terminating on the ring's corners. That ring
+ * is NOT part of the straight skeleton - conceptually the hole and its surrounding
+ * river are one flap. So when we detect the ring we DELETE its four sides and
+ * rebuild the ring's true straight skeleton (spine + the diagonals from each ring
+ * corner to the spine). With the ring sides gone, each ring corner is just a
+ * collinear pass-through - the outer bisector continues straight into the inner
+ * diagonal - so it stops being a junction, and axial seeds land only on the spine
+ * ends. We always delete the ring sides now, whether the ring sits inside the
+ * paper or straddles an edge (an edge/corner flap): they are axis-aligned and are
+ * omitted from the crease set downstream regardless, so removing them here only
+ * cleans up the axial seeding. `bounds` is unused now but kept for callers.
+ */
+export function repairFlapRidgeHole(
+  ridges: OriSegment[],
+  bounds: { width: number; height: number },
+): OriSegment[] {
+  void bounds;
+  const rect = ringRect(ridges);
+  if (!rect) return ridges;
+  const kept = ridges.filter((s) => !onRectSide(s, rect));
+  return [...kept, ...flapRidges(rect)];
+}
+
 
 // ---------------------------------------------------------------------------
 
@@ -170,7 +291,7 @@ function boundingRect(cells: Array<[number, number]>): GapRect {
   return { x0, y0, x1, y1 };
 }
 
-function insidePolygon(p: GridPoint, poly: OccupiedPolygon): boolean {
+export function insidePolygon(p: GridPoint, poly: OccupiedPolygon): boolean {
   if (!pointInRing(p, poly.outer)) return false;
   for (const hole of poly.inner ?? []) {
     if (pointInRing(p, hole)) return false;

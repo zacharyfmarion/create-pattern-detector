@@ -1,8 +1,15 @@
 import { runBpStudioLayout, type BpStudioLayoutContour, type BpStudioLayoutGraphics, type BpStudioLayoutLine } from "./bp-studio-layout.ts";
 import { solveWithBpStudioOptimizer } from "./bp-studio-optimizer.ts";
 import { SeededRandom } from "./random.ts";
-import { fillBoxPleatedGaps, type GapRect, type OccupiedPolygon } from "./box-pleated-gap-fill.ts";
-import type { OriSegment } from "./ori-parser.ts";
+import {
+  fillBoxPleatedGapsFromGrid,
+  insidePolygon,
+  type GapRect,
+  type OccupiedPolygon,
+} from "./box-pleated-gap-fill.ts";
+import type { GridPoint, OriSegment } from "./ori-parser.ts";
+
+const EPS = 1e-9;
 import type { BpOptimizerHierarchy, BpOptimizerRequest, BpOptimizerResult } from "./bp-studio-optimizer.ts";
 
 export type BoxPleatedPackingSymmetry = "vertical" | "horizontal" | "none";
@@ -264,6 +271,19 @@ export interface PackingGapFill {
   flaps: GapRect[];
   /** Straight-skeleton ridge creases for the filler flaps. */
   ridges: OriSegment[];
+  /**
+   * Filler ridges grouped per flap (parallel to `flaps`). Axial seeds come from
+   * each filler flap's own straight skeleton, so a point where two adjacent
+   * fillers merely touch on their shared boundary is never seeded.
+   */
+  ridgesByFlap: OriSegment[][];
+  /**
+   * Axial-seed centers for the filler flaps (flattened): each filler's straight-
+   * skeleton convergence points, computed from its reflected full rectangle. These
+   * are the authoritative centers - an edge/corner filler's center sits on (or just
+   * beyond) the paper boundary, which the clipped `ridgesByFlap` no longer carries.
+   */
+  centers: GridPoint[];
   /** True when all empty paper was filled (the packing is complete, rule #4). */
   complete: boolean;
   /** Empty regions that could not be filled (the packing should be rejected). */
@@ -272,26 +292,173 @@ export interface PackingGapFill {
 
 /**
  * Fill the empty paper of a BP Studio packing with filler flaps so it consumes
- * all paper (ODS polygon-packing rule #4). Flap, river, and stretch-device
- * contours are treated as occupied; the remaining empty rectangles are tiled
- * with valid flaps. A packing with an unfillable void (e.g. a 1-wide fully
- * interior strip) is reported incomplete and should be rejected.
+ * all paper (ODS polygon-packing rule #4). The empty regions ("holes") come from
+ * findPackingHoles - the gaps between facing flaps that exceed their river width.
+ * Each hole is tiled with valid flaps; a hole that cannot be tiled (e.g. a 1-wide
+ * fully interior strip) is reported incomplete and the packing is rejected.
  */
 export function fillPackingGaps(packing: BoxPleatedPacking): PackingGapFill {
-  const occupied: OccupiedPolygon[] = [];
-  for (const object of packing.layout.objects) {
-    if (object.kind === "root") continue;
-    for (const contour of object.contours) {
-      occupied.push({ outer: contour.outer, inner: contour.inner });
-    }
-  }
-  const result = fillBoxPleatedGaps(packing.sheet, occupied);
+  const result = fillBoxPleatedGapsFromGrid(packing.sheet, packingEmptyGrid(packing));
   return {
     flaps: result.flaps,
     ridges: result.ridges,
+    ridgesByFlap: result.ridgesByFlap,
+    centers: result.centersByFlap.flat(),
     complete: result.resolved,
     unresolved: result.unresolved,
   };
+}
+
+/**
+ * The cells (grid centres) that a river band covers. Every internal tree node is
+ * a river: its band is the children's subtree grown outward by the node's edge
+ * length (BP's RoughContour expansion). But that expansion fills interior gaps
+ * between sibling flaps too, so we keep only the OUTWARD ring: a cell within the
+ * width of the subtree is river unless the subtree sandwiches it (subtree cells on
+ * opposite axis-sides), which marks it as an interior hole instead.
+ *
+ * Returns a map from each river cell ("x,y") to the tree node that owns it - the
+ * river whose subtree is nearest - so callers (and the debug renderer) can tell
+ * adjacent rivers apart.
+ */
+export function packingRiverCells(packing: BoxPleatedPacking): Map<string, number> {
+  const W = Math.round(packing.sheet.width);
+  const H = Math.round(packing.sheet.height);
+  const childrenOf = new Map<number, number[]>();
+  for (const n of packing.tree.nodes) childrenOf.set(n.id, []);
+  for (const n of packing.tree.nodes) if (n.parentId != null) childrenOf.get(n.parentId)?.push(n.id);
+  const flapById = new Map(packing.flaps.map((f) => [f.id, f]));
+  // Real flap polygons keyed by their tree node, so the river subtree matches the
+  // coverage test (a cell inside a flap's bounding square but outside its real
+  // polygon - common next to a stretch - is not treated as flap).
+  const flapPolysByNode = new Map<number, OccupiedPolygon[]>();
+  for (const object of packing.layout.objects) {
+    if (object.kind !== "flap" || object.nodeId == null) continue;
+    flapPolysByNode.set(
+      object.nodeId,
+      object.contours.map((c) => ({ outer: c.outer, inner: c.inner })),
+    );
+  }
+  const leavesUnder = (id: number): number[] => {
+    const kids = childrenOf.get(id) ?? [];
+    if (kids.length === 0) return flapById.has(id) ? [id] : [];
+    return kids.flatMap(leavesUnder);
+  };
+  const key = (x: number, y: number): string => `${x},${y}`;
+
+  const owner = new Map<string, { node: number; dist: number }>();
+  for (const v of packing.tree.nodes) {
+    const kids = childrenOf.get(v.id) ?? [];
+    if (kids.length === 0 || v.parentId == null) continue; // skip flaps (leaves) and the root
+    const width = Math.round(v.lengthToParent);
+    if (width <= 0) continue;
+
+    const polys = leavesUnder(v.id).flatMap((leaf) => flapPolysByNode.get(leaf) ?? []);
+    if (polys.length === 0) continue;
+    const subtree = new Set<string>();
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const c = { x: x + 0.5, y: y + 0.5 };
+        if (polys.some((p) => insidePolygon(c, p))) subtree.add(key(x, y));
+      }
+    }
+    if (subtree.size === 0) continue;
+
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        if (subtree.has(key(x, y))) continue;
+        let dist = Infinity;
+        for (let dy = -width; dy <= width; dy++) {
+          for (let dx = -width; dx <= width; dx++) {
+            if (subtree.has(key(x + dx, y + dy))) dist = Math.min(dist, Math.max(Math.abs(dx), Math.abs(dy)));
+          }
+        }
+        if (!Number.isFinite(dist)) continue;
+        // Sandwiched = the subtree lies on opposite sides (anywhere along the row
+        // or column), so this cell is an interior gap (a hole), not the outward
+        // river ring. Scan the full row/column, not just within the width, so a
+        // gap taller than the river width is still recognised as enclosed.
+        let up = false;
+        let down = false;
+        let left = false;
+        let right = false;
+        for (let k = y + 1; k < H && !up; k++) if (subtree.has(key(x, k))) up = true;
+        for (let k = y - 1; k >= 0 && !down; k--) if (subtree.has(key(x, k))) down = true;
+        for (let k = x + 1; k < W && !right; k++) if (subtree.has(key(k, y))) right = true;
+        for (let k = x - 1; k >= 0 && !left; k--) if (subtree.has(key(k, y))) left = true;
+        if ((up && down) || (left && right)) continue;
+        const prev = owner.get(key(x, y));
+        if (!prev || dist < prev.dist) owner.set(key(x, y), { node: v.id, dist });
+      }
+    }
+  }
+  return new Map([...owner].map(([k, v]) => [k, v.node]));
+}
+
+/**
+ * The empty (hole) cells of a packing: paper not covered by a flap polygon, a
+ * stretch device, or a river band. Real flap/stretch polygons are used for
+ * coverage so non-rectangular flaps near Pythagorean stretches are not mis-counted
+ * as empty.
+ */
+export function packingEmptyGrid(packing: BoxPleatedPacking): boolean[][] {
+  const W = Math.round(packing.sheet.width);
+  const H = Math.round(packing.sheet.height);
+  const covers: OccupiedPolygon[] = [];
+  for (const object of packing.layout.objects) {
+    if (object.kind !== "flap" && object.kind !== "stretch-device") continue;
+    for (const contour of object.contours) covers.push({ outer: contour.outer, inner: contour.inner });
+  }
+  const rivers = packingRiverCells(packing);
+  const empty: boolean[][] = Array.from({ length: H }, () => new Array<boolean>(W).fill(false));
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      if (rivers.has(`${x},${y}`)) continue;
+      const c = { x: x + 0.5, y: y + 0.5 };
+      if (!covers.some((s) => insidePolygon(c, s))) empty[y][x] = true;
+    }
+  }
+  return empty;
+}
+
+/** The packing's holes as the bounding rectangles of its connected empty regions. */
+export function findPackingHoles(packing: BoxPleatedPacking): GapRect[] {
+  const empty = packingEmptyGrid(packing);
+  const H = empty.length;
+  const W = H > 0 ? empty[0].length : 0;
+  const seen = Array.from({ length: H }, () => new Array<boolean>(W).fill(false));
+  const holes: GapRect[] = [];
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      if (!empty[y][x] || seen[y][x]) continue;
+      let x0 = x;
+      let y0 = y;
+      let x1 = x + 1;
+      let y1 = y + 1;
+      const stack: Array<[number, number]> = [[x, y]];
+      seen[y][x] = true;
+      while (stack.length) {
+        const [cx, cy] = stack.pop()!;
+        x0 = Math.min(x0, cx);
+        y0 = Math.min(y0, cy);
+        x1 = Math.max(x1, cx + 1);
+        y1 = Math.max(y1, cy + 1);
+        for (const [nx, ny] of [
+          [cx + 1, cy],
+          [cx - 1, cy],
+          [cx, cy + 1],
+          [cx, cy - 1],
+        ] as Array<[number, number]>) {
+          if (nx >= 0 && ny >= 0 && nx < W && ny < H && empty[ny][nx] && !seen[ny][nx]) {
+            seen[ny][nx] = true;
+            stack.push([nx, ny]);
+          }
+        }
+      }
+      holes.push({ x0, y0, x1, y1 });
+    }
+  }
+  return holes;
 }
 
 export function renderBoxPleatedPackingSvg(
@@ -415,6 +582,7 @@ function sampleTree(config: BoxPleatedPackingConfig, rng: SeededRandom): Sampled
     const leavesOnHub = hubIndex === hubCount - 1 && requestedLeaves % 2 === 1 ? 1 : 2;
     for (let leafIndex = 0; leafIndex < leavesOnHub; leafIndex++) {
       const leafId = nextId++;
+      const { width, height } = evenShorterFlap(rng.choice([0, 0, 1, 2, 3]), rng.choice([0, 0, 1, 2, 3]));
       nodes.push({
         id: leafId,
         parentId: hubId,
@@ -422,8 +590,8 @@ function sampleTree(config: BoxPleatedPackingConfig, rng: SeededRandom): Sampled
         label: `leaf-${hubIndex}-${leafIndex}`,
         lengthToParent: scaledLength(rng.int(3, 7), optimizerDistanceScale),
         children: [],
-        width: rng.choice([0, 0, 1, 2, 3]),
-        height: rng.choice([0, 0, 1, 2, 3]),
+        width,
+        height,
       });
       nodes[hubId].children.push(leafId);
       leafIds.push(leafId);
@@ -431,6 +599,32 @@ function sampleTree(config: BoxPleatedPackingConfig, rng: SeededRandom): Sampled
   }
 
   return { nodes, leafIds, symmetry, optimizerDistanceScale, noStretches };
+}
+
+/**
+ * Constrain a flap's rectangular cross-section so its box-pleat molecule lands
+ * on the grid.
+ *
+ * A leaf flap occupies a `width x height` rectangle of paper that must be creased
+ * with its own straight skeleton (a spine plus 45-degree corner miters) to
+ * collapse flat. The spine runs down the middle of the SHORTER side, so it sits
+ * on an integer grid line only when the shorter side is even. A flap with an odd
+ * shorter side >= 1 (e.g. 1x2) would put its spine on a half-grid line - a
+ * sub-grid crease, which box pleating forbids - and there is no valid on-grid
+ * molecule for it. We therefore never sample such a flap: reduce an odd shorter
+ * side to the next even value (1 -> 0, 3 -> 2). A zero dimension is a degenerate
+ * (point/edge) flap with no interior to crease and is always fine; valid
+ * mixed-parity rectangles like 2x3 (shorter side 2) are left untouched.
+ *
+ * (When we later feed in real treemaker trees, which we do not control, the same
+ * rule needs to live as a validation/rejection check on the generated packing.)
+ */
+export function evenShorterFlap(width: number, height: number): { width: number; height: number } {
+  if (Math.min(width, height) % 2 === 1) {
+    if (width <= height) width -= 1;
+    else height -= 1;
+  }
+  return { width, height };
 }
 
 function optimizerRequestForTree(sampled: SampledTree, rng: SeededRandom): BpOptimizerRequest {

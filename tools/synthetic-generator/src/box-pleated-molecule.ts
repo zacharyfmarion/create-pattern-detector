@@ -29,10 +29,29 @@ export interface AxialResult {
   seeds: GridPoint[];
   /** Contour hits that terminated at a multi-ridge junction (need Y-handling later). */
   junctionTerminations: GridPoint[];
+  /**
+   * Reflection/termination points that did NOT land on a grid point. Every axial
+   * must reflect or end on an integer grid point; a non-empty list means the
+   * packing produced a sub-grid crease (e.g. a Pythagorean stretch edge whose
+   * reflection misses the grid) and should be rejected.
+   */
+  offGrid: GridPoint[];
   reflections: number;
 }
 
 const EPS = 1e-7;
+// Float-dust tolerance for snapping a reflection/termination point to the grid.
+// Far below any genuine sub-grid offset (a half cell, or a Pythagorean fraction
+// like 1/3), so it only cleans rounding error and never hides a real off-grid hit.
+const GRID_EPS = 1e-6;
+// Tolerance for the Kawasaki alternating angle sum (radians). A junction incident
+// to an off-grid vertex (where a non-45 stretch ridge crosses an axis crease at a
+// fractional point) carries that vertex at a slightly irrational angle, so its
+// angle sum misses zero by rounding dust (~6e-5 rad observed). This tolerance
+// absorbs that dust while staying far below any genuine Kawasaki violation (which
+// is on the order of a radian). The real off-grid vertices are still rejected -
+// they are odd-degree, which fails the even-degree condition regardless.
+const KAWASAKI_EPS = 1e-3;
 const MAX_BOUNCES = 64;
 const AXIS_DIRS: GridPoint[] = [
   { x: 1, y: 0 },
@@ -58,24 +77,51 @@ export function propagateAxials(
   const all: OriSegment[] = [];
   const seen = new Set<string>();
   const junctionTerminations: GridPoint[] = [];
+  const offGrid: GridPoint[] = [];
   let reflections = 0;
 
+  const insideSheet = (p: GridPoint): boolean =>
+    p.x >= -EPS && p.y >= -EPS && p.x <= sheet.width + EPS && p.y <= sheet.height + EPS;
+
   for (const seed of seeds) {
-    for (const dir of AXIS_DIRS) {
+    // A seed that sits on a stretch corner is the tip of a stretched (non-45)
+    // flap whose axis runs into the parallelogram along an OFF-axis direction.
+    // marchRay ignores ridges at a ray's own origin (t<=EPS), so an axis-aligned
+    // ray fired from the seed can never reflect off the arm it starts on - the
+    // stretch axis would be missing. Emit it explicitly: reflect the axis dirs
+    // off each incident arm and keep the ones pointing into the stretch sector.
+    for (const dir of [...AXIS_DIRS, ...stretchSeedDirs(seed, ridges)]) {
       let from = seed;
       let d = dir;
       for (let bounce = 0; bounce < MAX_BOUNCES; bounce++) {
         const hit = marchRay(from, d, ridges, sheet);
         if (!hit) break;
-        addSegment(all, seen, from, hit.point);
+        // Every reflection/termination must land on a grid point. Snap away float
+        // dust; a point not near any grid point is a genuine sub-grid crease - we
+        // record it and stop this contour so callers can reject the packing.
+        const point = snapToGrid(hit.point);
+        if (!point) {
+          offGrid.push(hit.point);
+          addSegment(all, seen, from, hit.point);
+          break;
+        }
+        // A corner/edge flap's center can lie outside the paper. Its axial is
+        // seeded there and marches IN; the paper edge it first meets is an entry,
+        // not a termination - drop the off-paper stub and keep marching inside so
+        // the crease starts at the paper edge rather than overhanging it.
+        if (hit.type === "boundary" && !insideSheet(from)) {
+          from = point;
+          continue;
+        }
+        addSegment(all, seen, from, point);
         if (hit.type === "boundary") break;
         if (hit.type === "junction") {
-          junctionTerminations.push(hit.point);
+          junctionTerminations.push(point);
           break;
         }
         // ridge interior: reflect across and continue.
         d = reflect(d, hit.ridgeDir!);
-        from = hit.point;
+        from = point;
         reflections++;
       }
     }
@@ -90,7 +136,70 @@ export function propagateAxials(
   // its M/V may need special handling at assignment (it is "both" a ridge and
   // an axial). Revisit when we wire crease assignment.
   const axials = subtractRidgeOverlaps(interior, ridges);
-  return { axials, edgeAxials, seeds, junctionTerminations, reflections };
+  return { axials, edgeAxials, seeds, junctionTerminations, offGrid, reflections };
+}
+
+/**
+ * Extra axial launch directions for a seed sitting on a Pythagorean-stretch
+ * corner. The stretch flap's axis runs into the parallelogram along an off-axis
+ * direction that is the reflection of an axis-aligned ray across one of the two
+ * arms meeting at the corner. We reflect all four axis dirs across each incident
+ * stretch arm (non-axis AND non-45 ridge) and keep a reflected direction only if
+ * it points strictly INTO the sector spanned by the two arms (the parallelogram
+ * interior) - that keeps the stretch axis (e.g. (4,3)) and drops the mirror-image
+ * directions that reflect back out of the stretch. Returns [] for ordinary seeds.
+ */
+function stretchSeedDirs(seed: GridPoint, ridges: OriSegment[]): GridPoint[] {
+  const arms: GridPoint[] = [];
+  for (const r of ridges) {
+    let o: GridPoint | null = null;
+    if (samePoint(r.a, seed)) o = r.b;
+    else if (samePoint(r.b, seed)) o = r.a;
+    if (!o) continue;
+    const dx = o.x - seed.x;
+    const dy = o.y - seed.y;
+    const len = Math.hypot(dx, dy);
+    if (len < EPS) continue;
+    if (Math.abs(dx) < EPS || Math.abs(dy) < EPS) continue; // axis-aligned: not a stretch arm
+    if (Math.abs(Math.abs(dx) - Math.abs(dy)) < EPS) continue; // 45-degree: not a stretch arm
+    arms.push({ x: dx / len, y: dy / len });
+  }
+  if (arms.length < 2) return [];
+  const ang = (p: GridPoint): number => Math.atan2(p.y, p.x);
+  const inSector = (d: GridPoint): boolean => {
+    const da = ang(d);
+    for (let i = 0; i < arms.length; i++) {
+      for (let j = i + 1; j < arms.length; j++) {
+        let lo = ang(arms[i]);
+        let hi = ang(arms[j]);
+        if (lo > hi) [lo, hi] = [hi, lo];
+        if (hi - lo >= Math.PI - EPS) continue; // reflex span: interior is the other side
+        if (da > lo + EPS && da < hi - EPS) return true;
+      }
+    }
+    return false;
+  };
+  const out: GridPoint[] = [];
+  const seen = new Set<string>();
+  for (const arm of arms) {
+    for (const ax of AXIS_DIRS) {
+      const d = reflect(ax, arm);
+      if (Math.abs(d.x) < EPS || Math.abs(d.y) < EPS) continue; // reflected back to an axis dir
+      if (!inSector(d)) continue;
+      const key = `${Math.round(d.x * 1e5)},${Math.round(d.y * 1e5)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(d);
+    }
+  }
+  return out;
+}
+
+/** Snap a point to the integer grid if it is within float-dust tolerance, else null. */
+function snapToGrid(p: GridPoint): GridPoint | null {
+  const rx = Math.round(p.x);
+  const ry = Math.round(p.y);
+  return Math.abs(p.x - rx) < GRID_EPS && Math.abs(p.y - ry) < GRID_EPS ? { x: rx, y: ry } : null;
 }
 
 /** Remove the portions of each axial that lie along a collinear ridge. */
@@ -136,16 +245,18 @@ function segAt(s: OriSegment, t0: number, t1: number): OriSegment {
 }
 
 /**
- * Stage B: axial+1 pleat contours.
+ * Stage B: axial+n pleat contours, generated level by level (axials = level 0).
  *
- * Rule (from the manual construction): take every point that is exactly 1 unit
- * perpendicular-offset from an axial crease and is not already a crease, then
- * march a contour through it in both directions following the SAME rules as
- * axial generation (reflect across ridges, terminate at a multi-ridge junction
- * or the paper edge). Both the interior axials and the paper-edge axials are
- * valid sources to offset from.
+ * Manual construction (the author's process): for each crease at the current
+ * level, walk it at unit gridpoints; offset 1 unit PERPENDICULAR to a candidate
+ * point p. Keep p only if the unit connecting segment from the walk point to p
+ * does NOT intersect or touch any ridge or any already-generated crease (touch
+ * = a crossing, a collinear overlap, or p landing on a crease). Then march a new
+ * crease from p in both directions: reflect at ridges, and STOP at the paper
+ * edge or any existing crease - so a pleat never runs straight through an axial
+ * or another pleat. The marched contour is a crease at the next level.
  *
- * `axials` should be the interior axials; `edgeAxials` the paper-edge runs.
+ * `axials` are the interior axials; `edgeAxials` the paper-edge runs.
  */
 export function propagateAxialOffsets(
   ridges: OriSegment[],
@@ -153,50 +264,133 @@ export function propagateAxialOffsets(
   axials: OriSegment[],
   edgeAxials: OriSegment[],
 ): OriSegment[] {
-  const out: OriSegment[] = [];
+  const sources = [...axials, ...edgeAxials];
+  return offsetRound(ridges, sheet, sources, sources).pleats;
+}
+
+/** One level of offset pleats: offset each source crease, stopping at every crease. */
+function offsetRound(
+  ridges: OriSegment[],
+  sheet: { width: number; height: number },
+  frontier: OriSegment[],
+  existingCreases: OriSegment[],
+): { pleats: OriSegment[] } {
+  // Stoppers grow as pleats are produced, so a later pleat stops at an earlier
+  // one in the same round (matching drawing them one at a time).
+  const stoppers = [...existingCreases];
+  const produced: OriSegment[] = [];
   const seen = new Set<string>();
-  const march = (start: GridPoint, dir: GridPoint): void => {
-    let from = start;
-    let d = dir;
-    for (let bounce = 0; bounce < MAX_BOUNCES; bounce++) {
-      const hit = marchRay(from, d, ridges, sheet);
-      if (!hit) break;
-      addSegment(out, seen, from, hit.point);
-      if (hit.type !== "ridge") break;
-      d = reflect(d, hit.ridgeDir!);
-      from = hit.point;
-    }
-  };
-
-  // Existing creases. A candidate seed point that already lies on any of these
-  // is skipped - we only seed in still-empty paper, then let the ridge
-  // reflection rules trace the contour.
-  const creases = [...axials, ...edgeAxials, ...ridges];
-  const onCrease = (p: GridPoint): boolean => creases.some((c) => pointOnSegment(p, c));
-
-  // Seeds: every interior integer point one unit perpendicular off an axial
-  // line, paired with the axial's direction. Offsetting from interior axials and
-  // edge-axials alike. Dedupe identical (point, dir) seeds.
-  const seedKeys = new Set<string>();
-  for (const a of [...axials, ...edgeAxials]) {
-    const dir = unit({ x: a.b.x - a.a.x, y: a.b.y - a.a.y });
+  for (const src of frontier) {
+    const dir = unit({ x: src.b.x - src.a.x, y: src.b.y - src.a.y });
+    // Only axis-parallel sources offset onto the grid; a non-45 stretch crease's
+    // pleats live in the rotated grid (not handled yet), so skip it as a source.
+    if (Math.abs(dir.x) > EPS && Math.abs(dir.y) > EPS) continue;
     const perp = { x: -dir.y, y: dir.x };
-    const steps = Math.round(Math.hypot(a.b.x - a.a.x, a.b.y - a.a.y));
+    // Walk only integer points that lie ON the source. A pleat that reflected off a
+    // non-45 stretch arm ends off-grid (non-integer length, e.g. 4.5), and rounding
+    // that UP would place the last walk point PAST the arm - inside the stretch -
+    // seeding a phantom pleat there. floor keeps the walk on the segment (unchanged
+    // for the integer-length on-grid sources, where round == floor).
+    const steps = Math.floor(Math.hypot(src.b.x - src.a.x, src.b.y - src.a.y) + EPS);
     for (let i = 0; i <= steps; i++) {
-      const base = { x: a.a.x + dir.x * i, y: a.a.y + dir.y * i };
+      const base = { x: src.a.x + dir.x * i, y: src.a.y + dir.y * i };
+      // Do not offset from a walk point that lies on a ridge - that is where the
+      // axial terminated against the ridge (e.g. a stretch corner), so a pleat
+      // seeded there hangs off the junction. (connectingClear can't catch it: the
+      // contact is at the foot, which is exempt as "on the source".)
+      if (ridges.some((r) => pointOnSegment(base, r))) continue;
       for (const sign of [1, -1]) {
         const p = { x: base.x + perp.x * sign, y: base.y + perp.y * sign };
         if (p.x < 0 || p.y < 0 || p.x > sheet.width || p.y > sheet.height) continue;
-        if (onCrease(p)) continue; // only seed in empty paper
-        const k = `${p.x},${p.y}:${dir.x},${dir.y}`;
-        if (seedKeys.has(k)) continue;
-        seedKeys.add(k);
-        march(p, dir);
-        march(p, { x: -dir.x, y: -dir.y });
+        if (!connectingClear(base, p, ridges, stoppers)) continue;
+        for (const seg of marchPleat(p, dir, ridges, stoppers, sheet)) {
+          const k = segmentKey(seg);
+          if (seen.has(k)) continue;
+          seen.add(k);
+          produced.push(seg);
+          stoppers.push(seg);
+        }
       }
     }
   }
-  return subtractRidgeOverlaps(out.filter((s) => !onPaperEdge(s, sheet)), ridges);
+  return { pleats: subtractRidgeOverlaps(produced.filter((s) => !onPaperEdge(s, sheet)), ridges) };
+}
+
+/**
+ * The unit connecting segment from a source walk point `base` to its offset `p`
+ * is clear iff it does not touch any ridge or crease except at its foot `base`
+ * (which lies on the source). Touch = p on a crease, the segment's midpoint on a
+ * crease (collinear overlap), or a proper interior crossing.
+ */
+function connectingClear(base: GridPoint, p: GridPoint, ridges: OriSegment[], creases: OriSegment[]): boolean {
+  const mid = { x: (base.x + p.x) / 2, y: (base.y + p.y) / 2 };
+  for (const c of ridges) {
+    if (pointOnSegment(p, c) || pointOnSegment(mid, c) || segmentsCross(base, p, c.a, c.b)) return false;
+  }
+  for (const c of creases) {
+    if (pointOnSegment(p, c) || pointOnSegment(mid, c) || segmentsCross(base, p, c.a, c.b)) return false;
+  }
+  return true;
+}
+
+/** March a pleat from `start` along ±dir: reflect at ridges, stop at any crease or the edge. */
+function marchPleat(
+  start: GridPoint,
+  dir: GridPoint,
+  ridges: OriSegment[],
+  creases: OriSegment[],
+  sheet: { width: number; height: number },
+): OriSegment[] {
+  const out: OriSegment[] = [];
+  const seen = new Set<string>();
+  for (const d0 of [dir, { x: -dir.x, y: -dir.y }]) {
+    let from = start;
+    let d = d0;
+    for (let bounce = 0; bounce < MAX_BOUNCES; bounce++) {
+      const hit = marchPleatRay(from, d, ridges, creases, sheet);
+      if (!hit) break;
+      // Reflecting over a non-45 stretch ridge sends the pleat off-axis, so its next
+      // landing is off-grid. That is a real (rotated-grid) pleat over the stretch, so
+      // keep the raw point and march on rather than dropping it - the pleat analog of
+      // the axial/hinge allowOffGrid handling. Snap away float dust when on-grid.
+      const point = snapToGrid(hit.point) ?? hit.point;
+      addSegment(out, seen, from, point);
+      if (hit.type !== "ridge") break; // crease or boundary: stop
+      d = reflect(d, hit.ridgeDir!);
+      from = point;
+    }
+  }
+  return out;
+}
+
+/** Nearest hit for a pleat march: ridge (reflect), crease (stop), or paper edge (stop). */
+function marchPleatRay(
+  from: GridPoint,
+  dir: GridPoint,
+  ridges: OriSegment[],
+  creases: OriSegment[],
+  sheet: { width: number; height: number },
+): RayHit | null {
+  let best: { t: number; hit: RayHit } | null = null;
+  for (const r of ridges) {
+    const inter = raySegmentIntersection(from, dir, r.a, r.b);
+    if (!inter || inter.t <= EPS || inter.collinear) continue;
+    const ridgeDir = straightRidgeDirAt(inter.point, ridges);
+    const hit: RayHit = ridgeDir
+      ? { point: inter.point, type: "ridge", ridgeDir }
+      : { point: inter.point, type: "junction" };
+    if (!best || inter.t < best.t - EPS) best = { t: inter.t, hit };
+  }
+  for (const c of creases) {
+    const inter = raySegmentIntersection(from, dir, c.a, c.b);
+    if (!inter || inter.t <= EPS || inter.collinear) continue;
+    if (!best || inter.t < best.t - EPS) best = { t: inter.t, hit: { point: inter.point, type: "junction" } };
+  }
+  const boundaryHit = rayBoundaryIntersection(from, dir, sheet);
+  if (boundaryHit && (!best || boundaryHit.t < best.t - EPS)) {
+    best = { t: boundaryHit.t, hit: { point: boundaryHit.point, type: "boundary" } };
+  }
+  return best?.hit ?? null;
 }
 
 /**
@@ -236,27 +430,32 @@ export function propagateAxialFamilyWithLevels(
   axials: OriSegment[],
   edgeAxials: OriSegment[],
 ): AxialFamilyLevels {
-  const family: OriSegment[] = [...axials];
-  const seen = new Set<string>(family.map(segmentKey));
   const level = new Map<string, number>();
   for (const s of axials) level.set(segmentKey(s), 0);
+  // Every crease generated so far stops later pleats; ridges (reflectors) stay
+  // separate. Level 0 = the axials and the paper-edge axials.
+  const stoppers: OriSegment[] = [...axials, ...edgeAxials];
+  const seen = new Set<string>(stoppers.map(segmentKey));
+  const pleats: OriSegment[] = [];
+  let frontier: OriSegment[] = [...axials, ...edgeAxials];
   let maxLevel = 0;
   for (let round = 1; round < 64; round++) {
-    const next = propagateAxialOffsets(ridges, sheet, family, edgeAxials);
-    let added = 0;
-    for (const s of next) {
+    const { pleats: produced } = offsetRound(ridges, sheet, frontier, stoppers);
+    const fresh: OriSegment[] = [];
+    for (const s of produced) {
       const k = segmentKey(s);
       if (seen.has(k)) continue;
       seen.add(k);
-      family.push(s);
+      pleats.push(s);
+      stoppers.push(s);
       level.set(k, round);
-      maxLevel = round;
-      added++;
+      fresh.push(s);
     }
-    if (added === 0) break;
+    if (fresh.length === 0) break;
+    maxLevel = round;
+    frontier = fresh;
   }
-  const axialKeys = new Set(axials.map(segmentKey));
-  return { pleats: family.filter((s) => !axialKeys.has(segmentKey(s))), level, maxLevel };
+  return { pleats, level, maxLevel };
 }
 
 export function segmentKey(s: OriSegment): string {
@@ -391,6 +590,21 @@ function classifyFlapRegions(
     cx < 0 || cy < 0 || cx >= W || cy >= H ? false : flap[label[idx(cx, cy)]];
 }
 
+/**
+ * True when segment [p1,p2] crosses segment [p3,p4] at a point strictly inside
+ * [p1,p2] (and on [p3,p4], endpoints included). Used to detect a ridge lying
+ * between a pleat seed and its source axial.
+ */
+function segmentsCross(p1: GridPoint, p2: GridPoint, p3: GridPoint, p4: GridPoint): boolean {
+  const r = { x: p2.x - p1.x, y: p2.y - p1.y };
+  const s = { x: p4.x - p3.x, y: p4.y - p3.y };
+  const denom = r.x * s.y - r.y * s.x;
+  if (Math.abs(denom) < EPS) return false; // parallel or collinear
+  const t = ((p3.x - p1.x) * s.y - (p3.y - p1.y) * s.x) / denom;
+  const u = ((p3.x - p1.x) * r.y - (p3.y - p1.y) * r.x) / denom;
+  return t > 1e-6 && t < 1 - 1e-6 && u > -1e-6 && u < 1 + 1e-6;
+}
+
 function pointOnSegment(p: GridPoint, seg: OriSegment): boolean {
   const cross = (seg.b.x - seg.a.x) * (p.y - seg.a.y) - (seg.b.y - seg.a.y) * (p.x - seg.a.x);
   if (Math.abs(cross) > 1e-6) return false;
@@ -413,15 +627,17 @@ function marchRay(
 ): RayHit | null {
   let best: { t: number; hit: RayHit } | null = null;
 
-  // Ridge intersections (reflect, or terminate at a multi-ridge junction).
+  // Ridge intersections. Reflect over a straight ridge (even one stored as
+  // several collinear segments); terminate only at a true junction where ridges
+  // of different directions meet.
   for (const r of ridges) {
     const inter = raySegmentIntersection(from, dir, r.a, r.b);
     if (!inter || inter.t <= EPS) continue;
     if (inter.collinear) continue; // leaving along this ridge - no crossing.
-    const atJunction = isRidgeEndpoint(inter.point, ridges);
-    const hit: RayHit = atJunction
-      ? { point: inter.point, type: "junction" }
-      : { point: inter.point, type: "ridge", ridgeDir: unit({ x: r.b.x - r.a.x, y: r.b.y - r.a.y }) };
+    const ridgeDir = straightRidgeDirAt(inter.point, ridges);
+    const hit: RayHit = ridgeDir
+      ? { point: inter.point, type: "ridge", ridgeDir }
+      : { point: inter.point, type: "junction" };
     if (!best || inter.t < best.t - EPS) best = { t: inter.t, hit };
   }
 
@@ -439,10 +655,20 @@ function reflect(d: GridPoint, ridgeDir: GridPoint): GridPoint {
   // ridge NORMAL, which preserves the component perpendicular to the ridge so
   // the contour continues to the far side, and flips the component along it.
   // d' = d - 2(d.r)r  (the opposite 90-degree turn from a line-mirror bounce).
+  // ridgeDir is unit, so d' is unit too. Return the true reflected direction
+  // rather than snapping to the 8 grid directions: over a 45-degree ridge an
+  // axis-parallel axial reflects to an exact axis-parallel direction anyway,
+  // but over a non-45-degree ridge (a Pythagorean stretch edge) the reflection
+  // is genuinely off-axis and must not be collapsed.
   const dot = d.x * ridgeDir.x + d.y * ridgeDir.y;
-  const rx = d.x - 2 * dot * ridgeDir.x;
-  const ry = d.y - 2 * dot * ridgeDir.y;
-  return snapDir({ x: rx, y: ry });
+  let rx = d.x - 2 * dot * ridgeDir.x;
+  let ry = d.y - 2 * dot * ridgeDir.y;
+  // Clean float dust so the 45-degree case stays exactly axis-parallel: a
+  // component within EPS of 0 is exactly 0. Genuinely off-axis components (a
+  // non-45-degree stretch reflection) are well above EPS and preserved.
+  if (Math.abs(rx) < EPS) rx = 0;
+  if (Math.abs(ry) < EPS) ry = 0;
+  return unit({ x: rx, y: ry });
 }
 
 // ---- geometry helpers ----
@@ -490,23 +716,62 @@ function rayBoundaryIntersection(
   return candidates[0] ?? null;
 }
 
-function isRidgeEndpoint(point: GridPoint, ridges: OriSegment[]): boolean {
+/**
+ * Junction vertices of a ridge set: points where two or more ridges of distinct
+ * directions meet. For a single flap's straight skeleton these are its spine
+ * convergence points - one for a point/square flap, two (the spine endpoints)
+ * for a longer rectangular flap. Axials must be seeded from ALL of them, not
+ * just the flap anchor, or a rectangular flap only grows half its molecule.
+ */
+export function ridgeJunctions(ridges: OriSegment[]): GridPoint[] {
+  const byPoint = new Map<string, { point: GridPoint; dirs: GridPoint[] }>();
   for (const r of ridges) {
-    if (samePoint(point, r.a) || samePoint(point, r.b)) return true;
+    for (const [end, other] of [[r.a, r.b], [r.b, r.a]] as const) {
+      const dx = other.x - end.x;
+      const dy = other.y - end.y;
+      const len = Math.hypot(dx, dy);
+      if (len < EPS) continue;
+      const key = `${Math.round(end.x * 1e6) / 1e6},${Math.round(end.y * 1e6) / 1e6}`;
+      const entry = byPoint.get(key) ?? { point: end, dirs: [] };
+      entry.dirs.push({ x: dx / len, y: dy / len });
+      byPoint.set(key, entry);
+    }
   }
-  return false;
+  const out: GridPoint[] = [];
+  for (const { point, dirs } of byPoint.values()) {
+    // A junction has >= 2 distinct (undirected) ridge directions.
+    const distinct: GridPoint[] = [];
+    for (const d of dirs) {
+      if (!distinct.some((e) => Math.abs(e.x * d.y - e.y * d.x) < EPS)) distinct.push(d);
+    }
+    if (distinct.length >= 2) out.push(point);
+  }
+  return out;
+}
+
+/**
+ * If `point` lies on a single straight ridge line - even one BP stored as
+ * several collinear segments meeting end-to-end - return that line's direction
+ * (the axial reflects over it). Return null at a true junction, where ridges of
+ * two or more distinct directions meet (a corner, a flap-center X, a T), so the
+ * axial terminates there. This lets an axial reflect at an interior grid point
+ * of a straight ridge that merely happens to be split into segments.
+ */
+function straightRidgeDirAt(point: GridPoint, ridges: OriSegment[]): GridPoint | null {
+  const lineDirs: GridPoint[] = [];
+  for (const r of ridges) {
+    if (!pointOnSegment(point, r)) continue;
+    const d = unit({ x: r.b.x - r.a.x, y: r.b.y - r.a.y });
+    if (d.x === 0 && d.y === 0) continue;
+    // Treat a direction and its opposite as the same (undirected) line.
+    if (!lineDirs.some((e) => Math.abs(e.x * d.y - e.y * d.x) < EPS)) lineDirs.push(d);
+  }
+  return lineDirs.length === 1 ? lineDirs[0] : null;
 }
 
 function unit(v: GridPoint): GridPoint {
   const len = Math.hypot(v.x, v.y);
   return len < EPS ? { x: 0, y: 0 } : { x: v.x / len, y: v.y / len };
-}
-
-function snapDir(v: GridPoint): GridPoint {
-  // Axis-parallel contours stay axis-parallel after a 90-degree reflection.
-  const x = Math.abs(v.x) < EPS ? 0 : Math.sign(v.x);
-  const y = Math.abs(v.y) < EPS ? 0 : Math.sign(v.y);
-  return { x, y };
 }
 
 function addSegment(out: OriSegment[], seen: Set<string>, a: GridPoint, b: GridPoint): void {
@@ -646,7 +911,10 @@ export function propagateHinges(
 }
 
 /** Planarize a set of segments into a vertex adjacency map (split at every crossing/T-junction). */
+export let PLANARIZE_CALLS = 0;
+export function resetPlanarizeCalls(): void { PLANARIZE_CALLS = 0; }
 export function planarize(segments: OriSegment[]): Map<string, GridPoint[]> {
+  PLANARIZE_CALLS++;
   const edges = new Set<string>();
   for (let i = 0; i < segments.length; i++) {
     const a = segments[i].a;
@@ -681,6 +949,117 @@ export function planarize(segments: OriSegment[]): Map<string, GridPoint[]> {
   return adj;
 }
 
+/**
+ * Precomputed planarization of the constant part of a molecule (boundary + ridges +
+ * axial family). planarize is O(n^2) and the base is ~150 segments that never change
+ * during hinge routing, so its self-intersections are computed once and reused. Pair
+ * with planarizeWithBase, which only adds the (few) hinge segments each call.
+ */
+export interface BasePlanarization {
+  segs: OriSegment[];
+  /** Per base segment: its point list from base x base only (endpoints + crossings). */
+  splits: GridPoint[][];
+  /** Per base segment: cached sub-edge keys, used verbatim when no hinge crosses it. */
+  subEdges: string[][];
+}
+
+/** Emit the sub-edges of segment a-b given its split points (mutates/sorts `points`). */
+function emitSubEdges(edges: Set<string>, a: GridPoint, b: GridPoint, points: GridPoint[]): void {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  points.sort((p, q) => (p.x - a.x) * dx + (p.y - a.y) * dy - ((q.x - a.x) * dx + (q.y - a.y) * dy));
+  for (let k = 0; k + 1 < points.length; k++) {
+    const u = points[k];
+    const v = points[k + 1];
+    if (key(u) === key(v)) continue;
+    edges.add(segKey(u, v));
+  }
+}
+
+/** Precompute the base (constant) planarization; see BasePlanarization. */
+export function precomputeBasePlanarization(base: OriSegment[]): BasePlanarization {
+  const splits: GridPoint[][] = [];
+  const subEdges: string[][] = [];
+  for (let i = 0; i < base.length; i++) {
+    const a = base[i].a;
+    const b = base[i].b;
+    const points: GridPoint[] = [a, b];
+    for (let j = 0; j < base.length; j++) {
+      if (i === j) continue;
+      const x = segmentIntersection(a, b, base[j].a, base[j].b);
+      if (x) points.push(x);
+      for (const e of [base[j].a, base[j].b]) {
+        if (pointOnSegmentStrict(e, a, b)) points.push(e);
+      }
+    }
+    splits.push([...points]); // keep the (unsorted) point set to merge with hinge points later
+    const se = new Set<string>();
+    emitSubEdges(se, a, b, points); // sorts a copy's worth in place; points no longer needed
+    subEdges.push([...se]);
+  }
+  return { segs: base, splits, subEdges };
+}
+
+/**
+ * Planarize base + hinges reusing the precomputed base. Produces output byte-identical
+ * to planarize([...base, ...hinges]) (same edges, inserted base-first then hinges, so
+ * even neighbor ordering matches), at a fraction of the cost: base segments not crossed
+ * by any hinge reuse their cached sub-edges, and only hinge x base / hinge x hinge
+ * intersections are recomputed.
+ */
+export function planarizeWithBase(bp: BasePlanarization, hinges: OriSegment[]): Map<string, GridPoint[]> {
+  PLANARIZE_CALLS++;
+  const base = bp.segs;
+  const edges = new Set<string>();
+  // Base segments: reuse cache unless a hinge crosses / touches them.
+  for (let i = 0; i < base.length; i++) {
+    const a = base[i].a;
+    const b = base[i].b;
+    let extra: GridPoint[] | null = null;
+    for (const h of hinges) {
+      const x = segmentIntersection(a, b, h.a, h.b);
+      if (x) (extra ??= []).push(x);
+      for (const e of [h.a, h.b]) {
+        if (pointOnSegmentStrict(e, a, b)) (extra ??= []).push(e);
+      }
+    }
+    if (!extra) {
+      for (const s of bp.subEdges[i]) edges.add(s);
+      continue;
+    }
+    emitSubEdges(edges, a, b, [...bp.splits[i], ...extra]);
+  }
+  // Hinge segments: intersect against all base + other hinge segments.
+  for (let i = 0; i < hinges.length; i++) {
+    const a = hinges[i].a;
+    const b = hinges[i].b;
+    const points: GridPoint[] = [a, b];
+    for (let j = 0; j < base.length; j++) {
+      const x = segmentIntersection(a, b, base[j].a, base[j].b);
+      if (x) points.push(x);
+      for (const e of [base[j].a, base[j].b]) {
+        if (pointOnSegmentStrict(e, a, b)) points.push(e);
+      }
+    }
+    for (let j = 0; j < hinges.length; j++) {
+      if (i === j) continue;
+      const x = segmentIntersection(a, b, hinges[j].a, hinges[j].b);
+      if (x) points.push(x);
+      for (const e of [hinges[j].a, hinges[j].b]) {
+        if (pointOnSegmentStrict(e, a, b)) points.push(e);
+      }
+    }
+    emitSubEdges(edges, a, b, points);
+  }
+  const adj = new Map<string, GridPoint[]>();
+  for (const edge of edges) {
+    const [uk, vk] = edge.split("|");
+    pushNeighbor(adj, uk, parseKey(vk));
+    pushNeighbor(adj, vk, parseKey(uk));
+  }
+  return adj;
+}
+
 function pushNeighbor(adj: Map<string, GridPoint[]>, vk: string, n: GridPoint): void {
   const list = adj.get(vk);
   if (!list) {
@@ -700,6 +1079,43 @@ export function failingJunctions(adj: Map<string, GridPoint[]>, sheet: { width: 
   return out;
 }
 
+/**
+ * Junction vertices that do NOT lie on an integer grid point. A junction is a
+ * planar vertex where two or more non-collinear creases meet (a corner, T, or
+ * crossing - a straight degree-2 pass-through is not one). Every crease
+ * intersection in a box-pleat pattern must land on the grid; a non-empty result
+ * means the packing produced a sub-grid crease (typically a non-45 stretch edge
+ * or an off-grid river crossing the grid between lattice points) and should be
+ * rejected.
+ */
+export function offGridJunctions(creases: OriSegment[], ridges: OriSegment[] = []): GridPoint[] {
+  const adj = planarize(creases);
+  // Stretch arms: non-axis, non-45 ridges. When an axial or pleat reflects over one it
+  // lands ON the arm at a fractional (off-grid) point - a legitimate reflection vertex,
+  // not a lattice break (the crease returns to the grid past it). So an off-grid vertex
+  // lying on a stretch arm is allowed; every other off-grid junction is still rejected.
+  const stretchRidges = ridges.filter((r) => {
+    const dx = Math.abs(r.b.x - r.a.x);
+    const dy = Math.abs(r.b.y - r.a.y);
+    return dx > EPS && dy > EPS && Math.abs(dx - dy) > EPS;
+  });
+  const out: GridPoint[] = [];
+  for (const [vk, neighbors] of adj) {
+    const v = parseKey(vk);
+    if (Math.abs(v.x - Math.round(v.x)) < GRID_EPS && Math.abs(v.y - Math.round(v.y)) < GRID_EPS) continue;
+    if (stretchRidges.some((r) => pointOnSegment(v, r))) continue; // reflection over a stretch arm
+    // Count distinct undirected edge directions; >= 2 means a real junction.
+    const dirs: GridPoint[] = [];
+    for (const n of neighbors) {
+      const d = unit({ x: n.x - v.x, y: n.y - v.y });
+      if (d.x === 0 && d.y === 0) continue;
+      if (!dirs.some((e) => Math.abs(e.x * d.y - e.y * d.x) < EPS)) dirs.push(d);
+    }
+    if (dirs.length >= 2) out.push(v);
+  }
+  return out;
+}
+
 function isFailingJunction(vx: number, vy: number, neighbors: GridPoint[], sheet: { width: number; height: number }): boolean {
   // Boundary vertices are not interior flat-fold vertices.
   if (vx < EPS || vy < EPS || Math.abs(vx - sheet.width) < EPS || Math.abs(vy - sheet.height) < EPS) return false;
@@ -715,7 +1131,7 @@ function isFailingJunction(vx: number, vy: number, neighbors: GridPoint[], sheet
   }
   let alt = 0;
   for (let i = 0; i < sectors.length; i++) alt += (i % 2 === 0 ? 1 : -1) * sectors[i];
-  const kawasaki = deg >= 4 && deg % 2 === 0 && Math.abs(alt) < 1e-6;
+  const kawasaki = deg >= 4 && deg % 2 === 0 && Math.abs(alt) < KAWASAKI_EPS;
   return !kawasaki;
 }
 
@@ -742,7 +1158,13 @@ export function hingeEndpoint(
       if (inter && !inter.collinear && inter.t > EPS && inter.t < best) best = inter.t;
     }
   };
-  crossStop(ridges);
+  // A non-45 (Pythagorean stretch) ridge is off-grid everywhere except where it
+  // passes through a lattice point. An axis-aligned hinge that stops on such a
+  // ridge lands at a fractional point (an off-grid junction). Stop only at clean
+  // 45/90 ridges; reject the whole direction below if it would reach a stretch
+  // ridge at an off-grid point.
+  const stretchRidges = ridges.filter((r) => !isCleanRidge(r));
+  crossStop(ridges.filter(isCleanRidge));
   crossStop(hinges);
   for (const c of flapCenters) {
     const t = (c.x - from.x) * dir.x + (c.y - from.y) * dir.y;
@@ -763,7 +1185,122 @@ export function hingeEndpoint(
     if (hi > EPS) best = Math.min(best, Math.max(Math.min(ta, tb), 0));
   }
   if (!Number.isFinite(best) || best < EPS) return null;
+  // Refuse to extend a hinge that would cross or end on a stretch ridge at an
+  // off-grid point: the resulting junction would never be a unit box-pleat vertex.
+  for (const r of stretchRidges) {
+    const inter = raySegmentIntersection(from, dir, r.a, r.b);
+    if (!inter || inter.collinear || inter.t <= EPS || inter.t > best + EPS) continue;
+    const px = from.x + dir.x * inter.t;
+    const py = from.y + dir.y * inter.t;
+    if (Math.abs(px - Math.round(px)) > GRID_EPS || Math.abs(py - Math.round(py)) > GRID_EPS) return null;
+  }
   return { x: from.x + dir.x * best, y: from.y + dir.y * best };
+}
+
+export interface HingeTrace {
+  /** The reflected polyline from origin to terminus. */
+  path: OriSegment[];
+  terminus: GridPoint;
+  terminusType: "edge" | "hinge" | "junction";
+  /** Total grid distance travelled - its parity decides the terminus colour. */
+  steps: number;
+}
+
+/**
+ * Trace a hinge as a reflecting ray from `from` in `dir`. Like an axial it
+ * reflects off ridges (mirror) and continues, crossing axials freely; it
+ * terminates at the paper edge, on another hinge, or at a ridge junction (where
+ * ridges of different directions meet and it cannot cleanly reflect). Returns
+ * null if any reflection/termination lands off the integer grid (a non-45 stretch
+ * reflection can never be a unit box-pleat vertex).
+ */
+export function traceHingeRay(
+  from: GridPoint,
+  dir: GridPoint,
+  ridges: OriSegment[],
+  hinges: OriSegment[],
+  axials: OriSegment[],
+  sheet: { width: number; height: number },
+  opts: { allowOffGrid?: boolean } = {},
+): HingeTrace | null {
+  const path: OriSegment[] = [];
+  let cur = from;
+  let d = dir;
+  let steps = 0;
+  const stepLen = (a: GridPoint, b: GridPoint): number =>
+    Math.round(Math.max(Math.abs(b.x - a.x), Math.abs(b.y - a.y)));
+  // A hinge is perpendicular to axials and can never run COINCIDENT with one. The
+  // test is per produced SEGMENT (cur -> pt), not the infinite forward ray: a segment
+  // is invalid only if it actually overlaps an axial along its own extent. This lets a
+  // hinge cross an empty gap toward a collinear axial and reflect off a ridge BEFORE
+  // ever reaching it (touching an axial endpoint is a zero-length overlap, allowed),
+  // while still forbidding a segment that truly runs down an axial.
+  const segOverlapsAxial = (a: GridPoint, bpt: GridPoint): boolean => {
+    const sx = bpt.x - a.x;
+    const sy = bpt.y - a.y;
+    const len2 = sx * sx + sy * sy;
+    if (len2 < EPS) return false;
+    const proj = (p: GridPoint): number => ((p.x - a.x) * sx + (p.y - a.y) * sy) / len2;
+    return axials.some((c) => {
+      const ex = c.b.x - c.a.x;
+      const ey = c.b.y - c.a.y;
+      if (Math.abs(ex * sy - ey * sx) > EPS) return false; // axial not parallel to segment
+      if (Math.abs((c.a.x - a.x) * sy - (c.a.y - a.y) * sx) > EPS) return false; // axial not on the segment's line
+      const u0 = proj(c.a);
+      const u1 = proj(c.b);
+      const lo = Math.max(0, Math.min(u0, u1));
+      const hi = Math.min(1, Math.max(u0, u1));
+      return hi - lo > EPS; // overlapping sub-interval of positive length
+    });
+  };
+
+  for (let bounce = 0; bounce < MAX_BOUNCES; bounce++) {
+    const ride = marchRay(cur, d, ridges, sheet);
+    let hinge: { t: number; point: GridPoint } | null = null;
+    for (const h of hinges) {
+      const inter = raySegmentIntersection(cur, d, h.a, h.b);
+      if (inter && !inter.collinear && inter.t > EPS && (!hinge || inter.t < hinge.t)) {
+        hinge = { t: inter.t, point: inter.point };
+      }
+    }
+    const rideDist = ride ? Math.hypot(ride.point.x - cur.x, ride.point.y - cur.y) : Infinity;
+    const hingeDist = hinge ? Math.hypot(hinge.point.x - cur.x, hinge.point.y - cur.y) : Infinity;
+
+    if (hinge && hingeDist < rideDist - EPS) {
+      const snapped = snapToGrid(hinge.point);
+      if (!snapped && !opts.allowOffGrid) return null;
+      const pt = snapped ?? hinge.point;
+      if (segOverlapsAxial(cur, pt)) return null; // this segment would run along an axial
+      path.push({ a: cur, b: pt });
+      return { path, terminus: pt, terminusType: "hinge", steps: steps + stepLen(cur, pt) };
+    }
+    if (!ride) return null;
+    if (ride.type === "boundary") {
+      if (segOverlapsAxial(cur, ride.point)) return null;
+      path.push({ a: cur, b: ride.point });
+      return { path, terminus: ride.point, terminusType: "edge", steps: steps + stepLen(cur, ride.point) };
+    }
+    // A reflection off a non-45 Pythagorean stretch ridge can land sub-grid; such a
+    // hinge is still valid (it reflects over the stretch), so allowOffGrid keeps the
+    // raw point and marches on instead of discarding the whole ray.
+    const snapped = snapToGrid(ride.point);
+    if (!snapped && !opts.allowOffGrid) return null; // off-grid reflection or junction
+    const pt = snapped ?? ride.point;
+    if (segOverlapsAxial(cur, pt)) return null;
+    path.push({ a: cur, b: pt });
+    steps += stepLen(cur, pt);
+    if (ride.type === "junction") return { path, terminus: pt, terminusType: "junction", steps };
+    d = reflect(d, ride.ridgeDir!);
+    cur = pt;
+  }
+  return null;
+}
+
+/** A 45/90 (axis-aligned or diagonal) ridge, vs a non-45 Pythagorean stretch ridge. */
+function isCleanRidge(s: OriSegment): boolean {
+  const dx = s.b.x - s.a.x;
+  const dy = s.b.y - s.a.y;
+  return Math.abs(dx) < EPS || Math.abs(dy) < EPS || Math.abs(Math.abs(dx) - Math.abs(dy)) < EPS;
 }
 
 function segmentIntersection(p1: GridPoint, p2: GridPoint, p3: GridPoint, p4: GridPoint): GridPoint | null {
