@@ -13,12 +13,14 @@
 
 import { mkdir, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { PACKING_STORE } from "./box-pleated-store.ts";
+import { PACKING_STORE, parseScaleMix, type ScaleMix } from "./box-pleated-store.ts";
 
 interface Args {
   store: string;
   out: string;
   doubleFraction: number;
+  scaleMix: ScaleMix | null;
+  scaleMixSpec: string | null;
   limit: number | null;
   workers: number;
 }
@@ -29,10 +31,13 @@ function parseArgs(argv: string[]): Args {
     return i >= 0 ? argv[i + 1] : undefined;
   };
   const limitRaw = get("--limit");
+  const scaleMixSpec = get("--scale-mix") ?? null;
   return {
     store: get("--store") ?? PACKING_STORE,
     out: get("--out") ?? "data/output/box-pleated",
     doubleFraction: Number(get("--double-fraction") ?? 0.5),
+    scaleMix: scaleMixSpec ? parseScaleMix(scaleMixSpec) : null,
+    scaleMixSpec,
     limit: limitRaw !== undefined ? Number(limitRaw) : null,
     workers: Number(get("--workers") ?? navigator.hardwareConcurrency ?? 8),
   };
@@ -47,12 +52,15 @@ interface Stats {
   offgrid: number;
   thrown: number;
   hist: Record<number, number>;
+  scaleCounts: Record<number, number>;
 }
-const zero = (): Stats => ({ accepted: 0, doubled: 0, rescued: 0, clean: 0, incomplete: 0, offgrid: 0, thrown: 0, hist: {} });
+const zero = (): Stats => ({ accepted: 0, doubled: 0, rescued: 0, clean: 0, incomplete: 0, offgrid: 0, thrown: 0, hist: {}, scaleCounts: {} });
 function add(a: Stats, b: Stats): Stats {
   const hist = { ...a.hist };
   for (const [k, v] of Object.entries(b.hist)) hist[Number(k)] = (hist[Number(k)] ?? 0) + v;
-  return { accepted: a.accepted + b.accepted, doubled: a.doubled + b.doubled, rescued: a.rescued + b.rescued, clean: a.clean + b.clean, incomplete: a.incomplete + b.incomplete, offgrid: a.offgrid + b.offgrid, thrown: a.thrown + b.thrown, hist };
+  const scaleCounts = { ...a.scaleCounts };
+  for (const [k, v] of Object.entries(b.scaleCounts ?? {})) scaleCounts[Number(k)] = (scaleCounts[Number(k)] ?? 0) + v;
+  return { accepted: a.accepted + b.accepted, doubled: a.doubled + b.doubled, rescued: a.rescued + b.rescued, clean: a.clean + b.clean, incomplete: a.incomplete + b.incomplete, offgrid: a.offgrid + b.offgrid, thrown: a.thrown + b.thrown, hist, scaleCounts };
 }
 
 async function main(): Promise<void> {
@@ -60,7 +68,7 @@ async function main(): Promise<void> {
   await mkdir(join(args.out, "folds"), { recursive: true });
   await mkdir(join(args.out, "metadata"), { recursive: true });
   const workers = Math.max(1, args.workers);
-  console.log(`Stage B: store ${args.store} -> ${args.out} · double-fraction ${args.doubleFraction} · ${workers} workers`);
+  console.log(`Stage B: store ${args.store} -> ${args.out} · ${args.scaleMixSpec ? `scale-mix ${args.scaleMixSpec}` : `double-fraction ${args.doubleFraction}`} · ${workers} workers`);
 
   const perWorkerLimit = args.limit !== null ? Math.ceil(args.limit / workers) : null;
   const latest: Stats[] = Array.from({ length: workers }, zero);
@@ -78,7 +86,7 @@ async function main(): Promise<void> {
           if (++done === workers) resolve();
         }
       };
-      worker.postMessage({ store: args.store, out: args.out, doubleFraction: args.doubleFraction, workers, workerId: w, limit: perWorkerLimit });
+      worker.postMessage({ store: args.store, out: args.out, doubleFraction: args.doubleFraction, scaleMix: args.scaleMix, workers, workerId: w, limit: perWorkerLimit });
     }
     const timer = setInterval(() => {
       const s = latest.reduce(add, zero());
@@ -108,6 +116,7 @@ async function main(): Promise<void> {
     clean: total.clean,
     rejections: { incomplete: total.incomplete, "off-grid": total.offgrid, throw: total.thrown },
     conflictHistogram: total.hist,
+    scaleCounts: total.scaleCounts,
     seconds: +secs.toFixed(1),
     cpsPerSec: +(total.accepted / Math.max(secs, 1e-6)).toFixed(2),
   };

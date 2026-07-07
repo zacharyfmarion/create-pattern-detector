@@ -118,6 +118,40 @@ export function shouldDouble(seed: number, fraction: number): boolean {
   return fraction > 0 && seedHash(seed) < fraction;
 }
 
+/**
+ * A Stage B scale mixture: even multipliers only. Doubling turns odd leftover
+ * gaps even (fillable); 3x preserves parity and came back invalid on every
+ * probed packing, so it is deliberately not representable.
+ */
+export type ScaleMix = Array<{ scale: 1 | 2 | 4; weight: number }>;
+
+/** Parse "1:0.25,2:0.35,4:0.4" into a ScaleMix (weights need not sum to 1). */
+export function parseScaleMix(spec: string): ScaleMix {
+  const mix: ScaleMix = [];
+  for (const part of spec.split(",")) {
+    const [s, w] = part.split(":");
+    const scale = Number(s);
+    const weight = Number(w);
+    if (![1, 2, 4].includes(scale) || !(weight >= 0) || !Number.isFinite(weight)) {
+      throw new Error(`Invalid scale-mix entry: ${part}`);
+    }
+    mix.push({ scale: scale as 1 | 2 | 4, weight });
+  }
+  if (!mix.some((m) => m.weight > 0)) throw new Error(`scale-mix has no positive weight: ${spec}`);
+  return mix;
+}
+
+/** Deterministically pick this seed's emission scale from a mixture (Stage B). */
+export function scaleForSeed(seed: number, mix: ScaleMix): 1 | 2 | 4 {
+  const total = mix.reduce((acc, m) => acc + m.weight, 0);
+  let threshold = seedHash(seed) * total;
+  for (const m of mix) {
+    threshold -= m.weight;
+    if (threshold < 0) return m.scale;
+  }
+  return mix[mix.length - 1].scale;
+}
+
 /** Deterministic train/val/test split by seed (85/10/5), independent of workers. */
 export function splitForSeed(seed: number): "train" | "val" | "test" {
   const h = (Math.imul(seed ^ 0x85ebca6b, 0xc2b2ae35) >>> 0) / 4294967296;
