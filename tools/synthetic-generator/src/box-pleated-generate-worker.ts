@@ -8,6 +8,7 @@
 // retried at 2x (doubling makes odd leftover gaps even -> fillable), recovering
 // packings that would otherwise be rejected as incomplete.
 
+import { appendFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { buildPackingCP } from "./box-pleated-cp.ts";
 import { boxPleatedCpToFold, boxPleatedQuality } from "./box-pleated-fold.ts";
@@ -48,6 +49,15 @@ self.onmessage = async (event: MessageEvent<WorkMsg>): Promise<void> => {
   const mine = seeds.filter((_, i) => i % workers === workerId);
 
   const rows: string[] = [];
+  // Incremental shard flushing: a multi-hour Stage B must not keep manifest
+  // rows only in memory (a restart would orphan every fold written so far).
+  const shardPath = join(out, `manifest.w${workerId}.jsonl`);
+  await writeFile(shardPath, "");
+  const flush = async (): Promise<void> => {
+    if (!rows.length) return;
+    await appendFile(shardPath, rows.join("\n") + "\n");
+    rows.length = 0;
+  };
   const st: Stats = { type: "progress", accepted: 0, doubled: 0, rescued: 0, clean: 0, incomplete: 0, offgrid: 0, thrown: 0, hist: {}, scaleCounts: {} };
 
   for (const seed of mine) {
@@ -107,9 +117,12 @@ self.onmessage = async (event: MessageEvent<WorkMsg>): Promise<void> => {
     st.scaleCounts[scale] = (st.scaleCounts[scale] ?? 0) + 1;
     if (q.clean) st.clean++;
     st.hist[q.conflicts] = (st.hist[q.conflicts] ?? 0) + 1;
-    if (st.accepted % 25 === 0) self.postMessage(st);
+    if (st.accepted % 25 === 0) {
+      await flush();
+      self.postMessage(st);
+    }
   }
 
-  await Bun.write(join(out, `manifest.w${workerId}.jsonl`), rows.join("\n") + (rows.length ? "\n" : ""));
+  await flush();
   self.postMessage({ ...st, type: "done" });
 };
