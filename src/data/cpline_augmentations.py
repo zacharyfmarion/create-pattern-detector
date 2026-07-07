@@ -32,12 +32,19 @@ BASE_AUGMENT_PROFILES = (
     "clean",
     "square-symmetry",
     "line-style",
+    "line-style-light",
     "dark-mode",
     "print-light",
+    "print-medium-lite",
     "print-medium",
+    "faint-light",
     "photo-light",
     "photo-dark",
 )
+# Cap augmented stroke widths on very dense CPs (see render_augmented_cpline_sample).
+DENSE_WIDTH_CAP_MIN_EDGES = 2500
+DENSE_WIDTH_CAP_PX = 3
+
 AUGMENT_MIXES: dict[str, tuple[tuple[str, float, str | None], ...]] = {
     "stage-base": (
         ("clean", 0.35, None),
@@ -53,6 +60,14 @@ AUGMENT_MIXES: dict[str, tuple[tuple[str, float, str | None], ...]] = {
         ("photo-light", 0.10, None),
         ("dark-mode", 0.15, None),
         ("photo-dark", 0.10, None),
+    ),
+    "vertex-light-rendered": (
+        ("clean", 0.15, None),
+        ("square-symmetry", 0.10, None),
+        ("line-style-light", 0.25, None),
+        ("print-light", 0.25, None),
+        ("print-medium-lite", 0.15, None),
+        ("faint-light", 0.10, None),
     ),
 }
 V2_AUGMENT_MIX = (
@@ -124,11 +139,33 @@ V3_NO_GUIDE_GRID_REPLAY_MIX = (
     ("v2-combined-no-grid", 0.05, None),
     ("v2-dark-combined-no-grid", 0.05, None),
 )
+# V4: scope geometry-obfuscating profiles OUT of junction training. In the v3
+# replay mix, 19% of samples had every non-border crease dashed and 27% carried
+# at least one obfuscator (dashes/text/watermark), while the dense line/junction
+# targets stayed full solid geometry — i.e. the model was trained to fire
+# junctions with no ink at the junction point (dash gaps land on vertices ~half
+# the time by construction of _draw_dashed_line). Keeps the photometric/style
+# variety (stage-balanced, line-style) and the ink-preserving issue profiles
+# (faint, ambiguous-mv). Note: with no dashed samples, the line_style head's
+# "dashed" class receives no positives under this mix.
+V4_SOLID_GEOMETRY_REPLAY_MIX = (
+    *(
+        (profile, weight * 0.40, style_variant)
+        for profile, weight, style_variant in AUGMENT_MIXES["stage-balanced"]
+    ),
+    ("line-style", 0.25, None),
+    ("clean", 0.05, None),
+    ("v2-faint", 0.075, None),
+    ("v2-dark-faint", 0.075, None),
+    ("v2-ambiguous-mv", 0.075, None),
+    ("v2-dark-ambiguous-mv", 0.075, None),
+)
 AUGMENT_MIXES["v2-issue-mix"] = V2_AUGMENT_MIX
 AUGMENT_MIXES["v2-dark-issue-mix"] = V2_DARK_AUGMENT_MIX
 AUGMENT_MIXES["v2-all-issue-mix"] = V2_ALL_AUGMENT_MIX
 AUGMENT_MIXES["v2-replay-corrective"] = V2_REPLAY_CORRECTIVE_MIX
 AUGMENT_MIXES["v3-no-guide-grid-replay"] = V3_NO_GUIDE_GRID_REPLAY_MIX
+AUGMENT_MIXES["v4-solid-geometry-replay"] = V4_SOLID_GEOMETRY_REPLAY_MIX
 MIXED_PROFILE_ENTRIES = AUGMENT_MIXES["stage-balanced"]
 MIXED_AUGMENT_PROFILES = tuple(AUGMENT_MIXES) + ("mixed",)
 AUGMENT_PROFILES = (
@@ -260,6 +297,18 @@ def render_augmented_cpline_sample(
         symmetry=params["square_symmetry"],
     )
     target_assignments = _target_assignments(cp.assignments, params)
+
+    # Density-aware width cap: on very dense CPs, fat stroke draws flood the
+    # inter-pleat gaps and invert the weave (measured on a 7,592-edge / 8.6px-
+    # pitch sample: at width 5 only a sparse dot-lattice of background
+    # survives — line direction and crossing structure are destroyed, so the
+    # sample carries ~no line/junction information). Real dense CPs are
+    # thin-lined vector exports or high-res scans, so the cap also matches the
+    # eval distribution. Applies to both the input image and the dense targets
+    # (they must stay width-consistent).
+    if len(cp.edges) > DENSE_WIDTH_CAP_MIN_EDGES:
+        params["line_width"] = min(int(params["line_width"]), DENSE_WIDTH_CAP_PX)
+        params["target_line_width"] = min(int(params["target_line_width"]), DENSE_WIDTH_CAP_PX)
 
     target_line_width = int(params["target_line_width"])
     junction_sigma = (
@@ -448,6 +497,18 @@ def _sample_render_params(
         return params
     if profile == "line-style":
         _apply_line_style_params(params, rng, line_width=line_width)
+    elif profile == "line-style-light":
+        _apply_line_style_params(params, rng, line_width=line_width, mild=True)
+        params.update(
+            {
+                "background": tuple(int(v) for v in rng.integers(246, 256, size=3)),
+                "brightness": float(rng.uniform(-3, 3)),
+                "contrast": float(rng.uniform(0.97, 1.04)),
+                "noise_std": float(rng.uniform(0.0, 1.5)),
+                "blur_kernel": int(rng.choice([0, 0, 0, 3])),
+                "jpeg_quality": int(rng.integers(90, 100)),
+            }
+        )
     elif profile == "dark-mode":
         _apply_dark_mode_params(
             params, rng, image_size=image_size, line_width=line_width, style_variant=style_variant
@@ -464,6 +525,19 @@ def _sample_render_params(
                 "jpeg_quality": int(rng.integers(82, 98)),
             }
         )
+    elif profile == "print-medium-lite":
+        _apply_line_style_params(params, rng, line_width=line_width, mild=True)
+        params.update(
+            {
+                "background": tuple(int(v) for v in rng.integers(232, 256, size=3)),
+                "brightness": float(rng.uniform(-7, 7)),
+                "contrast": float(rng.uniform(0.91, 1.09)),
+                "noise_std": float(rng.uniform(0.5, 4.5)),
+                "blur_kernel": int(rng.choice([0, 0, 3, 3])),
+                "jpeg_quality": int(rng.integers(76, 98)),
+                "lighting_gradient": bool(rng.random() < 0.20),
+            }
+        )
     elif profile == "print-medium":
         _apply_line_style_params(params, rng, line_width=line_width)
         params.update(
@@ -477,6 +551,8 @@ def _sample_render_params(
                 "lighting_gradient": bool(rng.random() < 0.45),
             }
         )
+    elif profile == "faint-light":
+        _apply_faint_light_params(params, rng, line_width=line_width)
     elif profile == "photo-light":
         _apply_line_style_params(params, rng, line_width=line_width, mild=True)
         params.update(
@@ -529,8 +605,13 @@ def _apply_line_style_params(
     line_width: int,
     mild: bool = False,
 ) -> None:
-    max_width = max(line_width, int(round(line_width * (1.5 if mild else 2.0))) + 1)
-    width = int(rng.integers(max(1, line_width), max_width + 1))
+    if mild:
+        min_width = 1
+        max_width = max(min_width, int(line_width) + 1)
+    else:
+        min_width = max(1, int(line_width))
+        max_width = max(min_width, int(round(line_width * 2.0)) + 1)
+    width = int(rng.integers(min_width, max_width + 1))
     palette_kind = str(rng.choice(["assignment", "assignment", "monochrome", "muted"]))
     if palette_kind == "monochrome":
         shade = int(rng.integers(20, 95))
@@ -561,6 +642,45 @@ def _apply_line_style_params(
     params["target_line_width"] = width
     params["line_alpha"] = float(rng.uniform(0.78 if mild else 0.68, 1.0))
     params["palette_kind"] = palette_kind
+
+
+def _apply_faint_light_params(
+    params: dict[str, Any],
+    rng: np.random.Generator,
+    *,
+    line_width: int,
+) -> None:
+    _apply_line_style_params(params, rng, line_width=line_width, mild=True)
+    background = tuple(int(v) for v in rng.integers(246, 256, size=3))
+    params["background"] = background
+    params["palette"] = _blend_palette_toward_background(
+        params["palette"],
+        background=background,
+        amount=float(rng.uniform(0.20, 0.45)),
+    )
+    params["line_alpha"] = float(rng.uniform(0.45, 0.76))
+    params["brightness"] = float(rng.uniform(-2, 4))
+    params["contrast"] = float(rng.uniform(0.94, 1.05))
+    params["noise_std"] = float(rng.uniform(0.0, 2.0))
+    params["blur_kernel"] = int(rng.choice([0, 0, 3]))
+    params["jpeg_quality"] = int(rng.integers(86, 100))
+    params["palette_kind"] = f"faint-{params.get('palette_kind', 'assignment')}"
+
+
+def _blend_palette_toward_background(
+    palette: dict[int, tuple[int, int, int]],
+    *,
+    background: tuple[int, int, int],
+    amount: float,
+) -> dict[int, tuple[int, int, int]]:
+    bg = np.asarray(background, dtype=np.float32)
+    blend = float(np.clip(amount, 0.0, 1.0))
+    result: dict[int, tuple[int, int, int]] = {}
+    for key, color in palette.items():
+        base = np.asarray(color, dtype=np.float32)
+        mixed = base * (1.0 - blend) + bg * blend
+        result[int(key)] = tuple(int(v) for v in np.clip(np.round(mixed), 0, 255))
+    return result
 
 
 def _target_assignments(assignments: np.ndarray, params: dict[str, Any]) -> np.ndarray:

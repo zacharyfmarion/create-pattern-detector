@@ -20,6 +20,18 @@ set -a; source configs/runpod.env; set +a
 runpodctl user
 ```
 
+For agent runs, prefer this env-file path over global RunPod config:
+
+```bash
+set -a; source configs/runpod.env; set +a
+runpodctl user
+```
+
+Do not assume `~/.runpod/config.toml` contains a usable key. During the
+2026-06-23 vertex-refiner run, the global config existed but had an empty API
+key; the working credentials were in the ignored `configs/runpod.env` file.
+Never print the key itself in logs or handoff notes.
+
 ## Create A Pod
 
 Prefer a 24GB+ GPU. A secure-cloud L4 works for the conservative first run; a
@@ -71,6 +83,34 @@ cd create-pattern-detector
 scripts/setup_python_env.sh
 ```
 
+If you are uploading an uncommitted local worktree snapshot instead of cloning
+from GitHub, make sure the archive includes the repo setup files as well as the
+source tree. At minimum, include:
+
+```text
+.python-version
+requirements.txt
+pyproject.toml
+src/
+scripts/
+configs/
+docs/
+implementation-plan/
+tests/
+```
+
+Missing `.python-version` or `requirements.txt` will make
+`scripts/setup_python_env.sh` fail on the pod. When patching a live pod with
+`scp`, copy files to their exact repo paths:
+
+```bash
+scp -P "$POD_PORT" src/foo.py root@"$POD_HOST":/workspace/create-pattern-detector/src/foo.py
+```
+
+Do not copy multiple files to `/workspace/create-pattern-detector/` unless that
+is intentionally the destination; `scp` will otherwise drop patched files at
+the repo root instead of preserving subdirectories.
+
 Install `tmux` if the template does not include it:
 
 ```bash
@@ -103,6 +143,20 @@ print("device", torch.cuda.get_device_name(0) if torch.cuda.is_available() else 
 print("numpy", np.__version__, "cv2", cv2.__version__)
 PY
 ```
+
+Known-good package state from the 2026-06-23 RTX 4090 run:
+
+```text
+torch 2.2.2+cu121
+torchvision 0.17.2+cu121
+numpy 1.26.x
+opencv-python 4.10.0.84
+opencv-python-headless 4.10.0.84
+torch.cuda.is_available() == True
+```
+
+If setup pulls a much newer Torch wheel and CUDA becomes unavailable, pin back
+to the CUDA 12.1 stack above before running preflight or training.
 
 ## Upload Synthetic Data
 
@@ -277,3 +331,20 @@ survive the restart, but confirm CUDA and dataset links again before continuing.
 RunPod bills while the pod is running, even if training has already finished.
 Stopping the pod stops GPU compute billing. Delete the pod later if you do not
 need its volume.
+
+For short-lived agent-created pods, copy artifacts back, then stop and delete
+the pod immediately:
+
+```bash
+set -a; source configs/runpod.env; set +a
+runpodctl pod stop "$RUNPOD_POD_ID"
+runpodctl pod delete "$RUNPOD_POD_ID"
+runpodctl pod list
+runpodctl network-volume list
+runpodctl user
+```
+
+Expected cleanup state is an empty pod list, an empty network-volume list, and
+`currentSpendPerHr=0`. The 2026-06-23 vertex-refiner run did not require a
+network volume; do not create or keep one unless the current training code
+explicitly uses it.

@@ -54,14 +54,21 @@ bun run box-pleated-generate --out DIR [--double-fraction 0.5] [--workers N] [--
 
 Two levers live here:
 
-- **Doubling** (`--double-fraction`, default 0.5): deterministically (by seed hash)
-  emits a **2×-scaled** variant of a packing. Scaling all geometry by 2 keeps it
-  valid (integers stay integers) but fills the finer grid with more pleats — a clean
-  way to push complexity/grid size up. Doubled CPs get a `-2x` id.
-- **Rescue-fallback**: a packing marked "don't double" that is **invalid at 1×** is
-  retried at 2×. Doubling turns odd leftover gaps even (fillable), so this recovers
-  packings otherwise dropped as *incomplete* — strictly higher yield. (Because of
-  this, a 50% doubling *decision* yields a higher fraction of doubled *output*.)
+- **Scaling** — either the legacy `--double-fraction` (default 0.5: 2× a random
+  fraction of seeds) or `--scale-mix 1:0.25,2:0.35,4:0.4` (deterministic by seed
+  hash; takes precedence). Scaling all geometry by k keeps a packing valid
+  (integers stay integers) but fills the finer grid with more pleats. **Even
+  multipliers only** — 3× preserves gap parity (odd gaps stay odd) and probed
+  invalid on every packing. Measured medians at grid ~25: 1× ≈ 290 edges/41px
+  pitch, 2× ≈ 705/19px, 4× ≈ 1,400–3,600/10px — 4× lands on the native hard-BP
+  band (edges 729/1,376/3,478 p10/50/90). Scaled CPs get `-2x`/`-4x` ids.
+  **Pitch guard:** 4× on grids >30 would drop rendered pitch below the ~8px
+  resolution floor at 1024, so those fall back to 2× automatically.
+- **Rescue-fallback**: a packing **invalid at its chosen scale** is retried at the
+  next even multiple (1×→2×, 2×→4×). Doubling turns odd leftover gaps even
+  (fillable), so this recovers packings otherwise dropped as *incomplete* —
+  strictly higher yield. (Because of this, the emitted scale distribution skews
+  denser than the *decision* distribution.)
 
 ## The packing store
 
@@ -96,7 +103,8 @@ assign it independently.
 
 | Lever | Where | Effect |
 |---|---|---|
-| `--double-fraction` | Stage B | fraction of packings emitted doubled (2×) |
+| `--double-fraction` | Stage B | fraction of packings emitted doubled (2×; legacy) |
+| `--scale-mix` | Stage B | deterministic scale mixture, e.g. `1:0.25,2:0.35,4:0.4` (even scales only; wins over `--double-fraction`) |
 | `HINGE_BUDGET` (env) | routeHinges | hinge-search node budget (default 300). Lower = faster, slightly worse assignment |
 | `--workers` | both stages | worker-pool size (default = CPU count) |
 | `leafCountForSeed` | `box-pleated-store.ts` | tree complexity — currently `[4,5,6][seed%3]`; widen to widen the grid/complexity distribution |

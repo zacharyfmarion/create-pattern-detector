@@ -2,9 +2,9 @@
 """Close-pair junction resolution eval.
 
 Measures whether a CPLineNet checkpoint can resolve GT vertex pairs closer
-than ~8px into two distinct vertices — the failure mode documented in
-docs/v2-close-pair-junction-recovery.md (the junction heatmap fuses such
-pairs into a single blob and legacy sub-pixel offsets cannot split them).
+than ~8px into two distinct vertices — the failure mode summarized in
+docs/model-training-history.md (the junction heatmap fuses such pairs into a
+single blob and legacy sub-pixel offsets cannot split them).
 
 Two decoders are reported side by side:
 - peaks: legacy local-maxima + anchor sub-pixel offset refinement;

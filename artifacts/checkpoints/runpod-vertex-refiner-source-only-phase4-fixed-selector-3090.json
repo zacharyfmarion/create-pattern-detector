@@ -1,0 +1,134 @@
+{
+  "schema": "create-pattern-detector/vertex-refiner-checkpoint/v1",
+  "modelId": "vertex-refiner-source-only-phase4-fixed-selector-20260622-3090",
+  "role": "phase4-source-only-fixed-selector-budget-probe",
+  "promoted": false,
+  "createdAt": "2026-06-22",
+  "checkpoint": {
+    "relativePath": "checkpoints/runpod_vertex_refiner_source_only_probe_20260622_fixed_selector/full/latest.pt",
+    "sha256": "b0d2fb86a1ea702ad0a0bc5061bb0b1e33ae15c9c9189f6551365ec98c5c23ac",
+    "sizeBytes": 7582198
+  },
+  "runpod": {
+    "podId": "3ip8xq59ltlrqj",
+    "gpu": "NVIDIA GeForce RTX 3090",
+    "location": "CA",
+    "costPerHourUsd": 0.22,
+    "templateId": "runpod-torch-v220",
+    "stoppedAfterCopyBack": true,
+    "deletedAfterCopyBack": true,
+    "budgetNote": "The official-template RTX 3090 probe ran for roughly 9 minutes at $0.22/hr, then the pod was stopped and deleted. runpodctl reported no pods, no network volumes, and currentSpendPerHr=0 afterward."
+  },
+  "architecture": {
+    "model": "VertexRefinerV1",
+    "baseChannels": 24,
+    "cropSizePx": 96,
+    "inputChannels": 8,
+    "auxiliaryMode": "zero",
+    "sourceOnly": true
+  },
+  "dataset": {
+    "sourceManifest": "data/generated/synthetic/cp_training_mix_v1/raw-manifest.jsonl",
+    "remoteSubsetRecords": 576,
+    "trainRecords": 32,
+    "valRecords": 8,
+    "maxEdges": 1200,
+    "imageSize": 512,
+    "proposalsPerSample": 128,
+    "includeGtTrainingAnchors": true,
+    "includeValGtAnchors": false,
+    "seed": 41
+  },
+  "training": {
+    "steps": 500,
+    "batchSize": 16,
+    "learningRate": 0.0003,
+    "checkpointEvery": 100,
+    "evalMaxBatches": 8,
+    "trainCrops": 3322,
+    "valCrops": 740,
+    "firstStepLoss": 161.11561584472656,
+    "lastStepLoss": 1.1342978477478027
+  },
+  "reports": {
+    "runConfig": "checkpoints/runpod_vertex_refiner_source_only_probe_20260622_fixed_selector/full/run_config.json",
+    "summary": "checkpoints/runpod_vertex_refiner_source_only_probe_20260622_fixed_selector/full/summary.json",
+    "eval": "checkpoints/runpod_vertex_refiner_source_only_probe_20260622_fixed_selector/full/eval.json",
+    "qualitativeOverlay": "checkpoints/runpod_vertex_refiner_source_only_probe_20260622_fixed_selector/full/qualitative_before_after.png",
+    "trainHistory": "checkpoints/runpod_vertex_refiner_source_only_probe_20260622_fixed_selector/full/train_history.jsonl",
+    "trainLog": "checkpoints/runpod_vertex_refiner_source_only_probe_20260622_fixed_selector/full/train.log"
+  },
+  "sampledBeforeAfterMetrics": {
+    "valBefore": {
+      "precision": 0.02493096646942801,
+      "recall": 0.34725274725274724,
+      "f1": 0.046521899153478104,
+      "falsePositive": 12359,
+      "loss": 283.5637140274048
+    },
+    "valAfter": {
+      "precision": 0.8717391304347826,
+      "recall": 0.8813186813186813,
+      "f1": 0.8765027322404371,
+      "falsePositive": 118,
+      "loss": 1.3750954270362854
+    }
+  },
+  "standaloneEvalMetrics": {
+    "cropLevel": {
+      "samples": 656,
+      "precision": 0.9021820917983446,
+      "recall": 0.9109211775878443,
+      "f1": 0.9065305736697856,
+      "meanErrorPx": 0.7098068745610295,
+      "falsePositive": 520,
+      "falseNegative": 469,
+      "loss": 1.2091971330526399
+    },
+    "proposalCoverage": {
+      "totalGtVertices": 1085,
+      "coveredByCrop": 1076,
+      "coverage": 0.9917050691244239,
+      "uncoveredByCrop": 9
+    },
+    "fullPattern": {
+      "samples": 8,
+      "precision": 0.195071482317532,
+      "recall": 0.9557603686635945,
+      "f1": 0.32401187314482116,
+      "meanErrorPx": 0.49105037534887847,
+      "falsePositive": 4279,
+      "falseNegative": 48,
+      "proposalCoverage": 0.9917050691244239,
+      "coveredConditionalRecall": 0.9637546468401487,
+      "decodedPredictionsTotalBeforeGlobalNms": 5316
+    },
+    "fullPatternByKind": {
+      "boundaryContact": {
+        "proposalCoverage": 1.0,
+        "recall": 0.8920863309352518,
+        "coveredConditionalRecall": 0.8920863309352518
+      },
+      "corner": {
+        "proposalCoverage": 0.71875,
+        "recall": 0.65625,
+        "coveredConditionalRecall": 0.9130434782608695
+      },
+      "interiorJunction": {
+        "proposalCoverage": 1.0,
+        "recall": 0.975929978118162,
+        "coveredConditionalRecall": 0.975929978118162
+      }
+    }
+  },
+  "interpretation": {
+    "summary": "With coverage-aware proposal selection, source-only VertexRefinerV1 reaches high crop-level precision/recall and high full-pattern recall on the small 512px probe. The next blocker is global duplicate suppression/merge precision across overlapping crop predictions, not dense vertex detection recall.",
+    "knownLimitations": [
+      "This is a 512px, base-24 budget probe, not the final 1024px/base-48 V1 target.",
+      "The run used a selected subset of cp_training_mix_v1 to stay cheap.",
+      "Full-pattern precision is measured before global NMS/merge and is low because overlapping crops emit duplicate vertices.",
+      "Corner proposal coverage remains weaker than interior/boundary-contact coverage.",
+      "No ONNX export or product integration should use this checkpoint as a promoted model."
+    ]
+  }
+}

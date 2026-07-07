@@ -77,7 +77,6 @@
   },
   "relatedDocs": [
     "docs/model-training-history.md",
-    "docs/v2-close-pair-junction-recovery.md",
     "docs/checkpoint-management.md"
   ]
 }

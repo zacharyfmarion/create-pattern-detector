@@ -1,0 +1,186 @@
+{
+  "schemaVersion": 1,
+  "schema": "create-pattern-detector/vertex-refiner-v1-phase0-baselines/v1",
+  "id": "vertex-refiner-v1-phase0-baselines-20260622",
+  "createdAt": "2026-06-22",
+  "purpose": "Frozen end-to-end and candidate-coverage comparison snapshot for the high-resolution VertexRefinerV1 work. These numbers anchor Phase 1+ improvements without rerunning every product benchmark.",
+  "currentBrowserModelPointer": "artifacts/checkpoints/current-browser-model.json",
+  "currentBrowserModelManifest": "artifacts/checkpoints/runpod-v3-no-guide-grid-close-pair-dense-edges-tess15-weighted-4090.json",
+  "sourceReportsRoot": "tree-maker-rust/artifacts/cp-detect-correctness/reports",
+  "treeMakerRustCommit": "17434b90ff8bea1ad9acf7ce147893025f47e95b",
+  "strictTopologyMetricImplementation": "tree-maker-rust compare_exact_solve_benchmark, implementation key exact_solved.strict_topology",
+  "baselines": {
+    "clean15_source_line_model_junctions": {
+      "label": "Clean-15 source-image line evidence plus CPLineNet model junctions",
+      "report": "tree-maker-rust/artifacts/cp-detect-correctness/reports/clean-1024-s15-source-image-line-evidence-iter5-2026-06-21/summary.json",
+      "sampleCount": 15,
+      "config": {
+        "candidateSource": "junction-first-v1",
+        "lineEvidenceSource": "source-image",
+        "junctionEvidenceSource": "model",
+        "strictVertexTolerancePx": 2.0
+      },
+      "strictTopology": {
+        "exactTopologySamples": 3,
+        "exactTopologyAndAssignmentSamples": 3,
+        "totalSamples": 15,
+        "vertexF1": 0.9851632047477745,
+        "edgeF1": 0.9634123222748814,
+        "unmatchedGtVertices": 34,
+        "unmatchedPredictedVertices": 6,
+        "missingEdges": 124,
+        "extraEdges": 69,
+        "mergedEdges": 35,
+        "splitEdges": 3
+      }
+    },
+    "clean15_source_line_gt_junctions": {
+      "label": "Clean-15 source-image line evidence plus ground-truth junction labels",
+      "report": "tree-maker-rust/artifacts/cp-detect-correctness/reports/clean-1024-s15-source-line-gt-junctions-2026-06-22/summary.json",
+      "sampleCount": 15,
+      "config": {
+        "candidateSource": "junction-first-v1",
+        "lineEvidenceSource": "source-image",
+        "junctionEvidenceSource": "ground-truth",
+        "gtJunctionLabels": true,
+        "strictVertexTolerancePx": 2.0
+      },
+      "strictTopology": {
+        "exactTopologySamples": 5,
+        "exactTopologyAndAssignmentSamples": 4,
+        "totalSamples": 15,
+        "vertexF1": 0.9944629014396457,
+        "edgeF1": 0.9815373021853806,
+        "unmatchedGtVertices": 15,
+        "unmatchedPredictedVertices": 0,
+        "missingEdges": 60,
+        "extraEdges": 38,
+        "mergedEdges": 23,
+        "splitEdges": 1
+      }
+    },
+    "clean15_source_line_gt_junctions_merge1": {
+      "label": "Clean-15 source-image line evidence plus ground-truth junction labels, 1px merge radius",
+      "report": "tree-maker-rust/artifacts/cp-detect-correctness/reports/clean-1024-s15-source-line-gt-junctions-merge1-2026-06-22/summary.json",
+      "sampleCount": 15,
+      "config": {
+        "candidateSource": "junction-first-v1",
+        "lineEvidenceSource": "source-image",
+        "junctionEvidenceSource": "ground-truth",
+        "gtJunctionLabels": true,
+        "strictVertexTolerancePx": 2.0,
+        "gtJunctionMergeRadiusPx": 1.0
+      },
+      "strictTopology": {
+        "exactTopologySamples": 5,
+        "exactTopologyAndAssignmentSamples": 4,
+        "totalSamples": 15,
+        "vertexF1": 0.9974236290025763,
+        "edgeF1": 0.9844248451867142,
+        "unmatchedGtVertices": 7,
+        "unmatchedPredictedVertices": 0,
+        "missingEdges": 42,
+        "extraEdges": 41,
+        "mergedEdges": 12,
+        "splitEdges": 1
+      }
+    },
+    "clean15_source_line_gt_junctions_merge1_exact": {
+      "label": "Clean-15 GT-junction 1px ceiling with exact solve enabled",
+      "report": "tree-maker-rust/artifacts/cp-detect-correctness/reports/clean-1024-s15-source-line-gt-junctions-merge1-exact-2026-06-22/summary.json",
+      "sampleCount": 15,
+      "config": {
+        "candidateSource": "junction-first-v1",
+        "lineEvidenceSource": "source-image",
+        "junctionEvidenceSource": "ground-truth",
+        "gtJunctionLabels": true,
+        "strictVertexTolerancePx": 2.0,
+        "gtJunctionMergeRadiusPx": 1.0,
+        "exactSolveEnabled": true
+      },
+      "strictTopology": {
+        "exactTopologySamples": 5,
+        "exactTopologyAndAssignmentSamples": 4,
+        "totalSamples": 15,
+        "vertexF1": 0.9959514170040487,
+        "edgeF1": 0.9821730155751549,
+        "unmatchedGtVertices": 9,
+        "unmatchedPredictedVertices": 2,
+        "missingEdges": 48,
+        "extraEdges": 47,
+        "mergedEdges": 12,
+        "splitEdges": 1
+      },
+      "exactSolve": {
+        "attempted": 15,
+        "accepted": 13,
+        "solved": 11,
+        "ambiguous": 2,
+        "failed": 2
+      }
+    },
+    "box_pleat_native_source_line_model_junctions": {
+      "label": "Box-pleat native v1 source-image line evidence plus CPLineNet model junctions",
+      "report": "tree-maker-rust/artifacts/cp-detect-correctness/reports/box-pleat-native-v1-source-image-line-evidence-release-2026-06-21/summary.json",
+      "sampleCount": 179,
+      "config": {
+        "candidateSource": "junction-first-v1",
+        "lineEvidenceSource": "source-image",
+        "junctionEvidenceSource": "model",
+        "strictVertexTolerancePx": 4.0
+      },
+      "strictTopology": {
+        "exactTopologySamples": 0,
+        "exactTopologyAndAssignmentSamples": 0,
+        "totalSamples": 179,
+        "vertexF1": 0.66468797974629,
+        "edgeF1": 0.5345850012775742,
+        "unmatchedGtVertices": 62162,
+        "unmatchedPredictedVertices": 87,
+        "missingEdges": 152962,
+        "extraEdges": 21900,
+        "mergedEdges": 20733,
+        "splitEdges": 119
+      }
+    }
+  },
+  "candidateCoverage": {
+    "clean15_source_line_model_junctions": {
+      "report": "tree-maker-rust/artifacts/cp-detect-correctness/reports/clean-1024-s15-source-line-model-junctions-candidate-coverage-2026-06-21/summary.json",
+      "gtEdgesEvaluated": 2249,
+      "adapterEndpointAvailable": 2209,
+      "adapterCarrierAvailable": 2198,
+      "adapterSingleSpan": 2167,
+      "adapterAny": 2193,
+      "selectedAny": 2190,
+      "candidateOracleRecall": 0.9751000444642063,
+      "selectedRecall": 0.9737661182747888,
+      "topMissCause": "carrier_missing_from_adapter"
+    },
+    "clean15_source_line_cv_junctions": {
+      "report": "tree-maker-rust/artifacts/cp-detect-correctness/reports/clean-1024-s15-source-skeleton-junctions-candidate-coverage-2026-06-21/summary.json",
+      "gtEdgesEvaluated": 2249,
+      "adapterEndpointAvailable": 747,
+      "adapterCarrierAvailable": 1539,
+      "adapterSingleSpan": 556,
+      "adapterAny": 1502,
+      "selectedAny": 1254,
+      "candidateOracleRecall": 0.6678523788350378,
+      "selectedRecall": 0.5575811471765229,
+      "topMissCause": "candidate_selected_wrong_assignment"
+    }
+  },
+  "promotionGates": {
+    "clean15StrictVertexF1": 0.995,
+    "clean15StrictEdgeF1": 0.98,
+    "clean15UnmatchedGtVerticesMax": 10,
+    "clean15ExactTopologySamples": "improve-or-stay-stable",
+    "boxPleatNative": "no-material-regression",
+    "candidateEndpointAvailability": "improve"
+  },
+  "notes": [
+    "The clean-15 GT-junction runs are ceilings for vertex evidence, not product promotion candidates.",
+    "The box-pleat native baseline uses strict vertex tolerance 4px because that pack is denser and larger.",
+    "The candidate-coverage contrast shows why CV-only junctions are not an adequate substitute for neural vertex evidence."
+  ]
+}

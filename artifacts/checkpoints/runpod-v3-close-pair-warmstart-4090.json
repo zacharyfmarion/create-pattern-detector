@@ -5,7 +5,7 @@
   "supersededBy": "runpod-v3-no-guide-grid-close-pair-dense-edges-max700-4090",
   "phase": "v3-close-pair",
   "registeredAt": "2026-06-10",
-  "description": "Close-pair junction recovery recipe (docs/v2-close-pair-junction-recovery.md): sigma 1.5 heatmap, penalty-reduced focal loss, CenterNet-style radius-3 nearest-vertex offsets. Warm-started from runpod-v2-replay-correction-full-4000ada with the offset head re-initialized. Best checkpoint of the close-pair round: beats the V2 baseline on every strict-topology metric (edge F1 0.942 -> 0.953 on clean-1024-s15, extras 130 -> 95, junction recall 0.959 -> 0.973) but close-pair resolution plateaus at ~26% (gate was 80%); a from-scratch 5000-step ablation (R3) landed identically, so the ceiling is the recipe/input resolution, not the init.",
+  "description": "Close-pair junction recovery recipe: sigma 1.5 heatmap, penalty-reduced focal loss, CenterNet-style radius-3 nearest-vertex offsets. Warm-started from runpod-v2-replay-correction-full-4000ada with the offset head re-initialized. Best checkpoint of the close-pair round: beats the V2 baseline on every strict-topology metric (edge F1 0.942 -> 0.953 on clean-1024-s15, extras 130 -> 95, junction recall 0.959 -> 0.973) but close-pair resolution plateaus at ~26% (gate was 80%); a from-scratch 5000-step ablation (R3) landed identically, so the ceiling is the recipe/input resolution, not the init.",
   "checkpoint": {
     "gitTracked": false,
     "relativePath": "checkpoints/r1_close_pair_warmstart/latest.pt",
@@ -80,7 +80,6 @@
   },
   "relatedDocs": [
     "docs/model-training-history.md",
-    "docs/v2-close-pair-junction-recovery.md",
     "docs/checkpoint-management.md"
   ]
 }
