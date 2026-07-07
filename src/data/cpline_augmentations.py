@@ -41,6 +41,10 @@ BASE_AUGMENT_PROFILES = (
     "photo-light",
     "photo-dark",
 )
+# Cap augmented stroke widths on very dense CPs (see render_augmented_cpline_sample).
+DENSE_WIDTH_CAP_MIN_EDGES = 2500
+DENSE_WIDTH_CAP_PX = 3
+
 AUGMENT_MIXES: dict[str, tuple[tuple[str, float, str | None], ...]] = {
     "stage-base": (
         ("clean", 0.35, None),
@@ -293,6 +297,18 @@ def render_augmented_cpline_sample(
         symmetry=params["square_symmetry"],
     )
     target_assignments = _target_assignments(cp.assignments, params)
+
+    # Density-aware width cap: on very dense CPs, fat stroke draws flood the
+    # inter-pleat gaps and invert the weave (measured on a 7,592-edge / 8.6px-
+    # pitch sample: at width 5 only a sparse dot-lattice of background
+    # survives — line direction and crossing structure are destroyed, so the
+    # sample carries ~no line/junction information). Real dense CPs are
+    # thin-lined vector exports or high-res scans, so the cap also matches the
+    # eval distribution. Applies to both the input image and the dense targets
+    # (they must stay width-consistent).
+    if len(cp.edges) > DENSE_WIDTH_CAP_MIN_EDGES:
+        params["line_width"] = min(int(params["line_width"]), DENSE_WIDTH_CAP_PX)
+        params["target_line_width"] = min(int(params["target_line_width"]), DENSE_WIDTH_CAP_PX)
 
     target_line_width = int(params["target_line_width"])
     junction_sigma = (
