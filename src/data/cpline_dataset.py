@@ -34,6 +34,17 @@ WEIGHTED_FAMILY_SAMPLING_PRESETS: dict[str, tuple[tuple[str, str, float], ...]] 
         ("sourceDataset", "tessellation_miura_ori_v2_15pct", 0.03),
         ("family", "search225-tiling", 0.20),
     ),
+    # The combined junction run: SEARCH-22.5 targets the easy/medium residual
+    # (native easy/medium are 79%/84% 22.5-system) and generated box-pleating
+    # targets hard (63% BP, junction recall 65% with heatmap-absent misses).
+    "v5-bp-search225": (
+        ("family", "treemaker-tree", 0.225),
+        ("family", "rabbit-ear-fold-program", 0.225),
+        ("sourceDataset", "tessellation_orthogonal_bp_grid_v2_15pct", 0.12),
+        ("sourceDataset", "tessellation_miura_ori_v2_15pct", 0.03),
+        ("family", "search225-tiling", 0.20),
+        ("family", "box-pleated", 0.20),
+    ),
 }
 SUPPORTED_FAMILY_SAMPLING = frozenset(
     {"natural", "balanced", *WEIGHTED_FAMILY_SAMPLING_PRESETS.keys()}

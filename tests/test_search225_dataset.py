@@ -117,3 +117,52 @@ def test_v4_search225_sampling_preset_quotas():
         "tessellation-fold-program": 30,
         "search225-tiling": 40,
     }
+
+
+def test_v5_bp_search225_sampling_preset_quotas():
+    def rows(family: str, source: str, count: int) -> list[dict]:
+        return [
+            {
+                "id": f"{family}-{source}-{idx}",
+                "foldPath": f"{idx}.fold",
+                "split": "train",
+                "family": family,
+                "sourceDataset": source,
+                "edges": 8,
+            }
+            for idx in range(count)
+        ]
+
+    records = (
+        rows("treemaker-tree", "cp_training_mix_v1", 100)
+        + rows("rabbit-ear-fold-program", "cp_training_mix_v1", 100)
+        + rows("tessellation-fold-program", "tessellation_orthogonal_bp_grid_v2_15pct", 100)
+        + rows("tessellation-fold-program", "tessellation_miura_ori_v2_15pct", 100)
+        + rows("search225-tiling", "search225_v1", 100)
+        + rows("box-pleated", "box_pleated_v1", 100)
+    )
+    selected = select_records(
+        records,
+        split="train",
+        limit=200,
+        max_edges=20,
+        seed=7,
+        family_sampling="v5-bp-search225",
+    )
+    family_counts = {
+        family: sum(record["family"] == family for record in selected)
+        for family in {
+            "treemaker-tree",
+            "rabbit-ear-fold-program",
+            "tessellation-fold-program",
+            "search225-tiling",
+            "box-pleated",
+        }
+    }
+    assert family_counts == {
+        "treemaker-tree": 45,
+        "rabbit-ear-fold-program": 45,
+        "tessellation-fold-program": 30,
+        "search225-tiling": 40,
+        "box-pleated": 40,
+    }
