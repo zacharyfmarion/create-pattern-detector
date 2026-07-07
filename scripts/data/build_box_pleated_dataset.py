@@ -93,6 +93,19 @@ def main() -> None:
         help="Drop CPs with more Maekawa conflicts than this (default: keep all)",
     )
     parser.add_argument(
+        "--min-edges",
+        type=int,
+        default=None,
+        help="Keep only CPs with at least this many edges (dense-supplement builds)",
+    )
+    parser.add_argument(
+        "--exclude-manifest",
+        type=Path,
+        default=None,
+        help="Skip (seed, scale) pairs already present in this raw-manifest.jsonl "
+        "(prevents duplicating CPs across box-pleated roots)",
+    )
+    parser.add_argument(
         "--no-maekawa-mask",
         action="store_true",
         help="Keep generator M/V labels at Maekawa-violating vertices instead of relabeling to U",
@@ -111,11 +124,24 @@ def main() -> None:
         for line in (args.stage_b.expanduser() / "manifest.jsonl").read_text().splitlines()
         if line.strip()
     ]
+    excluded_pairs: set[tuple[int, int]] = set()
+    if args.exclude_manifest is not None:
+        for line in args.exclude_manifest.expanduser().read_text().splitlines():
+            if line.strip():
+                row = json.loads(line)
+                excluded_pairs.add((int(row["seed"]), int(row["scale"])))
+
     rows = []
     dropped = 0
     masked_edges_total = 0
     for stage_row in sorted(stage_rows, key=lambda r: (int(r["seed"]), int(r["scale"]))):
         if args.max_conflicts is not None and stage_row["quality"]["conflicts"] > args.max_conflicts:
+            dropped += 1
+            continue
+        if args.min_edges is not None and int(stage_row["edges"]) < args.min_edges:
+            dropped += 1
+            continue
+        if (int(stage_row["seed"]), int(stage_row["scale"])) in excluded_pairs:
             dropped += 1
             continue
         sample_id = f"{args.dataset_name}-{stage_row['id']}"
@@ -204,6 +230,8 @@ def main() -> None:
         "adapterVersion": DATASET_VERSION,
         "stageB": str(args.stage_b.expanduser()),
         "maxConflicts": args.max_conflicts,
+        "minEdges": args.min_edges,
+        "excludeManifest": str(args.exclude_manifest) if args.exclude_manifest else None,
         "maekawaMask": not args.no_maekawa_mask,
         "family": FAMILY,
         "buckets": [
