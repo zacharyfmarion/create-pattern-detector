@@ -66,9 +66,12 @@ self.onmessage = async (event: MessageEvent<WorkMsg>): Promise<void> => {
     if (!raw) continue;
 
     let scale: number = scaleMix ? scaleForSeed(seed, scaleMix) : shouldDouble(seed, doubleFraction) ? 2 : 1;
-    // Pitch guard: 4x on a large grid drops the rendered pitch below the
-    // ~8px resolution floor at 1024 (grid 30 * 4 = 120 -> ~8px). Fall back to 2x.
-    if (scale === 4 && raw.sheet.width > 30) scale = 2;
+    // Pitch guard: 4x on a very large grid drops the rendered pitch below the
+    // resolution floor at 1024. Grid 36 * 4 = 144 -> ~6.7px, which matches the
+    // native hard tail (per-CP p10 junction spacing reaches 7.5px), so grids
+    // up to 36 are admitted; the guard now only protects hypothetical larger
+    // grids. (Was >30 -> ~8px; that cut off the 3-4.5k-edge regime entirely.)
+    if (scale === 4 && raw.sheet.width > 36) scale = 2;
     let cp;
     try {
       cp = buildPackingCP(scale === 1 ? raw : scalePacking(raw, scale));
