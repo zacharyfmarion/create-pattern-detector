@@ -27,22 +27,21 @@ PYTHON="${PYTHON:-.venv/bin/python}"
 RUN_DATE="${RUN_DATE:-$(date +%Y%m%d)}"
 PROMOTED_CHECKPOINT="${PROMOTED_CHECKPOINT:-$("$PYTHON" scripts/checkpoint/current_checkpoint.py --field checkpoint)}"
 
-export MANIFEST="${MANIFEST:-data/generated/synthetic/cp_training_mix_v4_search225/raw-manifest.jsonl}"
-export TRAIN_FAMILY_SAMPLING="${TRAIN_FAMILY_SAMPLING:-v4-search225-20pct}"
+export MANIFEST="${MANIFEST:-data/generated/synthetic/cp_training_mix_v5_bp_search225/raw-manifest.jsonl}"
+export TRAIN_FAMILY_SAMPLING="${TRAIN_FAMILY_SAMPLING:-v5-bp-search225}"
 export PROFILE="${PROFILE:-v4-solid-geometry-replay}"
 export EVAL_PROFILE="${EVAL_PROFILE:-$PROFILE}"
-export OUTPUT_ROOT="${OUTPUT_ROOT:-checkpoints/runpod_v4_search225_solid_geometry_${RUN_DATE}}"
+export OUTPUT_ROOT="${OUTPUT_ROOT:-checkpoints/runpod_v5_bp_search225_solid_geometry_${RUN_DATE}}"
 export INIT_CHECKPOINT="${INIT_CHECKPOINT:-$PROMOTED_CHECKPOINT}"
 export FULL_INIT_CHECKPOINT="${FULL_INIT_CHECKPOINT:-$INIT_CHECKPOINT}"
 export CHECKPOINT_LOAD_MODE="${CHECKPOINT_LOAD_MODE:-init}"
 export REINIT_HEADS="${REINIT_HEADS:-}"
 
-# 2500 covers everything in the v4 mix (max 2337; the old 1200 cap silently
-# excluded 965 rows incl. 942 dense tessellations — the very data added for
-# dense-BP coverage). Native hard-BP medians 1,376 edges (p90 3,478), so the
-# v5 BP-generator run should raise this to ~5000. Cost is render throughput
-# only (dense targets are fixed-size); bump NUM_WORKERS for dense-heavy runs.
-export MAX_EDGES="${MAX_EDGES:-2500}"
+# 5000 admits the full v5 mix including the box_pleated_v1 dense tail (the
+# old 1200 cap excluded the MEDIAN native hard-BP CP at 1,376 edges). Cost is
+# render throughput only (dense targets are fixed-size); bump NUM_WORKERS on
+# dense-heavy runs.
+export MAX_EDGES="${MAX_EDGES:-5000}"
 export JUNCTION_SIGMA_PX="${JUNCTION_SIGMA_PX:-1.5}"
 export JUNCTION_OFFSET_RADIUS_PX="${JUNCTION_OFFSET_RADIUS_PX:-3.0}"
 export JUNCTION_OFFSET_WEIGHT="${JUNCTION_OFFSET_WEIGHT:-0.5}"

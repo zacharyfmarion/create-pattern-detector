@@ -25,12 +25,20 @@ MAX_STEPS="${MAX_STEPS:-2000}"
 LR="${LR:-0.0003}"
 BASE_CHANNELS="${BASE_CHANNELS:-48}"
 MODEL_VERSION="${MODEL_VERSION:-v1}"
+AUGMENT_PROFILE="${AUGMENT_PROFILE:-}"
+if [[ -z "$AUGMENT_PROFILE" ]]; then
+  if [[ "$MODEL_VERSION" == "v3" ]]; then
+    AUGMENT_PROFILE="vertex-light-rendered"
+  else
+    AUGMENT_PROFILE="clean"
+  fi
+fi
 TRAIN_CROP_REFS="${TRAIN_CROP_REFS:-}"
 VAL_CROP_REFS="${VAL_CROP_REFS:-}"
 CROP_REF_PROGRESS_EVERY="${CROP_REF_PROGRESS_EVERY:-16}"
 BOUNDARY_GT_ANCHOR_REPEATS="${BOUNDARY_GT_ANCHOR_REPEATS:-}"
 if [[ -z "$BOUNDARY_GT_ANCHOR_REPEATS" ]]; then
-  if [[ "$MODEL_VERSION" == "v2" ]]; then
+  if [[ "$MODEL_VERSION" == "v2" || "$MODEL_VERSION" == "v3" ]]; then
     BOUNDARY_GT_ANCHOR_REPEATS="3"
   else
     BOUNDARY_GT_ANCHOR_REPEATS="0"
@@ -131,6 +139,8 @@ verify_run_config() {
     --expect-int "max_edges=$MAX_EDGES" \
     --expect-int "base_channels=$BASE_CHANNELS" \
     --expect-str "model_version=$MODEL_VERSION" \
+    --expect-str "input_version=$MODEL_VERSION" \
+    --expect-str "augment_profile=$AUGMENT_PROFILE" \
     --expect-int "boundary_gt_anchor_repeats=$BOUNDARY_GT_ANCHOR_REPEATS" \
     --expect-bool "include_gt_training_anchors=true" \
     --expect-bool "include_val_gt_anchors=false"
@@ -157,6 +167,7 @@ if [[ "${RUN_PREFLIGHT:-0}" == "1" ]]; then
     --lr "$LR" \
     --base-channels "$BASE_CHANNELS" \
     --model-version "$MODEL_VERSION" \
+    --augment-profile "$AUGMENT_PROFILE" \
     --crop-ref-progress-every "$CROP_REF_PROGRESS_EVERY" \
     --boundary-gt-anchor-repeats "$BOUNDARY_GT_ANCHOR_REPEATS" \
     --boundary-gt-anchor-jitter-px "$BOUNDARY_GT_ANCHOR_JITTER_PX" \
@@ -198,6 +209,7 @@ mkdir -p "$OUTPUT_ROOT/full"
   --lr "$LR" \
   --base-channels "$BASE_CHANNELS" \
   --model-version "$MODEL_VERSION" \
+  --augment-profile "$AUGMENT_PROFILE" \
   --crop-ref-progress-every "$CROP_REF_PROGRESS_EVERY" \
   --boundary-gt-anchor-repeats "$BOUNDARY_GT_ANCHOR_REPEATS" \
   --boundary-gt-anchor-jitter-px "$BOUNDARY_GT_ANCHOR_JITTER_PX" \
@@ -225,28 +237,38 @@ if [[ "$RUN_STANDALONE_EVAL" == "1" || "$RUN_STANDALONE_EVAL" == "true" ]]; then
   if [[ "$EVAL_FULL_PATTERN_DIAGNOSTICS" == "1" || "$EVAL_FULL_PATTERN_DIAGNOSTICS" == "true" ]]; then
     EVAL_DIAGNOSTIC_ARGS=(--full-pattern-diagnostics)
   fi
-  "$PYTHON" scripts/evals/eval_vertex_refiner.py \
-  --checkpoint "$OUTPUT_ROOT/full/latest.pt" \
-  --manifest "$MANIFEST" \
-  --split val \
-  --limit "$VAL_COUNT" \
-  --max-edges "$MAX_EDGES" \
-  --image-size "$IMAGE_SIZE" \
-  --proposals-per-sample "$PROPOSALS_PER_SAMPLE" \
-  --batch-size "$BATCH_SIZE" \
-  --base-channels "$BASE_CHANNELS" \
-  --model-version "$MODEL_VERSION" \
-  "${RENDERED_SAMPLE_CACHE_ARGS[@]}" \
-  --device "$DEVICE" \
-  --auxiliary-mode "$AUXILIARY_MODE" \
-  --crop-ref-progress-every "$CROP_REF_PROGRESS_EVERY" \
-  --no-include-gt-training-anchors \
-  --heatmap-threshold "$HEATMAP_THRESHOLD" \
-  --match-tolerance-px "$MATCH_TOLERANCE_PX" \
-  "${EVAL_DIAGNOSTIC_ARGS[@]}" \
-  "${EVAL_CROP_REF_ARGS[@]}" \
-  --seed "$VAL_SEED" \
-  --out "$OUTPUT_ROOT/full/eval.json" 2>&1 | tee "$OUTPUT_ROOT/full/eval.log"
+  run_eval() {
+    local checkpoint="$1"
+    local out_json="$2"
+    local out_log="$3"
+    "$PYTHON" scripts/evals/eval_vertex_refiner.py \
+      --checkpoint "$checkpoint" \
+      --manifest "$MANIFEST" \
+      --split val \
+      --limit "$VAL_COUNT" \
+      --max-edges "$MAX_EDGES" \
+      --image-size "$IMAGE_SIZE" \
+      --proposals-per-sample "$PROPOSALS_PER_SAMPLE" \
+      --batch-size "$BATCH_SIZE" \
+      --base-channels "$BASE_CHANNELS" \
+      --model-version "$MODEL_VERSION" \
+      --augment-profile "$AUGMENT_PROFILE" \
+      "${RENDERED_SAMPLE_CACHE_ARGS[@]}" \
+      --device "$DEVICE" \
+      --auxiliary-mode "$AUXILIARY_MODE" \
+      --crop-ref-progress-every "$CROP_REF_PROGRESS_EVERY" \
+      --no-include-gt-training-anchors \
+      --heatmap-threshold "$HEATMAP_THRESHOLD" \
+      --match-tolerance-px "$MATCH_TOLERANCE_PX" \
+      "${EVAL_DIAGNOSTIC_ARGS[@]}" \
+      "${EVAL_CROP_REF_ARGS[@]}" \
+      --seed "$VAL_SEED" \
+      --out "$out_json" 2>&1 | tee "$out_log"
+  }
+  run_eval "$OUTPUT_ROOT/full/latest.pt" "$OUTPUT_ROOT/full/eval.json" "$OUTPUT_ROOT/full/eval.log"
+  if [[ -f "$OUTPUT_ROOT/full/best.pt" ]]; then
+    run_eval "$OUTPUT_ROOT/full/best.pt" "$OUTPUT_ROOT/full/eval-best.json" "$OUTPUT_ROOT/full/eval-best.log"
+  fi
 else
   echo "Skipping standalone VertexRefiner source-only eval because RUN_STANDALONE_EVAL=$RUN_STANDALONE_EVAL"
 fi

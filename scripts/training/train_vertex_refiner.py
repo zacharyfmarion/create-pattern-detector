@@ -20,6 +20,7 @@ from torch.utils.data import DataLoader
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 
+from src.data.cpline_augmentations import AUGMENT_PROFILES
 from src.data.vertex_refiner_dataset import VertexRefinerCropDataset, vertex_refiner_collate
 from src.evaluation.vertex_refiner_eval import (
     evaluate_vertex_refiner,
@@ -67,6 +68,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--base-channels", type=int, default=16)
     parser.add_argument("--model-version", choices=["v1", "v2", "v3"], default="v1")
+    parser.add_argument(
+        "--augment-profile",
+        choices=AUGMENT_PROFILES,
+        default="clean",
+        help="Render augmentation profile for training and validation source images.",
+    )
     parser.add_argument(
         "--train-crop-refs",
         type=Path,
@@ -179,6 +186,7 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         limit=args.train_count,
         max_edges=args.max_edges,
         image_size=args.image_size,
+        augment_profile=args.augment_profile,
         seed=args.seed,
         proposals_per_sample=args.proposals_per_sample,
         include_gt_training_anchors=args.include_gt_training_anchors,
@@ -196,6 +204,7 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         limit=args.val_count,
         max_edges=args.max_edges,
         image_size=args.image_size,
+        augment_profile=args.augment_profile,
         seed=args.seed + 1000,
         proposals_per_sample=args.proposals_per_sample,
         include_gt_training_anchors=args.include_val_gt_anchors,
@@ -260,6 +269,8 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         "lr": args.lr,
         "base_channels": args.base_channels,
         "model_version": args.model_version,
+        "input_version": args.model_version,
+        "augment_profile": args.augment_profile,
         "train_crop_refs": None if train_crop_refs is None else train_crop_refs.as_posix(),
         "val_crop_refs": None if val_crop_refs is None else val_crop_refs.as_posix(),
         "train_crop_refs_source": train_dataset.crop_refs_source,
@@ -316,9 +327,43 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
     history: list[dict[str, float]] = []
     early_evaluations: list[dict[str, Any]] = []
     early_stop_reason: str | None = None
+    best_checkpoint_path = output_dir / "best.pt"
+    best_step = 0
+    best_val_metrics = before_val
+    best_val_f1 = float(before_val["f1"])
     loader_iter = iter(train_loader)
     history_path = output_dir / "train_history.jsonl"
     history_path.write_text("", encoding="utf-8")
+
+    def save_best(step: int, metrics: dict[str, Any]) -> None:
+        save_vertex_refiner_checkpoint(
+            best_checkpoint_path,
+            model=model,
+            optimizer=optimizer,
+            run_config={
+                **run_config,
+                "checkpoint_step": step,
+                "checkpoint_reason": "best_val_f1",
+                "best_val_f1": float(metrics["f1"]),
+            },
+            history=history,
+            elapsed_seconds=perf_counter() - start,
+            early_stop_reason=early_stop_reason,
+        )
+        (output_dir / "best_metrics.json").write_text(
+            json.dumps(
+                {
+                    "checkpoint": best_checkpoint_path.as_posix(),
+                    "step": step,
+                    "val": metrics,
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+    save_best(best_step, best_val_metrics)
     for step in range(1, args.max_steps + 1):
         try:
             batch = next(loader_iter)
@@ -369,6 +414,22 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
             eval_row = {"step": step, "val": intermediate_val}
             early_evaluations.append(eval_row)
             print(json.dumps({"step": step, "intermediate_val": intermediate_val}), flush=True)
+            intermediate_f1 = float(intermediate_val["f1"])
+            if intermediate_f1 > best_val_f1:
+                best_val_f1 = intermediate_f1
+                best_step = step
+                best_val_metrics = intermediate_val
+                save_best(step, intermediate_val)
+                print(
+                    json.dumps(
+                        {
+                            "step": step,
+                            "best_checkpoint": best_checkpoint_path.as_posix(),
+                            "best_val_f1": best_val_f1,
+                        }
+                    ),
+                    flush=True,
+                )
             if (
                 args.early_stop_min_val_f1 is not None
                 and step >= int(args.early_stop_after_step)
@@ -424,6 +485,12 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         elapsed_seconds=elapsed_seconds,
         early_stop_reason=early_stop_reason,
     )
+    after_val_f1 = float(after_val["f1"])
+    if after_val_f1 >= best_val_f1:
+        best_val_f1 = after_val_f1
+        best_step = len(history)
+        best_val_metrics = after_val
+        save_best(best_step, after_val)
     summary = {
         "schema": "create-pattern-detector/vertex-refiner-local-smoke/v1",
         "run_config": run_config,
@@ -438,6 +505,10 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         "early_stop_reason": early_stop_reason,
         "early_evaluations": early_evaluations,
         "checkpoint": checkpoint_path.as_posix(),
+        "best_checkpoint": best_checkpoint_path.as_posix(),
+        "best_step": best_step,
+        "best_val_f1": best_val_f1,
+        "best_val": best_val_metrics,
         "qualitative_overlay": qualitative_overlay_path.as_posix(),
         "elapsed_seconds": elapsed_seconds,
     }
