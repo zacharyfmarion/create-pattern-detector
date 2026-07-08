@@ -1,0 +1,73 @@
+{
+  "checkpoint": "checkpoints/runpod_v3_no_guide_grid_close_pair_dense_edges_tess15_weighted_probe_20260619/full/latest.pt",
+  "manifest": "data/generated/synthetic/cp_training_mix_v5_bp_search225/raw-manifest.jsonl",
+  "split": "val",
+  "profile": "clean",
+  "threshold": 0.4,
+  "offset_radius_px": 3.0,
+  "decode": "peak-gated-offset-cluster (evidence_extract.rs parity)",
+  "families": {
+    "box-pleated": {
+      "samples": 174,
+      "junctions": 81257,
+      "recall": 0.67807,
+      "misses": 26159,
+      "extras": 358,
+      "extras_per_sample": 2.057,
+      "clean_rate": 0.2299
+    },
+    "rabbit-ear-fold-program": {
+      "samples": 33,
+      "junctions": 1885,
+      "recall": 0.97241,
+      "misses": 52,
+      "extras": 21,
+      "extras_per_sample": 0.636,
+      "clean_rate": 0.5152
+    },
+    "search225-tiling": {
+      "samples": 93,
+      "junctions": 4063,
+      "recall": 0.99606,
+      "misses": 16,
+      "extras": 24,
+      "extras_per_sample": 0.258,
+      "clean_rate": 0.7742
+    },
+    "tessellation-fold-program": {
+      "samples": 38,
+      "junctions": 15112,
+      "recall": 0.99987,
+      "misses": 2,
+      "extras": 0,
+      "extras_per_sample": 0.0,
+      "clean_rate": 0.9474
+    },
+    "treemaker-tree": {
+      "samples": 174,
+      "junctions": 8340,
+      "recall": 0.99592,
+      "misses": 34,
+      "extras": 19,
+      "extras_per_sample": 0.109,
+      "clean_rate": 0.8793
+    }
+  },
+  "miss_taxonomy": {
+    "absent.close_pair": 11911,
+    "absent.isolated": 3806,
+    "localization.close_pair": 824,
+    "localization.isolated": 889,
+    "sub_threshold.close_pair": 5194,
+    "sub_threshold.isolated": 3639
+  },
+  "overall": {
+    "samples": 512,
+    "junctions": 110657,
+    "recall": 0.76266,
+    "misses": 26263,
+    "extras": 422,
+    "extras_per_sample": 0.824,
+    "clean_rate": 0.6211
+  }
+}

@@ -1,0 +1,73 @@
+{
+  "checkpoint": "checkpoints/runpod_v5_bp_search225_solid_geometry_20260707/full/step_12000.pt",
+  "manifest": "data/generated/synthetic/cp_training_mix_v5_bp_search225/raw-manifest.jsonl",
+  "split": "val",
+  "profile": "clean",
+  "threshold": 0.4,
+  "offset_radius_px": 3.0,
+  "decode": "peak-gated-offset-cluster (evidence_extract.rs parity)",
+  "families": {
+    "box-pleated": {
+      "samples": 174,
+      "junctions": 81257,
+      "recall": 0.99531,
+      "misses": 381,
+      "extras": 173,
+      "extras_per_sample": 0.994,
+      "clean_rate": 0.454
+    },
+    "rabbit-ear-fold-program": {
+      "samples": 33,
+      "junctions": 1885,
+      "recall": 0.97719,
+      "misses": 43,
+      "extras": 5,
+      "extras_per_sample": 0.152,
+      "clean_rate": 0.5455
+    },
+    "search225-tiling": {
+      "samples": 93,
+      "junctions": 4063,
+      "recall": 0.9968,
+      "misses": 13,
+      "extras": 3,
+      "extras_per_sample": 0.032,
+      "clean_rate": 0.8925
+    },
+    "tessellation-fold-program": {
+      "samples": 38,
+      "junctions": 15112,
+      "recall": 1.0,
+      "misses": 0,
+      "extras": 0,
+      "extras_per_sample": 0.0,
+      "clean_rate": 1.0
+    },
+    "treemaker-tree": {
+      "samples": 174,
+      "junctions": 8340,
+      "recall": 0.99748,
+      "misses": 21,
+      "extras": 16,
+      "extras_per_sample": 0.092,
+      "clean_rate": 0.8851
+    }
+  },
+  "miss_taxonomy": {
+    "absent.close_pair": 116,
+    "absent.isolated": 2,
+    "localization.close_pair": 181,
+    "localization.isolated": 34,
+    "sub_threshold.close_pair": 124,
+    "sub_threshold.isolated": 1
+  },
+  "overall": {
+    "samples": 512,
+    "junctions": 110657,
+    "recall": 0.99586,
+    "misses": 458,
+    "extras": 197,
+    "extras_per_sample": 0.385,
+    "clean_rate": 0.7266
+  }
+}
