@@ -219,36 +219,33 @@ expectation: hard recovery stays limited until pipeline work beyond junctions.
 
 ## 5. Recommendation and promotion steps
 
-**Promote step 12000.** The steps below follow the Update Rules in
-`docs/model-training-history.md` and `docs/checkpoint-management.md`. Steps 5.1–5.3
-are prepared as part of this report; **5.4–5.5 are the outward-facing ship steps
-and are left for explicit go-ahead** (they change what browser users receive and
-are hard to reverse).
+**Promote step 12000 — executed.** Following the Update Rules in
+`docs/model-training-history.md` and `docs/checkpoint-management.md`:
 
-1. **Checkpoint manifest** (`artifacts/checkpoints/`): register
-   `runpod_v5_bp_search225_solid_geometry_20260707/full/latest.pt`
-   (SHA `2f4b46ff39bb8db98d1cfbe59d8d32480c2d2ae1522bd2d75d421788b18a4876`,
-   image 1024, hrnet_w18, v2 heads, batch-stats BN, junction_offset_radius_px 3.0,
-   sampler `v5-bp-search225`, profile `v4-solid-geometry-replay`, max_edges 5000,
-   warm-started from the tess15 checkpoint, no head reinit). Prepared entry below.
-2. **`docs/model-training-history.md`**: add the timeline row and update the
-   Current Model section and BP diagnostic tables. Prepared text below.
-3. **Copy the checkpoint** into the canonical local checkout at the same relative
-   path (already present at `checkpoints/runpod_v5_bp_search225_solid_geometry_20260707/full/latest.pt`).
-4. **ONNX export** (in tree-maker-rust) — *ship step, needs go-ahead*:
-   `scripts/cp-detect/export-cpline-onnx.py --checkpoint <new latest.pt>
-   --detector-repo ~/Documents/code/create-pattern-detector` to a **versioned**
-   `--output-dir` (e.g. `cp-detector-v3-v5-bp-search225-step12000-20260708`) with
-   `--batchnorm-mode explicit-batch-stats`; manifest must carry
-   `inference.junction_offset_radius_px: 3.0`, threshold 0.65, image 1024. Record
-   the ONNX SHA-256. Do **not** overwrite the stable dir with the export default.
-5. **Flip the default** — *ship step, needs go-ahead*: point
-   `apps/web/public/models/cp-detector-v3` at the new export and update
-   `artifacts/checkpoints/current-browser-model.json` +
-   `scripts/cp-detect/current-model.json`. Re-run the browser-onnx dense cache /
-   product-parity check before shipping, since the numbers above are the
-   PyTorch-MPS cache (product ships browser-onnx; historically close but not
-   identical).
+1. **Browser-onnx re-baseline gate (passed).** Since the bake-off used the
+   PyTorch-MPS cache but the product ships browser onnxruntime-web, the v5 model
+   was re-run on the browser-onnx path (`run-browser-dense-cache.mjs` over
+   native-cp-v1, then deterministic replay): **204 recovered** (281 gate-passing,
+   12 accepted-wrong). That is ~12% below the MPS 231 (mostly ~26 fewer CPs
+   clearing the topology gate — browser-onnx logits differ slightly), but
+   decisively above the 121 tess15 baseline. Because browser-onnx *reduces*
+   recoveries, the tess15 browser-onnx number is ≤ its MPS 121, so the ≥ +83
+   margin is robust. (A full tess15 browser-onnx like-for-like run is included
+   for the record; the headless browser run is fragile under CPU contention.)
+2. **Checkpoint manifest** registered:
+   `artifacts/checkpoints/runpod-v5-bp-search225-solid-geometry-step12000-4090.json`
+   (status `promoted`; PyTorch SHA `2f4b46ff…4876`; sampler `v5-bp-search225`,
+   profile `v4-solid-geometry-replay`, max_edges 5000, warm-started from tess15,
+   no head reinit; native metrics embedded).
+3. **ONNX exported** to the versioned dir
+   `apps/web/public/models/cp-detector-v3-v5-bp-search225-step12000-20260708/`
+   (`explicit-batch-stats`, radius 3.0, threshold 0.65, image 1024; ONNX SHA
+   `399e6078…1092`), then copied to the stable `cp-detector-v3/` dir the browser
+   loads.
+4. **Pointers/docs flipped:** `artifacts/checkpoints/current-browser-model.json`
+   and `scripts/cp-detect/current-model.json` → v5; `docs/model-training-history.md`
+   Current Model + timeline updated; stage-inspector and benchmark dense-cache
+   defaults repointed. Verified with `check-local-model-assets.mjs`.
 
 Spot-check of the **22 regressed CPs** (done): 14 medium / 8 easy, scattered
 across native CPs, and driven by *missing edges* (4-21 per CP), not extras — i.e.
