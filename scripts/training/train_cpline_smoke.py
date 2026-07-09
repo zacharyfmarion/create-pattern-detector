@@ -65,7 +65,7 @@ def parse_args() -> argparse.Namespace:
         help=(
             "Record sampling for the training split. Balanced gives each manifest "
             "family an equal share; v3-tessellation-15pct preserves the dense-edge "
-            "base mix while adding 15% tessellations."
+            "base mix while adding 15%% tessellations."
         ),
     )
     parser.add_argument("--max-steps", type=int, default=120)

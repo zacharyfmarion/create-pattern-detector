@@ -4,35 +4,47 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-A deep learning model for detecting and classifying crease patterns in origami diagrams. The system extracts valid origami graphs from images while maintaining mathematical constraints (Kawasaki/Maekawa theorems, 2-colorability).
+This repository is the **data + training + evaluation** side of an origami
+crease-pattern detection system. It trains a dense line/junction/assignment model
+(`CPLineNet`) and a vertex-refiner, and exports them to ONNX.
+
+It does **not** contain a production inference path. Everything downstream of the
+model — decoding the dense ONNX signals into a FOLD graph, exact-solve topology
+reconstruction, flat-fold verification, the browser/desktop app, and the
+production correctness benchmarks — lives in the Rust monorepo
+**`~/Documents/code/tree-maker-rust`** ("Ori Studio"). The Rust decode path is the
+production source of truth. When the model changes, the handoff is a re-exported
+ONNX file, tracked by pointers in that repo's `scripts/cp-detect/` directory
+(`current-model.json`, `current-vertex-refiner.json`, `export-cpline-onnx.py`).
+
+The older mask-first prototype (HRNet pixel head → skeletonize → GNN graph head)
+and the earlier Python inference CLI have both been removed.
 
 ## Commands
 
 ### Setup
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -e .
+scripts/setup_python_env.sh
 ```
+Reuses a shared dependency virtualenv across git worktrees and links it into the
+current worktree as `.venv`. See `AGENTS.md` for `--adopt-local` and reset flags.
 
-### Training
+### Train
+CPLineNet: `scripts/training/train_cpline_smoke.py` (roadmap-native path),
+wrapped by the RunPod curriculum scripts (`scripts/training/run_cpline_runpod_*.sh`).
+Vertex-refiner: `scripts/training/train_vertex_refiner.py`.
+**Before training, exporting, or promoting a checkpoint, read
+`docs/model-training-history.md`** — it is the source of truth for the current
+model, checkpoint registry, and ONNX export provenance. Resolve the promoted
+checkpoint through `artifacts/checkpoints/current-browser-model.json`, not a
+hard-coded path. Run-config verification: `scripts/training/verify_cpline_run_config.py`.
+
+### Code Quality
 ```bash
-python scripts/training/train_pixel_head.py --fold-dir full_train --epochs 5 --save-every 1 --batch-size 8 --image-size 512 --wandb --wandb-project cp-detector --resume checkpoints/<checkpoint>.pt
-
-python scripts/training/train_graph_head.py \
-   --pixel-checkpoint checkpoints/checkpoint_epoch_8.pt \
-   --data-dir data/training/full-training \
-   --epochs 30 \
-   --batch-size 4 \
-   --lr 5e-4 \
-   --checkpoint-dir checkpoints/graph
-```
-
-### Validation/Testing
-```bash
-python scripts/validation/validate_pipeline.py --fold-dir data/output/synthetic/raw/tier-a
-python scripts/debug/test_graph_extraction.py
-python scripts/validation/sanity_check.py
+black src/ scripts/          # Format (line-length=100)
+ruff check src/ scripts/     # Lint
+mypy src/                    # Type check
+pytest tests/                # Test suite
 ```
 
 ### Data Generation (TypeScript/Bun)
@@ -42,54 +54,41 @@ bun run src/generate-dataset.ts --count 1000 --method mixed
 bun run src/validate-scraped.ts
 ```
 
-### Code Quality
-```bash
-black src/ scripts/          # Format (line-length=100)
-ruff check src/ scripts/     # Lint
-mypy src/                    # Type check
-```
-
 ## Architecture
 
-**Three-Phase Training Pipeline:**
+CPLineNet predicts dense evidence fields (line probability, orientation,
+junction heatmap/offset, M/V/B/U assignment logits, boundary/style heads). During
+training and evaluation these fields are decoded through the in-repo deterministic
+vectorizer to compute graph-quality metrics:
 
-1. **Phase 1: Pixel Head** (50 epochs) - Train backbone + pixel head
-   - Input: Rendered crease pattern image (1024×1024)
-   - Model: HRNet-W32 backbone → Pixel Head (3 branches)
-   - Outputs: Segmentation mask (5 classes), orientation field (cos/sin θ), junction heatmap
-
-2. **Post-processing: Graph Extraction** (non-learned)
-   - Skeletonize segmentation → 1px wide lines
-   - Detect vertices from junction heatmap peaks + skeleton junctions
-   - Trace edges along skeleton between vertices
-   - Output: Over-complete candidate graph (biased toward recall)
-
-3. **Phase 2: Graph Head** (30 epochs) - Freeze pixel head, train GNN
-   - Input: Candidate graph + backbone features
-   - Model: 4-layer GAT with edge/node updates
-   - Outputs: Edge existence (keep/drop), edge assignment (M/V/B/U), vertex refinement (±5px)
-
-4. **Phase 3: End-to-End** (20 epochs) - Fine-tune all components together
-
-**Data Flow:**
 ```
-FOLD files → Rendered images → Pixel Head → Post-processing → Candidate graph → Graph Head → Final pattern
+CPLineNet dense fields
+  -> cpline_outputs_to_evidence   (src/vectorization/cpline_adapter.py)
+  -> PlanarGraphBuilder /
+     SquareTopologyDecoder        (src/vectorization/)
+  -> edge assignment              (src/vectorization/edge_assignment.py)
+  -> conservative repair          (src/vectorization/constraint_repair.py)
+  -> metrics / quality report     (src/vectorization/metrics.py, quality_report.py)
 ```
+
+**`src/vectorization/` is a training/eval instrument, not the production
+decoder.** The shipped decode path (junction-first candidate graph, exact-solve
+topology, flat-fold verification, browser runtime) is the Rust implementation in
+`tree-maker-rust`. Keep the Python vectorizer honest as an eval baseline, but do
+not treat it as production behavior.
 
 ## Key Source Directories
 
-- `src/models/cp_detector.py` - Main detector combining backbone + heads
-- `src/models/backbone/hrnet.py` - HRNet feature extractor (stride 4)
-- `src/models/heads/pixel_head.py` - Multi-task prediction (seg, orientation, junction)
-- `src/models/graph/` - Phase 2 GNN components (graph_head.py, layers.py, features.py)
-- `src/postprocessing/` - Pixel → Graph conversion:
-  - `skeletonize.py` - Morphological thinning
-  - `junctions.py` - Vertex detection from heatmap + skeleton
-  - `edge_tracing.py` - Follow skeleton to form edges
-  - `cleanup.py` - Merge collinear edges, remove noise
-  - `graph_extraction.py` - Main orchestrator
-- `src/data/` - Dataset, FOLD parser, transforms, annotations
-- `src/training/trainer.py` - Training loop with AMP, scheduling, checkpointing
+- `src/models/cpline_net.py` - CPLineNet: dense line/junction/assignment fields
+- `src/models/backbone/hrnet.py` - HRNet feature extractor (shared, used by CPLineNet)
+- `src/models/vertex_refiner.py` - Vertex refinement heads (V1/V2/V3)
+- `src/models/losses/` - CPLineNet loss functions
+- `src/vectorization/` - deterministic pixel-evidence → planar FOLD graph, used to
+  compute training/eval metrics (not production)
+- `src/evaluation/` - vertex-refiner evaluation (recall diagnostics, global merge)
+- `src/data/` - datasets (`cpline_dataset.py`), FOLD parsing, augmentations, scraping
+- `scripts/training/` - CPLineNet + vertex-refiner training and RunPod wrappers
+- `scripts/evals/`, `scripts/vectorization/` - evaluation and vectorizer-baseline scripts
 
 ## Origami Domain Constraints
 
@@ -103,20 +102,13 @@ FOLD files → Rendered images → Pixel Head → Post-processing → Candidate 
 
 Located in `data/output/synthetic/raw/` and `data/output/scraped/`:
 - **Tier S:** Passes all validation (Maekawa, Kawasaki, 2-colorability, flat-foldability)
-- **Tier A:** Passes local validation only (primary training data, ~89K synthetic + ~155 scraped)
+- **Tier A:** Passes local validation only (primary training data)
 - **Rejected:** Fails validation
 
-## Configuration
+## Planning Docs
 
-Training config in `configs/base.yaml`:
-- Image size: 1024×1024, stride 4
-- 5 segmentation classes: BG=0, M=1, V=2, B=3, U=4
-- Loss weights: seg=1.0, orient=0.5, junction=1.0
-- Data split: 85/10/5 (train/val/test)
-
-## Graph Extraction Philosophy
-
-The post-processing stage creates an **over-complete candidate graph** biased toward recall:
-- If a real crease is missing from candidates, the Graph Head cannot recover it
-- Extra spurious edges can be filtered by the Graph Head via edge existence prediction
-- Key parameters tuned for high recall: low junction threshold (0.55), small NMS distance (3px), bridge 2px gaps
+Implementation plans live in `implementation-plan/` and are **git-ignored local
+working notes** (not tracked), to avoid stale plans causing confusion. The tracked
+source of truth for training/model state is `docs/model-training-history.md`.
+Direction for the downstream decoder/app/benchmark lives in the `tree-maker-rust`
+repo, not here.

@@ -4,7 +4,6 @@ __all__ = [
     "FOLDParser",
     "CreasePattern",
     "GroundTruthGenerator",
-    "CreasePatternDataset",
     "CplineFoldDataset",
     "AUGMENT_PROFILES",
     "AUGMENT_MIXES",
@@ -26,10 +25,6 @@ def __getattr__(name: str):
         from .annotations import GroundTruthGenerator
 
         return GroundTruthGenerator
-    if name == "CreasePatternDataset":
-        from .dataset import CreasePatternDataset
-
-        return CreasePatternDataset
     if name == "CplineFoldDataset":
         from .cpline_dataset import CplineFoldDataset
 

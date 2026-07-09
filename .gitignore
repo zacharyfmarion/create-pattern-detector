@@ -28,3 +28,7 @@ artifacts/box_pleat_eval/
 *.safetensors
 **/*.zip
 visualizations/
+
+# Implementation plans are local working notes, not tracked in git
+implementation-plan/
+implementations-plans/
