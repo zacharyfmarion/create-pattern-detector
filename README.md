@@ -50,14 +50,10 @@ box-pleat candidate set from the native converted-FOLD corpus. The eval is
 verified by path-independent FOLD content fingerprints instead of tracked local
 paths.
 
-### Validate Pipeline
-
-```bash
-python scripts/validation/validate_pipeline.py --fold-dir data/output/synthetic/raw/tier-a
-```
-
 ### Train Model
 
-```bash
-python scripts/training/train_pixel_head.py --fold-dir data/output/synthetic/raw/tier-a
-```
+CPLineNet training is the roadmap-native path in
+`scripts/training/train_cpline_smoke.py`, wrapped by the RunPod curriculum
+scripts (`scripts/training/run_cpline_runpod_*.sh`). Read
+`docs/model-training-history.md` before training, exporting, or promoting a
+checkpoint.

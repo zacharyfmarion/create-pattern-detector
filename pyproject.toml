@@ -32,11 +32,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-graph = [
-    # For Phase 2: Graph Neural Networks
-    "torch-geometric>=2.3.0",
-]
-
 dev = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
@@ -49,9 +44,6 @@ dev = [
 ]
 
 [project.scripts]
-cp-train = "scripts.train:main"
-cp-evaluate = "scripts.evaluate:main"
-cp-predict = "scripts.inference:main"
 cp-detect = "src.inference.cli:main"
 
 [build-system]

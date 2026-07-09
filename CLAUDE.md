@@ -4,35 +4,53 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-A deep learning model for detecting and classifying crease patterns in origami diagrams. The system extracts valid origami graphs from images while maintaining mathematical constraints (Kawasaki/Maekawa theorems, 2-colorability).
+A deep learning model for detecting and classifying crease patterns in origami
+diagrams. The system extracts valid origami graphs from images while maintaining
+mathematical constraints (Kawasaki/Maekawa theorems, 2-colorability).
+
+The production system is **vector-first**: a learned line/junction/assignment
+model (`CPLineNet`) produces dense visual evidence, and a deterministic
+geometry stage builds and repairs the planar FOLD graph. The older mask-first
+prototype (HRNet pixel head → skeletonize → GNN graph head) has been removed;
+see `ROADMAP.md` for the architecture decision.
 
 ## Commands
 
 ### Setup
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -e .
+scripts/setup_python_env.sh
 ```
+Reuses a shared dependency virtualenv across git worktrees and links it into the
+current worktree as `.venv`. See `AGENTS.md` for `--adopt-local` and reset flags.
 
-### Training
+### Detect a CP image
 ```bash
-python scripts/training/train_pixel_head.py --fold-dir full_train --epochs 5 --save-every 1 --batch-size 8 --image-size 512 --wandb --wandb-project cp-detector --resume checkpoints/<checkpoint>.pt
-
-python scripts/training/train_graph_head.py \
-   --pixel-checkpoint checkpoints/checkpoint_epoch_8.pt \
-   --data-dir data/training/full-training \
-   --epochs 30 \
-   --batch-size 4 \
-   --lr 5e-4 \
-   --checkpoint-dir checkpoints/graph
+cp-detect --rectified input.png \
+  --output output.fold \
+  --report output.report.json \
+  --debug-dir debug/
 ```
+Entry point: `src/inference/cli.py` → `src/inference/pipeline.py`. See
+`docs/phase-5-inference-cli.md` for checkpoint recovery, output layout, and
+debug artifacts.
 
-### Validation/Testing
+### Train the model
+CPLineNet training is the roadmap-native path in
+`scripts/training/train_cpline_smoke.py`, wrapped by the RunPod curriculum
+scripts (`scripts/training/run_cpline_runpod_*.sh`). **Before training,
+exporting, or promoting a checkpoint, read `docs/model-training-history.md`** —
+it is the source of truth for the current model, checkpoint registry, and ONNX
+export provenance. Resolve the promoted checkpoint through
+`artifacts/checkpoints/current-browser-model.json`, not a hard-coded path.
+
+Run-config verification: `scripts/training/verify_cpline_run_config.py`.
+
+### Code Quality
 ```bash
-python scripts/validation/validate_pipeline.py --fold-dir data/output/synthetic/raw/tier-a
-python scripts/debug/test_graph_extraction.py
-python scripts/validation/sanity_check.py
+black src/ scripts/          # Format (line-length=100)
+ruff check src/ scripts/     # Lint
+mypy src/                    # Type check
+pytest tests/                # Test suite
 ```
 
 ### Data Generation (TypeScript/Bun)
@@ -42,54 +60,40 @@ bun run src/generate-dataset.ts --count 1000 --method mixed
 bun run src/validate-scraped.ts
 ```
 
-### Code Quality
-```bash
-black src/ scripts/          # Format (line-length=100)
-ruff check src/ scripts/     # Lint
-mypy src/                    # Type check
-```
-
 ## Architecture
 
-**Three-Phase Training Pipeline:**
-
-1. **Phase 1: Pixel Head** (50 epochs) - Train backbone + pixel head
-   - Input: Rendered crease pattern image (1024×1024)
-   - Model: HRNet-W32 backbone → Pixel Head (3 branches)
-   - Outputs: Segmentation mask (5 classes), orientation field (cos/sin θ), junction heatmap
-
-2. **Post-processing: Graph Extraction** (non-learned)
-   - Skeletonize segmentation → 1px wide lines
-   - Detect vertices from junction heatmap peaks + skeleton junctions
-   - Trace edges along skeleton between vertices
-   - Output: Over-complete candidate graph (biased toward recall)
-
-3. **Phase 2: Graph Head** (30 epochs) - Freeze pixel head, train GNN
-   - Input: Candidate graph + backbone features
-   - Model: 4-layer GAT with edge/node updates
-   - Outputs: Edge existence (keep/drop), edge assignment (M/V/B/U), vertex refinement (±5px)
-
-4. **Phase 3: End-to-End** (20 epochs) - Fine-tune all components together
-
-**Data Flow:**
+**Inference pipeline** (`src/inference/pipeline.py`):
 ```
-FOLD files → Rendered images → Pixel Head → Post-processing → Candidate graph → Graph Head → Final pattern
+input image
+  -> SquareRectifier            (src/inference/rectifier.py)
+  -> CPLineNet                  (src/models/cpline_net.py; HRNet backbone)
+  -> cpline_outputs_to_evidence (src/vectorization/cpline_adapter.py)
+  -> PlanarGraphBuilder /
+     SquareTopologyDecoder      (src/vectorization/)
+  -> EdgeAssignment             (src/vectorization/edge_assignment.py)
+  -> OrigamiConstraintRepair    (src/vectorization/constraint_repair.py)
+  -> QualityReport + FOLDWriter (src/vectorization/quality_report.py, fold_writer.py)
 ```
+The learned model detects visual evidence for lines, junctions, and
+assignments. The final graph is built by deterministic geometry and validated as
+a planar FOLD graph. Vertex refinement lives in `src/models/vertex_refiner.py`.
 
 ## Key Source Directories
 
-- `src/models/cp_detector.py` - Main detector combining backbone + heads
-- `src/models/backbone/hrnet.py` - HRNet feature extractor (stride 4)
-- `src/models/heads/pixel_head.py` - Multi-task prediction (seg, orientation, junction)
-- `src/models/graph/` - Phase 2 GNN components (graph_head.py, layers.py, features.py)
-- `src/postprocessing/` - Pixel → Graph conversion:
-  - `skeletonize.py` - Morphological thinning
-  - `junctions.py` - Vertex detection from heatmap + skeleton
-  - `edge_tracing.py` - Follow skeleton to form edges
-  - `cleanup.py` - Merge collinear edges, remove noise
-  - `graph_extraction.py` - Main orchestrator
-- `src/data/` - Dataset, FOLD parser, transforms, annotations
-- `src/training/trainer.py` - Training loop with AMP, scheduling, checkpointing
+- `src/models/cpline_net.py` - CPLineNet: dense line/junction/assignment fields
+- `src/models/backbone/hrnet.py` - HRNet feature extractor (shared, used by CPLineNet)
+- `src/models/vertex_refiner.py` - Vertex refinement heads (V1/V2/V3)
+- `src/models/losses/` - CPLineNet loss functions
+- `src/vectorization/` - Deterministic pixel-evidence → planar FOLD graph:
+  - `cpline_adapter.py` - CPLineNet outputs → vectorizer evidence
+  - `planar_graph_builder.py` / `square_topology_decoder.py` - graph construction
+  - `edge_assignment.py` - M/V/B/U assignment from logits
+  - `constraint_repair.py` - conservative origami-constraint repair
+  - `quality_report.py` / `diagnostics.py` - validation + honest failure reports
+  - `fold_writer.py` - FOLD output
+- `src/inference/` - CLI, pipeline orchestration, rectifier
+- `src/data/` - datasets (`cpline_dataset.py`), FOLD parsing, augmentations
+- `scripts/training/` - CPLineNet + vertex-refiner training and RunPod wrappers
 
 ## Origami Domain Constraints
 
@@ -103,20 +107,12 @@ FOLD files → Rendered images → Pixel Head → Post-processing → Candidate 
 
 Located in `data/output/synthetic/raw/` and `data/output/scraped/`:
 - **Tier S:** Passes all validation (Maekawa, Kawasaki, 2-colorability, flat-foldability)
-- **Tier A:** Passes local validation only (primary training data, ~89K synthetic + ~155 scraped)
+- **Tier A:** Passes local validation only (primary training data)
 - **Rejected:** Fails validation
 
-## Configuration
+## Planning Docs
 
-Training config in `configs/base.yaml`:
-- Image size: 1024×1024, stride 4
-- 5 segmentation classes: BG=0, M=1, V=2, B=3, U=4
-- Loss weights: seg=1.0, orient=0.5, junction=1.0
-- Data split: 85/10/5 (train/val/test)
-
-## Graph Extraction Philosophy
-
-The post-processing stage creates an **over-complete candidate graph** biased toward recall:
-- If a real crease is missing from candidates, the Graph Head cannot recover it
-- Extra spurious edges can be filtered by the Graph Head via edge existence prediction
-- Key parameters tuned for high recall: low junction threshold (0.55), small NMS distance (3px), bridge 2px gaps
+Implementation plans live in `implementation-plan/` and are **git-ignored local
+working notes** (not tracked), to avoid stale plans causing confusion. The
+tracked source of truth for direction is `ROADMAP.md`; for training/model state
+it is `docs/model-training-history.md`.
