@@ -1,5 +1,9 @@
 # Crease Pattern Detector V2 Roadmap
 
+> **Archived / historical.** Superseded by the top-level `ROADMAP.md`
+> (current source of truth as of 2026-06-15). Kept for provenance; do not treat
+> as authoritative.
+
 ## Goal State
 
 V2 should produce structurally correct square origami crease-pattern FOLD graphs

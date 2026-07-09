@@ -644,3 +644,8 @@ The project is production-ready when:
 - Debug overlays make failures actionable.
 - The system has fixed synthetic and real regression suites.
 - Downstream origami-base computation succeeds on the intended benchmark set.
+
+## History
+
+This is the single current roadmap. The earlier V2 roadmap has been folded in
+and archived at `docs/archive/V2_ROADMAP.md` for provenance.
