@@ -1,0 +1,60 @@
+{
+  "checkpoint": "checkpoints/runpod_v3_no_guide_grid_close_pair_dense_edges_tess15_weighted_probe_20260619/full/latest.pt",
+  "manifest": "data/generated/synthetic/cp_training_mix_v4_search225/raw-manifest.jsonl",
+  "split": "val",
+  "profile": "clean",
+  "threshold": 0.4,
+  "offset_radius_px": 3.0,
+  "decode": "peak-gated-offset-cluster (evidence_extract.rs parity)",
+  "families": {
+    "rabbit-ear-fold-program": {
+      "samples": 5,
+      "junctions": 202,
+      "recall": 0.9901,
+      "misses": 2,
+      "extras": 3,
+      "extras_per_sample": 0.6,
+      "clean_rate": 0.8
+    },
+    "search225-tiling": {
+      "samples": 18,
+      "junctions": 845,
+      "recall": 0.99763,
+      "misses": 2,
+      "extras": 2,
+      "extras_per_sample": 0.111,
+      "clean_rate": 0.7778
+    },
+    "tessellation-fold-program": {
+      "samples": 2,
+      "junctions": 670,
+      "recall": 1.0,
+      "misses": 0,
+      "extras": 0,
+      "extras_per_sample": 0.0,
+      "clean_rate": 1.0
+    },
+    "treemaker-tree": {
+      "samples": 23,
+      "junctions": 1108,
+      "recall": 1.0,
+      "misses": 0,
+      "extras": 1,
+      "extras_per_sample": 0.043,
+      "clean_rate": 0.9565
+    }
+  },
+  "miss_taxonomy": {
+    "localization.close_pair": 3,
+    "sub_threshold.isolated": 1
+  },
+  "overall": {
+    "samples": 48,
+    "junctions": 2825,
+    "recall": 0.99858,
+    "misses": 4,
+    "extras": 6,
+    "extras_per_sample": 0.125,
+    "clean_rate": 0.875
+  }
+}

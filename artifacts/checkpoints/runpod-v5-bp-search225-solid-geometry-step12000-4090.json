@@ -1,0 +1,123 @@
+{
+  "schemaVersion": 1,
+  "id": "runpod-v5-bp-search225-solid-geometry-step12000-4090",
+  "status": "promoted",
+  "phase": "v5-bp-search225-solid-geometry-junction",
+  "registeredAt": "2026-07-08",
+  "description": "Current promoted V5 browser/default checkpoint. BP + search225 solid-geometry junction run, step 12000 (= latest.pt). Warm-started from the promoted tess15-weighted checkpoint with no head reinit, preserving the close-pair radius-3 junction-offset recipe. Raises the training edge envelope max_edges 1200->5000 and adds 10,905 box-pleated + 6,451 SEARCH-22.5 rows via the v5-bp-search225 sampler under the v4-solid-geometry-replay profile (no dash/text/watermark obfuscators). Selected over steps 6000/11000 by a direct native-cp-v1 end-to-end bake-off (deterministic exact-solve replay, PyTorch-MPS): recovered 231 vs 214/212. Browser-onnx re-baseline (shipping numeric path) recovers 204, decisively above the 121 tess15 baseline; the win holds on the path the product ships.",
+  "checkpoint": {
+    "gitTracked": false,
+    "relativePath": "checkpoints/runpod_v5_bp_search225_solid_geometry_20260707/full/latest.pt",
+    "originalRunpodPath": "/workspace/create-pattern-detector/checkpoints/runpod_v5_bp_search225_solid_geometry_20260707/full/latest.pt",
+    "sha256": "2f4b46ff39bb8db98d1cfbe59d8d32480c2d2ae1522bd2d75d421788b18a4876",
+    "sizeBytes": 141185120,
+    "note": "latest.pt == step 12000 weights (val_loss null / skip_final_eval; latest.pt is the final training state). step_1000..step_12000 snapshots also retained under the same full/ dir."
+  },
+  "model": {
+    "class": "CPLineNet",
+    "backbone": "hrnet_w18",
+    "hiddenChannels": 128,
+    "imageSize": 1024,
+    "v2Heads": true,
+    "junctionOffsetClamp": 1.0
+  },
+  "training": {
+    "device": "cuda",
+    "gpu": "NVIDIA GeForce RTX 4090",
+    "runpodPodId": "w53bba01tcrgth",
+    "dataset": "cp_training_mix_v5_bp_search225",
+    "manifest": "data/generated/synthetic/cp_training_mix_v5_bp_search225/raw-manifest.jsonl",
+    "datasetRows": 33827,
+    "trainSamples": 8192,
+    "valSamples": 512,
+    "maxEdges": 5000,
+    "batchSize": 1,
+    "maxSteps": 12000,
+    "seed": 41,
+    "augmentProfile": "v4-solid-geometry-replay",
+    "evalAugmentProfile": "v4-solid-geometry-replay",
+    "initCheckpoint": "checkpoints/runpod_v3_no_guide_grid_close_pair_dense_edges_tess15_weighted_probe_20260619/full/latest.pt",
+    "loadedCheckpoint": "checkpoints/runpod_v3_no_guide_grid_close_pair_dense_edges_tess15_weighted_probe_20260619/full/latest.pt",
+    "reinitHeads": "",
+    "learningRate": 0.00005,
+    "junctionSigmaPx": 1.5,
+    "junctionOffsetRadiusPx": 3.0,
+    "junctionOffsetWeight": 0.5,
+    "junctionFocalAlpha": 2.0,
+    "junctionFocalBeta": 4.0,
+    "trainFamilySampling": "v5-bp-search225",
+    "trainSelectionSummary": {
+      "families": {
+        "box-pleated": 1638,
+        "rabbit-ear-fold-program": 1843,
+        "search225-tiling": 1639,
+        "tessellation-fold-program": 1229,
+        "treemaker-tree": 1843
+      },
+      "sourceDatasets": {
+        "box_pleated_dense_v1": 279,
+        "box_pleated_v1": 1359,
+        "cp_training_mix_v1": 3686,
+        "search225_v1": 1639,
+        "tessellation_miura_ori_v2_15pct": 246,
+        "tessellation_orthogonal_bp_grid_v2_15pct": 983
+      }
+    },
+    "batchnormMode": "batch-stats",
+    "skipGraphEval": true,
+    "skipFinalEval": true,
+    "elapsedSeconds": 23377.79426319152,
+    "firstTrainLoss": 148.92489624023438,
+    "lastTrainLoss": 0.43785667419433594,
+    "estimatedRunpodCostUsd": 8.0
+  },
+  "inference": {
+    "batchnormMode": "batch-stats",
+    "vectorizerThreshold": 0.65,
+    "junctionOffsetRadiusPx": 3.0,
+    "notes": "junction_offset remains radius-normalized and must be decoded with radius-3 offset-vote clustering (product decode = junction-first-v1 + source-image line evidence; no vertex refiner). Browser ONNX export uses explicit per-image BatchNorm ops. Promoted for a large native-cp-v1 end-to-end recovery gain driven by higher junction recall (more CPs pass the topology gate); recall is the lever, not extras-filtering.",
+    "downstreamVersionedOnnxManifest": "tree-maker-rust/apps/web/public/models/cp-detector-v3-v5-bp-search225-step12000-20260708/manifest.json",
+    "downstreamOnnxSha256": "399e6078318040383131191a04b0d28a9e1ad35e43dd8c7460dd2575a14b1092"
+  },
+  "evaluation": {
+    "nativeCpV1EndToEnd": {
+      "harness": "tree-maker-rust replay_exact_solve_experiments (deterministic exact-solve, --threads 4) over gate-passing inputs captured by compare_exact_solve_benchmark --candidate-source junction-first-v1 --line-evidence-source source-image --parity-repair --skip-flat-folder; strict 2px, 25s solve; commit 6ba22bf1, built+run from same worktree (provenance guard)",
+      "denseCache": "native-cp-v1-pytorch-mps-v5-bp-search225-step12000-20260708 (PyTorch-MPS; browser-onnx re-baseline pending)",
+      "report": "create-pattern-detector/reports/2026-07-08-v5-junction-training-run.md",
+      "solveRecoveredOriginal": 231,
+      "baselineSolveRecoveredOriginal": 121,
+      "gatePassingInputs": 307,
+      "baselineGatePassingInputs": 150,
+      "acceptedWrong": 19,
+      "bakeOffRecovered": {
+        "step6000": 214,
+        "step11000": 212,
+        "step12000": 231
+      },
+      "note": "Baseline reproduces PR #74's 121/17 exactly. Directional 16-core per-bucket (baseline->v5): easy 70->131, medium 49->87, hard 0->2. Held-out caveat: 3 finalists measured on native for selection (see report)."
+    },
+    "nativeCpV1EndToEndBrowserOnnx": {
+      "note": "Shipping numeric path (browser onnxruntime-web) via run-browser-dense-cache.mjs + deterministic replay. Confirms the win holds on the path the product actually runs.",
+      "denseCache": "native-cp-v1-browser-onnx-v5-bp-search225-step12000-20260708",
+      "solveRecoveredOriginal": 204,
+      "gatePassingInputs": 281,
+      "acceptedWrong": 12,
+      "baselineSolveRecoveredOriginalMps": 121,
+      "mpsToOnnxDelta": "browser-onnx recovers ~12% fewer than PyTorch-MPS (204 vs 231), mostly from ~26 fewer CPs clearing the topology gate; still decisively above baseline"
+    },
+    "nativeCpV1JunctionRecall": {
+      "harness": "tree-maker-rust scripts/cp-detect/rederive-junction-recall.py (raw dense detection recall @thr0.65)",
+      "easy": 0.9593,
+      "medium": 0.9589,
+      "hard": 0.8153,
+      "baselineEasy": 0.9184,
+      "baselineMedium": 0.9052,
+      "baselineHard": 0.5500
+    }
+  },
+  "relatedDocs": [
+    "reports/2026-07-08-v5-junction-training-run.md",
+    "docs/model-training-history.md",
+    "docs/checkpoint-management.md"
+  ]
+}

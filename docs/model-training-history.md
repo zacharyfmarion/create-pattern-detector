@@ -11,12 +11,17 @@ The tracked source of truth for the current downstream/browser model is:
 artifacts/checkpoints/current-browser-model.json
 ```
 
-That pointer currently resolves to the V3 no-guide-grid close-pair dense-edge
-15% tessellation weighted checkpoint. It warm-started from the previous
-dense-edge max1200 checkpoint, kept all heads, preserved the `max_edges=1200`
-training envelope, added the corrected 15% tessellation mix with
-`TRAIN_FAMILY_SAMPLING=v3-tessellation-15pct`, and preserved the close-pair
-radius-3 junction-offset recipe.
+That pointer currently resolves to the **V5 BP + search225 solid-geometry
+junction checkpoint (step 12000)**. It warm-started from the previous promoted
+tess15-weighted checkpoint with no head reinit, preserved the close-pair
+radius-3 junction-offset recipe, raised the training edge envelope to
+`max_edges=5000`, and added 10,905 box-pleated + 6,451 SEARCH-22.5 rows via
+`TRAIN_FAMILY_SAMPLING=v5-bp-search225` under the `v4-solid-geometry-replay`
+augmentation profile (no dash/text/watermark). It was promoted after a direct
+native-cp-v1 end-to-end bake-off: `solve_recovered_original` **121 -> 231**
+(PyTorch-MPS, deterministic exact-solve replay), confirmed on the shipping
+browser-onnx path at **204** recovered — both decisively above the tess15
+baseline. Recall (more junctions clearing the topology gate) is the driver.
 
 Use the helper when a command needs the current path:
 
@@ -34,8 +39,8 @@ apps/web/public/models/cp-detector-v3/model.onnx
 The versioned export used to promote that default is:
 
 ```text
-apps/web/public/models/cp-detector-v3-tess15-weighted-20260619/manifest.json
-apps/web/public/models/cp-detector-v3-tess15-weighted-20260619/model.onnx
+apps/web/public/models/cp-detector-v3-v5-bp-search225-step12000-20260708/manifest.json
+apps/web/public/models/cp-detector-v3-v5-bp-search225-step12000-20260708/model.onnx
 ```
 
 Important settings are recorded in the checkpoint manifest resolved by the
@@ -43,9 +48,9 @@ pointer. Operational defaults should read that manifest or the pointer rather
 than copying the current path or checksum into another file. As of this update:
 
 - PyTorch checkpoint SHA-256:
-  `0827adc76d7d33b67e7121f912ef06378649b62dae59340cc2a1ab7e0d39988d`
+  `2f4b46ff39bb8db98d1cfbe59d8d32480c2d2ae1522bd2d75d421788b18a4876`
 - ONNX SHA-256 in `tree-maker-rust`:
-  `b425cfd6caecde93caa92f0e8952040f5bada0345c5387a222d1fb915e283742`
+  `399e6078318040383131191a04b0d28a9e1ad35e43dd8c7460dd2575a14b1092`
 - Image size: `1024`
 - Backbone: `hrnet_w18`
 - V2 auxiliary heads: enabled
@@ -53,10 +58,18 @@ than copying the current path or checksum into another file. As of this update:
   per-image BatchNorm ops.
 - Junction offset radius: `3.0` px. Decoders must use offset-vote clustering
   rather than legacy sub-pixel-only offset decoding.
-- Promoted continuation envelope: `max_edges=1200`, `1500` steps, no head
-  reinitialization from the prior max1200 dense-edge checkpoint.
-- Training mix: `cp_training_mix_v3_tessellation_15pct` with
-  `TRAIN_FAMILY_SAMPLING=v3-tessellation-15pct`.
+- Promoted training envelope: `max_edges=5000`, `12000` steps, warm-started
+  from the tess15-weighted checkpoint with no head reinitialization.
+- Training mix: `cp_training_mix_v5_bp_search225` with
+  `TRAIN_FAMILY_SAMPLING=v5-bp-search225` and the `v4-solid-geometry-replay`
+  augmentation profile.
+- Native-cp-v1 promotion evidence: `reports/2026-07-08-v5-junction-training-run.md`.
+
+The prior promoted model (tess15-weighted, superseded 2026-07-08) is retained
+for comparison: manifest
+`artifacts/checkpoints/runpod-v3-no-guide-grid-close-pair-dense-edges-tess15-weighted-4090.json`,
+ONNX SHA `b425cfd6caecde93caa92f0e8952040f5bada0345c5387a222d1fb915e283742`,
+versioned dir `apps/web/public/models/cp-detector-v3-tess15-weighted-20260619/`.
 
 ## Do Not Confuse Older Runs
 
@@ -256,7 +269,8 @@ non-promotable sampler ablation.
 | 2026-06-17 | V3 no-guide-grid close-pair full R1 | `artifacts/checkpoints/runpod-v3-no-guide-grid-close-pair-full-r1-4090.json` | R1 close-pair checkpoint, reinitialized `non_crease_head` | Superseded browser/product model. Keeps radius-3 close-pair decoder compatibility, fixes BP non-crease suppression, and improves current-pack clean-15 strict topology. |
 | 2026-06-18 | V3 no-guide-grid close-pair dense-edge max700 | `artifacts/checkpoints/runpod-v3-no-guide-grid-close-pair-dense-edges-max700-4090.json` | No-guide-grid close-pair R1, no head reinit | Superseded browser/product model. Raises the training edge envelope to `max_edges=700`, improves dense BP horizontal/vertical recall, and improves clean-15 strict topology to `0.9623` strict edge F1. |
 | 2026-06-18 | V3 no-guide-grid close-pair dense-edge max1200 | `artifacts/checkpoints/runpod-v3-no-guide-grid-close-pair-dense-edges-max1200-l40s.json` | Max700 checkpoint, no head reinit | Superseded browser/product model. Raises the training edge envelope to `max_edges=1200`; improves BP orthogonal effective recall to `0.6746` and clean-15 strict edge F1 to `0.9655`, with modestly higher non-crease conflict. |
-| 2026-06-19 | V3 no-guide-grid close-pair dense-edge tess15 weighted | `artifacts/checkpoints/runpod-v3-no-guide-grid-close-pair-dense-edges-tess15-weighted-4090.json` | Max1200 checkpoint, no head reinit | Current promoted browser/product model. Uses `TRAIN_FAMILY_SAMPLING=v3-tessellation-15pct` to preserve balanced TreeMaker/Rabbit exposure while adding 12% orthogonal BP-grid and 3% Miura tessellations. BP orthogonal effective recall improves to `0.7547`; clean-15 strict edge F1 remains tied at `0.9651`. |
+| 2026-06-19 | V3 no-guide-grid close-pair dense-edge tess15 weighted | `artifacts/checkpoints/runpod-v3-no-guide-grid-close-pair-dense-edges-tess15-weighted-4090.json` | Max1200 checkpoint, no head reinit | Previous promoted browser/product model (superseded 2026-07-08). Uses `TRAIN_FAMILY_SAMPLING=v3-tessellation-15pct` to preserve balanced TreeMaker/Rabbit exposure while adding 12% orthogonal BP-grid and 3% Miura tessellations. BP orthogonal effective recall improves to `0.7547`; clean-15 strict edge F1 remains tied at `0.9651`. |
+| 2026-07-08 | V5 BP + search225 solid-geometry junction (step 12000) | `artifacts/checkpoints/runpod-v5-bp-search225-solid-geometry-step12000-4090.json` | tess15-weighted checkpoint, no head reinit | **Current promoted browser/product model.** Warm-started from tess15-weighted; raises envelope to `max_edges=5000`, adds 10,905 box-pleated + 6,451 SEARCH-22.5 rows via `TRAIN_FAMILY_SAMPLING=v5-bp-search225` under `v4-solid-geometry-replay`. Native-cp-v1 `solve_recovered_original` **121 -> 231** (PyTorch-MPS, deterministic replay; baseline reproduces PR #74 exactly), **204** on the shipping browser-onnx path. Raw junction recall +4/+5/+26 pts (easy/medium/hard). Selected over steps 6000/11000 by a native end-to-end bake-off (231 vs 214/212); recall is the lever. See `reports/2026-07-08-v5-junction-training-run.md`. |
 
 ## Update Rules
 
