@@ -1,5 +1,20 @@
 # Agent Notes
 
+## Repository Scope
+
+This repo is **data + training + evaluation** only. It produces the ONNX models
+(`CPLineNet` + vertex-refiner) and the deterministic ML eval spec. It has **no
+production inference path** — the earlier Python `cp-detect` CLI has been removed.
+
+All post-processing of the dense ONNX signals — decode to a FOLD graph,
+exact-solve topology reconstruction, flat-fold verification, the browser/desktop
+app, and the production correctness benchmarks — lives in the Rust monorepo
+`~/Documents/code/tree-maker-rust` ("Ori Studio"), which is the production source
+of truth. The handoff is a re-exported ONNX file; model pointers and export
+scripts live there under `scripts/cp-detect/` (`current-model.json`,
+`current-vertex-refiner.json`, `export-cpline-onnx.py`). `src/vectorization/`
+here is a training/eval instrument, not the shipped decoder.
+
 ## Python Environment
 
 Use the shared setup script instead of building a fresh dependency environment in
@@ -162,7 +177,7 @@ registered as an ablation at
 `artifacts/checkpoints/runpod-v3-close-pair-scratch-r3-4090.json` because it
 landed statistically identical to R1 and was not promoted.
 
-The older blessed Phase 3 V1 Python/CLI baseline remains registered at
+The older blessed Phase 3 V1 baseline checkpoint remains registered at
 `artifacts/checkpoints/phase3-v1-cpline.json`.
 
 ## RunPod Phase 3

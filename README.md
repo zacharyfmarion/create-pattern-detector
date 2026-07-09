@@ -1,6 +1,24 @@
 # Crease Pattern Detector
 
-A deep learning model for detecting and classifying crease patterns in origami diagrams.
+Training and data pipeline for the origami crease-pattern detection model: a
+dense line/junction/assignment model (`CPLineNet`) plus a vertex-refiner, trained
+here and exported to ONNX.
+
+## Scope
+
+This repository owns **data generation, training, and evaluation** only. It
+produces the ONNX models and the deterministic ML eval spec.
+
+Everything downstream of the model — decoding the dense ONNX signals into a FOLD
+graph, exact-solve topology reconstruction, flat-fold verification, the
+browser/desktop app, and the production correctness benchmarks — lives in the
+Rust monorepo **`~/Documents/code/tree-maker-rust`** ("Ori Studio"). Once a model
+is exported to ONNX, all post-processing happens there; the Rust decode path is
+the production source of truth. There is no Python inference/CLI in this repo.
+
+Model/vertex-refiner pointers and the ONNX export scripts live in that repo under
+`scripts/cp-detect/` (`current-model.json`, `current-vertex-refiner.json`,
+`export-cpline-onnx.py`).
 
 ## Installation
 
@@ -9,51 +27,33 @@ scripts/setup_python_env.sh
 ```
 
 The setup script reuses a shared dependency virtualenv across git worktrees and
-links it into the current worktree as `.venv`.
+links it into the current worktree as `.venv`. See `AGENTS.md` for flags.
 
 ## Model Source Of Truth
 
-Before using, exporting, or retraining CPLineNet, read
+Before training, exporting, or promoting a checkpoint, read
 `docs/model-training-history.md`. It records the current downstream/browser model,
 the checkpoint registry entry, ONNX export provenance, and why older close-pair
 or diagnostic runs were not promoted. Resolve the current promoted checkpoint
 through `artifacts/checkpoints/current-browser-model.json` instead of copying a
 checkpoint path into docs.
 
-## Usage
-
-### Detect A CP Image
-
-```bash
-cp-detect --rectified input.png \
-  --output output.fold \
-  --report output.report.json \
-  --debug-dir debug/
-```
-
-Phase 5 supports readable CP images and page/screenshot images with a visible
-crease-pattern border. The rectifier crops the CP panel, perspective-warps it to
-the canonical square, preserves the detected border inside a small clean margin,
-and falls back to resize/pad only when the panel cannot be detected confidently.
-Full arbitrary photo/document rectification remains Phase 6. Transparent inputs
-use `--alpha-matte auto` by default so dark-mode CPs are not flattened onto white
-unless the matte is truly ambiguous.
-
-See `docs/phase-5-inference-cli.md` for checkpoint recovery, output layout, and
-debug artifacts.
-
-### Box-Pleat Native Eval
-
-Use `docs/evals/box-pleat-native-v1.md` and
-`eval_specs/box_pleat_native_v1.json` to regenerate the deterministic
-box-pleat candidate set from the native converted-FOLD corpus. The eval is
-verified by path-independent FOLD content fingerprints instead of tracked local
-paths.
-
-### Train Model
+## Train Model
 
 CPLineNet training is the roadmap-native path in
 `scripts/training/train_cpline_smoke.py`, wrapped by the RunPod curriculum
-scripts (`scripts/training/run_cpline_runpod_*.sh`). Read
-`docs/model-training-history.md` before training, exporting, or promoting a
-checkpoint.
+scripts (`scripts/training/run_cpline_runpod_*.sh`). Vertex-refiner training is
+`scripts/training/train_vertex_refiner.py`. Read `docs/model-training-history.md`
+and `docs/runpod-quickstart.md` first.
+
+## Evaluate
+
+Training evaluates predicted dense fields through the in-repo deterministic
+vectorizer (`src/vectorization/`) to produce graph-quality metrics. Note this
+vectorizer is a **training/eval instrument**, not the production decoder — the
+shipped decode path is the Rust implementation in `tree-maker-rust`.
+
+The box-pleat / grid-line-suppression eval is defined by
+`docs/evals/box-pleat-native-v1.md` and `eval_specs/box_pleat_native_v1.json`,
+verified by path-independent canonical FOLD fingerprints. The Rust repo consumes
+that spec to build its product-side correctness pack.

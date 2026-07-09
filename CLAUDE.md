@@ -4,15 +4,21 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-A deep learning model for detecting and classifying crease patterns in origami
-diagrams. The system extracts valid origami graphs from images while maintaining
-mathematical constraints (Kawasaki/Maekawa theorems, 2-colorability).
+This repository is the **data + training + evaluation** side of an origami
+crease-pattern detection system. It trains a dense line/junction/assignment model
+(`CPLineNet`) and a vertex-refiner, and exports them to ONNX.
 
-The production system is **vector-first**: a learned line/junction/assignment
-model (`CPLineNet`) produces dense visual evidence, and a deterministic
-geometry stage builds and repairs the planar FOLD graph. The older mask-first
-prototype (HRNet pixel head → skeletonize → GNN graph head) has been removed;
-see `ROADMAP.md` for the architecture decision.
+It does **not** contain a production inference path. Everything downstream of the
+model — decoding the dense ONNX signals into a FOLD graph, exact-solve topology
+reconstruction, flat-fold verification, the browser/desktop app, and the
+production correctness benchmarks — lives in the Rust monorepo
+**`~/Documents/code/tree-maker-rust`** ("Ori Studio"). The Rust decode path is the
+production source of truth. When the model changes, the handoff is a re-exported
+ONNX file, tracked by pointers in that repo's `scripts/cp-detect/` directory
+(`current-model.json`, `current-vertex-refiner.json`, `export-cpline-onnx.py`).
+
+The older mask-first prototype (HRNet pixel head → skeletonize → GNN graph head)
+and the earlier Python inference CLI have both been removed.
 
 ## Commands
 
@@ -23,27 +29,15 @@ scripts/setup_python_env.sh
 Reuses a shared dependency virtualenv across git worktrees and links it into the
 current worktree as `.venv`. See `AGENTS.md` for `--adopt-local` and reset flags.
 
-### Detect a CP image
-```bash
-cp-detect --rectified input.png \
-  --output output.fold \
-  --report output.report.json \
-  --debug-dir debug/
-```
-Entry point: `src/inference/cli.py` → `src/inference/pipeline.py`. See
-`docs/phase-5-inference-cli.md` for checkpoint recovery, output layout, and
-debug artifacts.
-
-### Train the model
-CPLineNet training is the roadmap-native path in
-`scripts/training/train_cpline_smoke.py`, wrapped by the RunPod curriculum
-scripts (`scripts/training/run_cpline_runpod_*.sh`). **Before training,
-exporting, or promoting a checkpoint, read `docs/model-training-history.md`** —
-it is the source of truth for the current model, checkpoint registry, and ONNX
-export provenance. Resolve the promoted checkpoint through
-`artifacts/checkpoints/current-browser-model.json`, not a hard-coded path.
-
-Run-config verification: `scripts/training/verify_cpline_run_config.py`.
+### Train
+CPLineNet: `scripts/training/train_cpline_smoke.py` (roadmap-native path),
+wrapped by the RunPod curriculum scripts (`scripts/training/run_cpline_runpod_*.sh`).
+Vertex-refiner: `scripts/training/train_vertex_refiner.py`.
+**Before training, exporting, or promoting a checkpoint, read
+`docs/model-training-history.md`** — it is the source of truth for the current
+model, checkpoint registry, and ONNX export provenance. Resolve the promoted
+checkpoint through `artifacts/checkpoints/current-browser-model.json`, not a
+hard-coded path. Run-config verification: `scripts/training/verify_cpline_run_config.py`.
 
 ### Code Quality
 ```bash
@@ -62,21 +56,26 @@ bun run src/validate-scraped.ts
 
 ## Architecture
 
-**Inference pipeline** (`src/inference/pipeline.py`):
+CPLineNet predicts dense evidence fields (line probability, orientation,
+junction heatmap/offset, M/V/B/U assignment logits, boundary/style heads). During
+training and evaluation these fields are decoded through the in-repo deterministic
+vectorizer to compute graph-quality metrics:
+
 ```
-input image
-  -> SquareRectifier            (src/inference/rectifier.py)
-  -> CPLineNet                  (src/models/cpline_net.py; HRNet backbone)
-  -> cpline_outputs_to_evidence (src/vectorization/cpline_adapter.py)
+CPLineNet dense fields
+  -> cpline_outputs_to_evidence   (src/vectorization/cpline_adapter.py)
   -> PlanarGraphBuilder /
-     SquareTopologyDecoder      (src/vectorization/)
-  -> EdgeAssignment             (src/vectorization/edge_assignment.py)
-  -> OrigamiConstraintRepair    (src/vectorization/constraint_repair.py)
-  -> QualityReport + FOLDWriter (src/vectorization/quality_report.py, fold_writer.py)
+     SquareTopologyDecoder        (src/vectorization/)
+  -> edge assignment              (src/vectorization/edge_assignment.py)
+  -> conservative repair          (src/vectorization/constraint_repair.py)
+  -> metrics / quality report     (src/vectorization/metrics.py, quality_report.py)
 ```
-The learned model detects visual evidence for lines, junctions, and
-assignments. The final graph is built by deterministic geometry and validated as
-a planar FOLD graph. Vertex refinement lives in `src/models/vertex_refiner.py`.
+
+**`src/vectorization/` is a training/eval instrument, not the production
+decoder.** The shipped decode path (junction-first candidate graph, exact-solve
+topology, flat-fold verification, browser runtime) is the Rust implementation in
+`tree-maker-rust`. Keep the Python vectorizer honest as an eval baseline, but do
+not treat it as production behavior.
 
 ## Key Source Directories
 
@@ -84,16 +83,12 @@ a planar FOLD graph. Vertex refinement lives in `src/models/vertex_refiner.py`.
 - `src/models/backbone/hrnet.py` - HRNet feature extractor (shared, used by CPLineNet)
 - `src/models/vertex_refiner.py` - Vertex refinement heads (V1/V2/V3)
 - `src/models/losses/` - CPLineNet loss functions
-- `src/vectorization/` - Deterministic pixel-evidence → planar FOLD graph:
-  - `cpline_adapter.py` - CPLineNet outputs → vectorizer evidence
-  - `planar_graph_builder.py` / `square_topology_decoder.py` - graph construction
-  - `edge_assignment.py` - M/V/B/U assignment from logits
-  - `constraint_repair.py` - conservative origami-constraint repair
-  - `quality_report.py` / `diagnostics.py` - validation + honest failure reports
-  - `fold_writer.py` - FOLD output
-- `src/inference/` - CLI, pipeline orchestration, rectifier
-- `src/data/` - datasets (`cpline_dataset.py`), FOLD parsing, augmentations
+- `src/vectorization/` - deterministic pixel-evidence → planar FOLD graph, used to
+  compute training/eval metrics (not production)
+- `src/evaluation/` - vertex-refiner evaluation (recall diagnostics, global merge)
+- `src/data/` - datasets (`cpline_dataset.py`), FOLD parsing, augmentations, scraping
 - `scripts/training/` - CPLineNet + vertex-refiner training and RunPod wrappers
+- `scripts/evals/`, `scripts/vectorization/` - evaluation and vectorizer-baseline scripts
 
 ## Origami Domain Constraints
 
@@ -113,6 +108,7 @@ Located in `data/output/synthetic/raw/` and `data/output/scraped/`:
 ## Planning Docs
 
 Implementation plans live in `implementation-plan/` and are **git-ignored local
-working notes** (not tracked), to avoid stale plans causing confusion. The
-tracked source of truth for direction is `ROADMAP.md`; for training/model state
-it is `docs/model-training-history.md`.
+working notes** (not tracked), to avoid stale plans causing confusion. The tracked
+source of truth for training/model state is `docs/model-training-history.md`.
+Direction for the downstream decoder/app/benchmark lives in the `tree-maker-rust`
+repo, not here.

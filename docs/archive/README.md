@@ -12,3 +12,4 @@ For current direction see `ROADMAP.md`; for training/model state see
 | `initial-plan.md` | Original design brainstorm (2025-12) predating the vector-first architecture. |
 | `phase-2-vectorizer.md` | Early vectorizer notes; superseded by `src/vectorization/` + `CLAUDE.md`. |
 | `phase-3-augmentations.md` | Early augmentation notes; superseded by the CPLineNet training path. |
+| `phase-5-inference-cli.md` | Documented the removed Python `cp-detect` CLI; production inference now lives in `tree-maker-rust`. |
